@@ -1,0 +1,21 @@
+# Database metadata platform	platform_db
+# Database target inventory_db
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      - POSTGRES_USER: admin
+      - POSTGRES_PASSWORD: root
+      - POSTGRES_DB: platform_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+
+  # backend:
+
+  # frontend: 
+
+volumes:
+  postgres_data:
