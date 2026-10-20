@@ -4,11 +4,11 @@ services:
   postgres:
     image: postgres:17
     environment:
-      - POSTGRES_USER: admin
-      - POSTGRES_PASSWORD: root
-      - POSTGRES_DB: platform_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: platform_db
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
