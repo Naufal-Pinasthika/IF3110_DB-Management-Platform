@@ -60,9 +60,9 @@ type CreateUserRequest struct {
 
 // PATCH /api/v1/admin/users/{userId} request body
 type UpdateUserRequest struct {
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	IsPlatformAdmin bool `json:"is_platform_admin,omitempty"`
+	Username *string `json:"username,omitempty"`
+	Password *string `json:"password,omitempty"`
+	IsActive *bool `json:"is_active,omitempty"`
 }
 
 // POST /api/v1/admin/users response body
@@ -83,7 +83,7 @@ type CreateGroupRequest struct {
 
 // PATCH /api/v1/admin/groups/{groupId}
 type UpdateGroupRequest struct {
-	Name string `json:"name"`
+	Name *string `json:"name,omitempty"`
 }
 
 // POST /api/v1/admin/groups response body (Group)
@@ -128,8 +128,8 @@ type CreateDatabaseRequest struct {
 	SSLMode string `json:"ssl_mode"`
 	ReaderUsername string `json:"reader_username"`
 	ReaderPassword string `json:"reader_password"`
-	MigrationUsername string `json:"migration_username"`
-	MigrationPassword string `json:"migration_password"`
+	MigratorUsername string `json:"migrator_username"`
+	MigratorPassword string `json:"migrator_password"`
 }
 
 // PATCH /api/v1/admin/databases/{dbId} request body
@@ -141,8 +141,8 @@ type UpdateDatabaseRequest struct {
 	SSLMode *string `json:"ssl_mode,omitempty"`
 	ReaderUsername *string `json:"reader_username,omitempty"`
 	ReaderPassword *string `json:"reader_password,omitempty"`
-	MigrationUsername *string `json:"migration_username,omitempty"`
-	MigrationPassword *string `json:"migration_password,omitempty"`
+	MigratorUsername *string `json:"migrator_username,omitempty"`
+	MigratorPassword *string `json:"migrator_password,omitempty"`
 	IsEnabled *bool `json:"is_enabled,omitempty"`
 }
 
@@ -158,14 +158,14 @@ type ManagedDatabaseSummary struct {
 
 // GET /api/v1/admin/databases/{dbId} response body
 type ManagedDatabaseDetail struct {
+	ID string `json:"id"`
 	Label string `json:"label"`
 	Host string `json:"host"`
 	Port int `json:"port"`
 	DatabaseName string `json:"database_name"`
 	SSLMode string `json:"ssl_mode"`
 	ReaderUsername string `json:"reader_username"`
-	ReaderPassword string `json:"reader_password"`
-	MigrationUsername string `json:"migration_username"`
+	MigratorUsername string `json:"migrator_username"`
 	IsEnabled bool `json:"is_enabled"`
 }
 
@@ -273,6 +273,15 @@ type MigrationUpdated struct {
     Version *int64 `json:"version"`
 }
 
+// POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute response body
+type MigrationExecuted struct {
+    ID string `json:"id"`
+    Status MigrationStatus `json:"status"`
+    Version *int64 `json:"version"`
+    ExecutedBy *string `json:"executed_by"`
+    ExecutedAt *time.Time `json:"executed_at"`
+}
+
 // GET /api/v1/databases/{dbId}/migrations response body ([]MigrationSummary)
 type MigrationSummary struct {
     ID string `json:"id"`
@@ -299,11 +308,3 @@ type MigrationDetail struct {
     ErrorSummary *string `json:"error_summary"`
 }
 
-// POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute response bdoy
-type MigrationExecuted struct {
-    ID string `json:"id"`
-    Status MigrationStatus `json:"status"`
-    Version *int64 `json:"version"`
-    ExecutedBy *string `json:"executed_by"`
-    ExecutedAt *time.Time `json:"executed_at"`
-}
