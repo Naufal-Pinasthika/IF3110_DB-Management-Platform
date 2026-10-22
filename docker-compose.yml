@@ -13,7 +13,15 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
 
-  # backend:
+  backend:
+    build:
+      context: .
+      dockerfile: src/Dockerfile
+    environment:
+      APP_ADDR: ":8080"
+    ports:
+    # register host port here (currently :28080)
+      - "28080:8080"
 
   # frontend: 
 

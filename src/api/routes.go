@@ -3,6 +3,7 @@ package api
 import "net/http"
 
 type RouteHandlers struct {
+	Health http.Handler
 	Login http.Handler
 	Me http.Handler
 	Logout http.Handler
@@ -45,12 +46,35 @@ type RouteMiddleware struct {
 	DatabaseAccess func(AccessLevel) Middleware
 }
 
+func registerRoute(mux *http.ServeMux, method, path string, handler http.Handler, protected ...Middleware) {
+	if handler == nil {
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Endpoint handler is not configured")
+		})
+	}
+
+	for i := len(protected) - 1; i >= 0; i-- {
+		if protected[i] == nil {
+			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				WriteAPIError(w, http.StatusServiceUnavailable, "MIDDLEWARE_NOT_CONFIGURED", "Required route middleware is not configured")
+			})
+			break
+		}
+		handler = protected[i](handler)
+	}
+
+	mux.Handle(method+" "+path, handler)
+}
+
 func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware RouteMiddleware) {
 	session := middleware.Session
 	admin := middleware.PlatformAdmin
 	csrf := middleware.CSRF
 	databaseView := databaseAccessMiddleware(middleware, AccessViewOnly)
 	databaseEdit := databaseAccessMiddleware(middleware, AccessViewEdit)
+
+	// Health
+	registerRoute(mux, "GET", "/health", handlers.Health)
 
 	// Auth
 	if middleware.LoginCSRF == nil {
