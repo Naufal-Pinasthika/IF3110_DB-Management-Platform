@@ -47,12 +47,14 @@ type RouteMiddleware struct {
 }
 
 func registerRoute(mux *http.ServeMux, method, path string, handler http.Handler, protected ...Middleware) {
+	// placeholder as long as all the handler havent been imlemented yet
 	if handler == nil {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Endpoint handler is not configured")
 		})
 	}
 
+	// check every middleware configured if its valid (csrf, session, admin, etc.)
 	for i := len(protected) - 1; i >= 0; i-- {
 		if protected[i] == nil {
 			handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
