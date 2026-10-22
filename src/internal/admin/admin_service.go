@@ -7,26 +7,27 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
 )
 
 type Repository interface {
-	ListUsers(ctx context.Context) ([]api.AdminUser, error)
-	GetUser(ctx context.Context, userID string) (auth.UserRecord, error)
-	CreateUser(ctx context.Context, user auth.UserRecord) (api.AdminUser, error)
-	UpdateUser(ctx context.Context, user auth.UserRecord, revokeSessions bool, now time.Time) (api.AdminUser, error)
-	ListGroups(ctx context.Context) ([]api.Group, error)
-	CreateGroup(ctx context.Context, name string) (api.Group, error)
-	UpdateGroup(ctx context.Context, groupID, name string) (api.Group, error)
+	ListUsers(ctx context.Context) ([]models.User, error)
+	GetUser(ctx context.Context, userID string) (models.User, error)
+	CreateUser(ctx context.Context, user models.User) (models.User, error)
+	UpdateUser(ctx context.Context, user models.User, revokeSessions bool, now time.Time) (models.User, error)
+	ListGroups(ctx context.Context) ([]models.Group, error)
+	CreateGroup(ctx context.Context, name string) (models.Group, error)
+	UpdateGroup(ctx context.Context, groupID, name string) (models.Group, error)
 	DeleteGroup(ctx context.Context, groupID string, now time.Time) error
-	AddGroupMember(ctx context.Context, groupID, userID string, now time.Time) (api.GroupMember, error)
+	AddGroupMember(ctx context.Context, groupID, userID string, now time.Time) (models.UserGroup, error)
 	RemoveGroupMember(ctx context.Context, groupID, userID string, now time.Time) error
-	ListDatabases(ctx context.Context) ([]api.ManagedDatabaseSummary, error)
-	GetDatabase(ctx context.Context, databaseID string) (store.DatabaseRecord, error)
-	CreateDatabase(ctx context.Context, database store.DatabaseRecord) (api.ManagedDatabaseSummary, error)
-	UpdateDatabase(ctx context.Context, database store.DatabaseRecord) (api.ManagedDatabaseSummary, error)
+	ListDatabases(ctx context.Context) ([]models.ManagedDatabase, error)
+	GetDatabase(ctx context.Context, databaseID string) (models.ManagedDatabase, error)
+	CreateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error)
+	UpdateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error)
 	DisableDatabase(ctx context.Context, databaseID string) error
-	SetGroupDatabaseAccess(ctx context.Context, grant api.GroupDatabaseAccess, now time.Time) (api.GroupDatabaseAccess, error)
+	SetGroupDatabaseAccess(ctx context.Context, grant models.GroupAccess, now time.Time) (models.GroupAccess, error)
 	DeleteGroupDatabaseAccess(ctx context.Context, groupID, databaseID string, now time.Time) error
 }
 
@@ -38,6 +39,7 @@ type ConnectionTester interface {
 	TestConnection(context.Context, string) error
 }
 
+// Service maps persistence models to the existing API response types.
 type Service struct {
 	Repository   Repository
 	Access       AdminChecker
@@ -55,7 +57,7 @@ func (s *Service) ListUsers(ctx context.Context, actor auth.Principal) ([]api.Ad
 // CreateUser creates an account with a password hash.
 func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input api.CreateUserRequest) (api.AdminUser, error) {
 	// TODO Require platform admin access and validate the username and password.
-	// TODO Use HashPassword then persist a UserRecord with active state.
+	// TODO Use HashPassword then persist models.User with active state.
 	// TODO Return api.AdminUser without the password hash.
 	return api.AdminUser{}, apperror.ErrNotImplemented
 }
@@ -118,14 +120,15 @@ func (s *Service) ListManagedDatabases(ctx context.Context, actor auth.Principal
 func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principal, input api.CreateDatabaseRequest) (api.ManagedDatabaseSummary, error) {
 	// TODO Require platform admin access and validate label and host and port and SSL mode.
 	// TODO Constrain permitted destinations according to the deployment network policy.
-	// TODO Encrypt both passwords with Cipher then persist a DatabaseRecord.
+	// TODO Encrypt both passwords with Cipher then persist models.ManagedDatabase.
 	// TODO Keep plaintext passwords and DSNs out of responses and logs.
 	return api.ManagedDatabaseSummary{}, apperror.ErrNotImplemented
 }
 
 // GetManagedDatabase returns editable connection settings without passwords.
 func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.ManagedDatabaseDetail, error) {
-	// TODO Require platform admin access then return only DatabaseRecord.Detail.
+	// TODO Require platform admin access and load models.ManagedDatabase.
+	// TODO Map public connection fields to api.ManagedDatabaseDetail without ciphertext.
 	return api.ManagedDatabaseDetail{}, apperror.ErrNotImplemented
 }
 

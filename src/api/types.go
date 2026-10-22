@@ -1,6 +1,10 @@
 package api
 
-import "time"
+import (
+	"time"
+
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+)
 
 // General attr
 type DataResponse[T any] struct {
@@ -16,18 +20,18 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
-type AccessLevel string
+type AccessLevel = models.AccessLevel
 const (
-	AccessViewOnly AccessLevel = "VIEW_ONLY"
-	AccessViewEdit AccessLevel = "VIEW_EDIT"
+	AccessViewOnly = models.AccessViewOnly
+	AccessViewEdit = models.AccessViewEdit
 )
 
-type MigrationStatus string
+type MigrationStatus = models.MigrationStatus
 const (
-	MigrationDraft MigrationStatus = "DRAFT"
-	MigrationRunning MigrationStatus = "RUNNING"
-	MigrationApplied MigrationStatus = "APPLIED"
-	MigrationFailed MigrationStatus = "FAILED"
+	MigrationDraft = models.MigrationDraft
+	MigrationRunning = models.MigrationRunning
+	MigrationApplied = models.MigrationApplied
+	MigrationFailed = models.MigrationFailed
 )
 
 // ------------------------------------------------------------

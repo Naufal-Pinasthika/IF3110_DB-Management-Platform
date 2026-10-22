@@ -2,41 +2,45 @@ package auth
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
+// PostgresRepository uses GORM models and leaves HTTP mapping to the service.
 type PostgresRepository struct {
-	DB *sql.DB
+	DB *gorm.DB
 }
 
 var _ Repository = (*PostgresRepository)(nil)
 
 // FindUserByUsername loads an account for password verification.
-func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (UserRecord, error) {
-	// TODO Query users with a bound username and map missing rows to a domain error.
-	return UserRecord{}, apperror.ErrNotImplemented
+func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (models.User, error) {
+	// TODO Query models.User with WithContext and a bound username.
+	// TODO Map gorm.ErrRecordNotFound to a domain error.
+	return models.User{}, apperror.ErrNotImplemented
 }
 
 // FindUserByID loads current account flags for session checks.
-func (r *PostgresRepository) FindUserByID(ctx context.Context, userID string) (UserRecord, error) {
+func (r *PostgresRepository) FindUserByID(ctx context.Context, userID string) (models.User, error) {
 	// TODO Read users by ID on each validation so inactive accounts lose access.
-	return UserRecord{}, apperror.ErrNotImplemented
+	return models.User{}, apperror.ErrNotImplemented
 }
 
 // CreateSession persists a new session using hashes only.
-func (r *PostgresRepository) CreateSession(ctx context.Context, session Session) error {
-	// TODO Insert session hashes and timestamps with parameterized SQL.
+func (r *PostgresRepository) CreateSession(ctx context.Context, session models.Session) error {
+	// TODO Create models.Session with hashes only and the supplied timestamps.
 	return apperror.ErrNotImplemented
 }
 
 // FindSessionByTokenHash finds either token generation for later policy checks.
-func (r *PostgresRepository) FindSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
+func (r *PostgresRepository) FindSessionByTokenHash(ctx context.Context, tokenHash string) (models.Session, error) {
 	// TODO Look up token_hash or previous_token_hash and preserve nullable fields.
 	// TODO Let the service check revocation and all expiration rules.
-	return Session{}, apperror.ErrNotImplemented
+	return models.Session{}, apperror.ErrNotImplemented
 }
 
 // TouchSession updates activity after validation.

@@ -5,20 +5,14 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
+	"gorm.io/gorm"
+
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
-// DatabaseRecord adds private credentials to the existing public API type.
-// Never send this record as an HTTP response.
-type DatabaseRecord struct {
-	Detail              api.ManagedDatabaseDetail
-	ReaderPasswordEnc   string `json:"-"`
-	MigratorPasswordEnc string `json:"-"`
-}
-
 type DatabaseRepository interface {
-	GetDatabase(context.Context, string) (DatabaseRecord, error)
+	GetDatabase(context.Context, string) (models.ManagedDatabase, error)
 }
 
 type CredentialCipher interface {
@@ -32,11 +26,13 @@ type TargetStore struct {
 }
 
 // OpenPlatform opens the metadata database rather than a managed target.
-func OpenPlatform(ctx context.Context, databaseURL string) (*sql.DB, error) {
-	// TODO Choose and register a PostgreSQL driver before calling sql.Open.
-	// TODO Configure the pool and PingContext with a timeout.
+func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
+	// TODO Use gorm.Open with postgres.Open and disable automatic ping until context is set.
+	// TODO Silence SQL logging so errors cannot expose hashes or credentials.
+	// TODO Get the underlying sql.DB and configure the pool and PingContext with a timeout.
 	// TODO Close a pool after a failed ping and never log its DSN.
 	// TODO Let the composition root close the pool during shutdown.
+	// TODO Apply versioned SQL migrations separately and never call AutoMigrate here.
 	return nil, apperror.ErrNotImplemented
 }
 
@@ -45,6 +41,7 @@ func (s *TargetStore) Reader(ctx context.Context, databaseID string) (*sql.DB, e
 	// TODO Load current settings and reject a disabled target.
 	// TODO Decrypt reader credentials and safely encode the connection string.
 	// TODO Open and ping with a timeout without falling back to the migrator.
+	// TODO Use the pgx driver registered by the GORM PostgreSQL driver for raw target SQL.
 	// TODO Define pool ownership and close or invalidate pools after config changes.
 	return nil, apperror.ErrNotImplemented
 }

@@ -7,14 +7,15 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
 // Repository is the persistence contract used by authentication.
 type Repository interface {
-	FindUserByUsername(ctx context.Context, username string) (UserRecord, error)
-	FindUserByID(ctx context.Context, userID string) (UserRecord, error)
-	CreateSession(ctx context.Context, session Session) error
-	FindSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error)
+	FindUserByUsername(ctx context.Context, username string) (models.User, error)
+	FindUserByID(ctx context.Context, userID string) (models.User, error)
+	CreateSession(ctx context.Context, session models.Session) error
+	FindSessionByTokenHash(ctx context.Context, tokenHash string) (models.Session, error)
 	TouchSession(ctx context.Context, sessionID string, now time.Time) error
 	RotateSession(ctx context.Context, sessionID, expectedHash, nextHash string, now, graceUntil time.Time) error
 	RevokeSession(ctx context.Context, sessionID string, now time.Time) error
@@ -55,7 +56,7 @@ func (s *Service) ValidateSession(ctx context.Context, token string, now time.Ti
 }
 
 // RotateSession replaces a token while preserving the original absolute expiration.
-func (s *Service) RotateSession(ctx context.Context, session Session, now time.Time) (string, error) {
+func (s *Service) RotateSession(ctx context.Context, session models.Session, now time.Time) (string, error) {
 	// TODO Generate a new random token and save its hash with the previous hash.
 	// TODO Update rotated time and grace atomically with a conditional update or lock.
 	// TODO Do not rotate again just because a request used the previous token.
@@ -78,7 +79,7 @@ func (s *Service) RevokeUserSessions(ctx context.Context, userID string, now tim
 }
 
 // ValidateCSRF checks a request token against its session.
-func (s *Service) ValidateCSRF(ctx context.Context, session Session, token string) error {
+func (s *Service) ValidateCSRF(ctx context.Context, session models.Session, token string) error {
 	// TODO Reject missing tokens and compare token hashes in constant time.
 	// TODO Use a separate CSRF token rather than exposing the session cookie value.
 	return apperror.ErrNotImplemented

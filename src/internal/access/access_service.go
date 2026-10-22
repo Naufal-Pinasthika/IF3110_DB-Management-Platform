@@ -6,12 +6,13 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
 type Repository interface {
-	ListUserGrants(ctx context.Context, userID, databaseID string) ([]api.AccessLevel, error)
-	ListGrantedDatabases(ctx context.Context, userID string) ([]api.ManagedDatabaseSummary, error)
-	GetDatabaseSummary(ctx context.Context, databaseID string) (api.ManagedDatabaseSummary, error)
+	ListUserGrants(ctx context.Context, userID, databaseID string) ([]models.GroupAccess, error)
+	ListGrantedDatabases(ctx context.Context, userID string) ([]models.ManagedDatabase, error)
+	GetDatabaseSummary(ctx context.Context, databaseID string) (models.ManagedDatabase, error)
 }
 
 type Service struct {
@@ -52,6 +53,6 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 // GetDatabase returns a permitted target summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
 	// TODO Require at least VIEW_ONLY and return the current effective access.
-	// TODO Return only safe fields from GetDatabaseSummary.
+	// TODO Map only safe model fields from GetDatabaseSummary to api.UserDatabase.
 	return api.UserDatabase{}, apperror.ErrNotImplemented
 }

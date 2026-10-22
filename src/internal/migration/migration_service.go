@@ -7,17 +7,18 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
 type Repository interface {
-	ListMigrations(ctx context.Context, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error)
-	GetMigration(ctx context.Context, databaseID, migrationID string) (api.MigrationDetail, error)
-	CreateMigration(ctx context.Context, databaseID, creatorID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error)
-	UpdateMigration(ctx context.Context, databaseID, migrationID string, input api.UpdateMigrationRequest, now time.Time) (api.MigrationUpdated, error)
+	ListMigrations(ctx context.Context, databaseID string, status models.MigrationStatus) ([]models.Migration, error)
+	GetMigration(ctx context.Context, databaseID, migrationID string) (models.Migration, error)
+	CreateMigration(ctx context.Context, migration models.Migration) (models.Migration, error)
+	UpdateMigration(ctx context.Context, databaseID, migrationID string, sqlText string, now time.Time) (models.Migration, error)
 	LockDatabase(ctx context.Context, databaseID string) (func() error, error)
-	MarkRunning(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (api.MigrationDetail, error)
-	MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (api.MigrationExecuted, error)
-	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (api.MigrationExecuted, error)
+	MarkRunning(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error)
+	MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error)
+	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error)
 }
 
 type AccessChecker interface {
@@ -37,20 +38,22 @@ type Service struct {
 // ListMigrations returns linear history and draft summaries.
 func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error) {
 	// TODO Require at least VIEW_ONLY and validate the optional status filter.
-	// TODO Return target scoped history including failed attempts without changing records.
+	// TODO Map target scoped models to api.MigrationSummary without changing history.
 	return nil, apperror.ErrNotImplemented
 }
 
 // GetMigration returns SQL and audit details for a visible migration.
 func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string) (api.MigrationDetail, error) {
-	// TODO Require at least VIEW_ONLY and look up using both IDs.
+	// TODO Require at least VIEW_ONLY and look up the model using both IDs.
+	// TODO Map the model to api.MigrationDetail without exposing loaded relations.
 	return api.MigrationDetail{}, apperror.ErrNotImplemented
 }
 
 // CreateMigration creates a SQL draft for an editor.
 func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, databaseID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error) {
 	// TODO Require VIEW_EDIT and validate a nonempty name up to 200 characters and nonempty SQL.
-	// TODO Take creator ID from the principal and save DRAFT with version NULL.
+	// TODO Build models.Migration using the principal and timestamps with DRAFT status and nil Version.
+	// TODO Map the saved model to api.MigrationCreated.
 	return api.MigrationCreated{}, apperror.ErrNotImplemented
 }
 
