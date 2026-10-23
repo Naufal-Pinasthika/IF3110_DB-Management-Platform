@@ -11,7 +11,7 @@ import (
 func HashPassword(password string) (string, error) { 	
 	// validation 0 < len(password) <= 72 (pick 72 because bcrypt has a strict limit 72 bytes)
 	if len(password) <= 0 || len(password) > 72 {
-		return "", errors.New("Password length must be 1-72 characters")
+		return "", ErrInvalidPasswordlength
 	}
 	
 	// uses 12 optimal work factor
