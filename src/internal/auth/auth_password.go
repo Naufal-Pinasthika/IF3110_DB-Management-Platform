@@ -1,19 +1,35 @@
 package auth
 
 import (
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
+	"errors"
+	"golang.org/x/crypto/bcrypt"
 )
 
-// HashPassword hashes a platform account password.
-func HashPassword(password string) (string, error) {
-	// TODO Choose bcrypt or Argon2id with a random salt and documented cost.
-	// TODO Never use reversible encryption or a fast hash for account passwords.
-	return "", apperror.ErrNotImplemented
+// main reference: https://gowebexamples.com/password-hashing/
+
+// Hashes platform account password
+func HashPassword(password string) (string, error) { 	
+	// validation 0 < len(password) <= 72 (pick 72 because bcrypt has a strict limit 72 bytes)
+	if len(password) <= 0 || len(password) > 72 {
+		return "", errors.New("Password length must be 1-72 characters")
+	}
+	
+	// uses 12 optimal work factor
+	// https://stackoverflow.com/questions/4443476/optimal-bcrypt-work-factor
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
 }
 
-// VerifyPassword checks a password with the selected hashing library.
-func VerifyPassword(password, encodedHash string) error {
-	// TODO Use the verifier supplied by the same library as HashPassword.
-	// TODO Return a generic authentication error and never log either input.
-	return apperror.ErrNotImplemented
+// Checks password relative to its hash
+func VerifyPassword(password string, encodedHash string) error {
+	err := 	bcrypt.CompareHashAndPassword([]byte(encodedHash), []byte(password))
+
+	if err != nil {
+		return err
+	}
+	return nil
 }
