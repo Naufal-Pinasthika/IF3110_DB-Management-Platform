@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -10,38 +11,110 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
-// Repository is the persistence contract used by authentication.
+// define repository func interface
 type Repository interface {
 	FindUserByUsername(ctx context.Context, username string) (models.User, error)
 	FindUserByID(ctx context.Context, userID string) (models.User, error)
 	CreateSession(ctx context.Context, session models.Session) error
 	FindSessionByTokenHash(ctx context.Context, tokenHash string) (models.Session, error)
 	TouchSession(ctx context.Context, sessionID string, now time.Time) error
-	RotateSession(ctx context.Context, sessionID, expectedHash, nextHash string, now, graceUntil time.Time) error
+	RotateSession(ctx context.Context, sessionID, expectedHash string, nextHash string, now time.Time, graceUntil time.Time) error
 	RevokeSession(ctx context.Context, sessionID string, now time.Time) error
 	RevokeUserSessions(ctx context.Context, userID string, now time.Time) error
 }
 
 type Service struct {
 	Repository Repository
-	Policy     config.SessionConfig
+	Policy config.SessionConfig
+	tempPasswordHash string
 }
 
-// Login verifies an account and creates a fresh session.
+// generate api.LoginResponse
+func userResponse(user models.User) api.LoginResponse{
+	return api.LoginResponse{
+		ID: user.ID,
+		Username: user.Username,
+		IsPlatformAdmin: user.IsPlatformAdmin,
+	}
+}
+
+// login an account and creates a fresh session
 func (s *Service) Login(ctx context.Context, input api.LoginRequest, now time.Time) (LoginResult, error) {
-	// TODO Validate credentials and find an active user and verify the password hash.
-	// TODO Use one generic login error for missing users and wrong passwords.
-	// TODO Generate separate random session and CSRF tokens with crypto/rand.
-	// TODO Store token hashes and timestamps with a fixed absolute expiration.
-	// TODO Return the raw session token only for SetCookie and never in JSON or logs.
-	return LoginResult{}, apperror.ErrNotImplemented
+	// validation
+	if input.Username == "" || len(input.Username) > 64 || len(input.Password) == 0 || len(input.Password) > 72 {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+
+	// find user via query
+	user, err := s.Repository.FindUserByUsername(ctx, input.Username)
+	if errors.Is(err, errNotFound) {
+		// still verifies to prevent timing attack
+		// https://security.stackexchange.com/questions/239054/timing-attacks-in-password-hash-comparisons
+		_ = VerifyPassword(input.Password, s.tempPasswordHash)
+		return  LoginResult{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	// verifies its password relative to its hash
+	passwordValid := VerifyPassword(input.Password, user.PasswordHash)
+	if passwordValid != nil || !user.IsActive {
+		return LoginResult{}, ErrInvalidCredentials
+	}
+
+	// grant token session
+	sessionToken, err := newToken()
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	csrfToken, err := newToken()
+	if err != nil {
+		return LoginResult{}, err
+	}
+
+	// inject session to db
+	session := models.Session{
+		UserID: user.ID,
+		TokenHash: tokenHash(sessionToken),
+		CSRFTokenHash: tokenHash(csrfToken),
+		CreatedAt: now,
+		RotatedAt: now,
+		LastSeenAt: now,
+		AbsoluteExpiresAt: now.Add(s.Policy.AbsoluteTimeout),
+	}
+
+	errCreateSession := s.Repository.CreateSession(ctx, session)
+	if errCreateSession != nil {
+		return LoginResult{}, errCreateSession
+	}
+
+	// return LoginResult successfully
+	return LoginResult{
+		User: userResponse(user),
+		Session: session,
+		SessionToken: sessionToken,
+		CSRFToken: csrfToken,
+	}, nil
 }
 
-// Me returns the current authenticated user.
+// 	returns current authenticated user.
 func (s *Service) Me(ctx context.Context, actor Principal) (api.LoginResponse, error) {
-	// TODO Use the validated principal and confirm that its user is still active.
-	// TODO Return the existing LoginResponse without hashes or session identifiers.
-	return api.LoginResponse{}, apperror.ErrNotImplemented
+	// Use validated principal and confirm that its user is still active.
+	user, err := s.Repository.FindUserByID(ctx, actor.User.ID)
+	if errors.Is(err, errNotFound) {
+		return api.LoginResponse{}, ErrUnauthenticated
+	}
+	if err != nil {
+		return api.LoginResponse{}, err
+	}
+	if !user.IsActive {
+		return api.LoginResponse{}, ErrUnauthenticated
+	}
+
+	// success
+	return userResponse(user), nil
 }
 
 // ValidateSession validates cookie state on every protected request.

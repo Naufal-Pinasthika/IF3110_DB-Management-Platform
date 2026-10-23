@@ -8,11 +8,6 @@ import (
 
 // Hashes platform account password
 func HashPassword(password string) (string, error) { 	
-	// validation 0 < len(password) <= 72 (pick 72 because bcrypt has a strict limit 72 bytes)
-	if len(password) <= 0 || len(password) > 72 {
-		return "", ErrInvalidPasswordlength
-	}
-	
 	// uses 12 optimal work factor
 	// https://stackoverflow.com/questions/4443476/optimal-bcrypt-work-factor
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
