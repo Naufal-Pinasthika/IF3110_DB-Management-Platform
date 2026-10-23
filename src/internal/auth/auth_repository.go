@@ -3,10 +3,7 @@ package auth
 import (
 	"context"
 	"time"
-
 	"gorm.io/gorm"
-
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
@@ -14,8 +11,6 @@ import (
 type PostgresRepository struct {
 	DB *gorm.DB
 }
-
-var _ Repository = (*PostgresRepository)(nil)
 
 // FindUserByUsername loads an account for password verification.
 func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (models.User, error) {
@@ -103,7 +98,7 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, sessionID string
 	result := r.DB.WithContext(ctx).Model(&models.Session{}).
 				Where("id = ? AND token_hash = ? AND revoked_at IS NULL AND absolute_expires > ?", sessionID, expectedHash, now).
 				// update token_hash, previous_token_hash, previous_valid_untul, rotated_at
-				Update(map[string]any{
+				Updates(map[string]any{
 					"token_hash" : nextHash, 
 					"previous_token_hash" : expectedHash,
 					"previous_valid_until" : graceUntil,
