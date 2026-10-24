@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -49,29 +51,89 @@ func (h * Handler) clearCookie(w http.ResponseWriter) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Login handles POST /api/v1/auth/login.
+// /api/v1/auth/login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	// TODO Decode api.LoginRequest with a body size limit and call Service.Login.
-	// TODO Set an HttpOnly and SameSite cookie with Secure on production HTTPS.
-	// TODO Return only result.User using api.DataResponse with status 200.
-	// TODO Deliver the separate CSRF token through the chosen form or header mechanism.
-	// TODO Map service errors to the existing API error envelope.
-	api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Login is not implemented")
+	// no-store since this is auth handling
+	w.Header().Set("Cache-Control", "no-store")
+
+	// limit request body only 8kb
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	
+	// decode api.LoginRequest with a body size limit and call Service.Login
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields() // add strict rule when unmarshling json to struct to prevent malicious additional input fields (ex: adding is_admin)
+
+	var input api.LoginRequest
+	errDecode := decoder.Decode(&input)
+	if errDecode != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid login request")
+		return
+	}
+
+	// make sure json request body is properly validated untill eof
+	errDecode = decoder.Decode(&struct{}{})
+	if errDecode!= io.EOF {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
+		return
+	}
+
+	// pass the credentials into service
+	result, err := h.Service.Login(r.Context(), input, time.Now().UTC())
+	if err != nil {
+		WriteAuthError(w, err)
+		return
+	}
+
+
+
+	// Set  HttpOnly and SameSite (csrf) cookie with Secure on production (HTTPS)
+	h.setCookie(w, h.Service.Policy.CookieName, result.SessionToken, true, result.Session.AbsoluteExpiresAt)
+	h.setCookie(w, "csrf_token", result.CSRFToken, false, result.Session.AbsoluteExpiresAt)
+
+	// DataResponse uses Generic Wrapper [T any] {Data T}, where T is LoginResponse
+	// since LoginResponse.User exist, we pass ONLY the User field into schema (LoginResponse.User = Data)
+	// this is because Login() only need to rply with User response pattern
+	// expect alot of this pattern will exist accross auth handler
+	WriteJSON(w, api.DataResponse[api.LoginResponse]{Data: result.User})
 }
 
-// Me handles GET /api/v1/auth/me.
+// /api/v1/auth/me
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	// TODO Read the validated principal from context and call Service.Me.
-	// TODO Return api.LoginResponse inside api.DataResponse with status 200.
-	// TODO Map service errors to the existing API error envelope.
-	api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Me is not implemented")
+	// read the validated principal from context and call Service.Me
+	principal, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		WriteAuthError(w, ErrUnauthenticated)
+		return
+	}
+
+	user, err := h.Service.Me(r.Context(), principal)
+	if err != nil {
+		WriteAuthError(w, err)
+		return
+	}
+
+	WriteJSON(w, api.DataResponse[api.LoginResponse]{Data: user})
 }
 
-// Logout handles POST /api/v1/auth/logout.
+// POST /api/v1/auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	// TODO Require the validated session and CSRF guard then call Service.Logout.
-	// TODO Expire the cookie using the same name and path and security attributes.
-	// TODO Return api.LogoutResult inside api.DataResponse with status 200.
-	// TODO Map service errors to the existing API error envelope.
-	api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "Logout is not implemented")
+	// validate session and CSRF guard then call Service.Logout
+	principal, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		WriteAuthError(w, ErrUnauthenticated)
+		return
+	}
+
+	err := h.Service.Logout(r.Context(), principal, time.Now().UTC())
+	if err != nil {
+		WriteAuthError(w, err)
+		return
+	}
+
+	// clear cookies 
+	h.clearCookie(w)
+	
+	WriteJSON(w, api.DataResponse[api.LogoutResult]{
+		Data: api.LogoutResult{Success: true},
+	})
 }
