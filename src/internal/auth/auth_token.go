@@ -31,6 +31,8 @@ func tokenHash(token string) string {
 	hash := sha256.Sum256(tokenBytes)
 
 	// convert to string
+	// should return 43 character by ceiling(8 * 32 / 6) when converting to base64 char
+	// https://stackoverflow.com/questions/13378815/base64-length-calculation
 	hashBytes := hash[:]
 	hashString := hex.EncodeToString(hashBytes)
 	return hashString

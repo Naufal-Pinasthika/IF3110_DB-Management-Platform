@@ -2,11 +2,11 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
@@ -29,8 +29,10 @@ type Service struct {
 	tempPasswordHash string
 }
 
-// generate api.LoginResponse
-func userResponse(user models.User) api.LoginResponse{
+// this section mostly helper methods
+
+// returns api.LoginResponse
+func userResponse(user models.User) api.LoginResponse {
 	return api.LoginResponse{
 		ID: user.ID,
 		Username: user.Username,
@@ -38,6 +40,18 @@ func userResponse(user models.User) api.LoginResponse{
 	}
 }
 
+// returns now + gracePeriod, unless already capped by session.AbsoluteExpiresAt
+func (s *Service) graceUntil (session models.Session, now time.Time) time.Time {
+	until := now.Add(s.Policy.GracePeriod)
+
+	if until.After(session.AbsoluteExpiresAt) {
+		return session.AbsoluteExpiresAt
+	}
+	return  until
+}
+
+
+// --------------------------------------------
 // login an account and creates a fresh session
 func (s *Service) Login(ctx context.Context, input api.LoginRequest, now time.Time) (LoginResult, error) {
 	// validation
@@ -119,41 +133,147 @@ func (s *Service) Me(ctx context.Context, actor Principal) (api.LoginResponse, e
 
 // ValidateSession validates cookie state on every protected request.
 func (s *Service) ValidateSession(ctx context.Context, token string, now time.Time) (ValidatedSession, error) {
-	// TODO Hash the token and find a current or previous token match.
-	// TODO Reject revoked or idle or absolute expired sessions and inactive users.
-	// TODO Accept a previous token only within grace and before absolute expiration.
-	// TODO Load current user flags and check expiry before updating last activity.
-	// TODO Rotate when due and return a new cookie token without extending absolute life.
-	// TODO Prevent concurrent rotations from replacing each other or extending grace.
-	return ValidatedSession{}, apperror.ErrNotImplemented
+	// length base64 char token validation
+	if len(token) != 43 {
+		return ValidatedSession{}, ErrUnauthenticated
+	}
+	// hash token and find a current or previous token match
+	hash := tokenHash(token)
+
+	// concurrency control on hash token validation to prevent race condition
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := s.Repository.FindSessionByTokenHash(ctx, hash)
+		if errors.Is(err, errNotFound) {
+			return ValidatedSession{}, ErrUnauthenticated
+		}
+		if err != nil {
+			return ValidatedSession{}, err
+		}
+
+		// check if session revokes, expired, or idle timeout
+		if session.RevokedAt != nil || !now.Before(session.AbsoluteExpiresAt) || now.Before(session.LastSeenAt.Add(s.Policy.IdleTimeout)) {
+			return ValidatedSession{}, ErrUnauthenticated
+		}
+
+		// check if current hash session is the same as session stored in db
+		// can be current session token (isCurrToken) / previous token hash (isPrevToken)
+		isCurrToken := hash == session.TokenHash
+
+		isPrevToken := session.PreviousTokenHash != nil && session.PreviousValidUntil != nil && hash == *session.PreviousTokenHash && now.Before(*session.PreviousValidUntil)
+
+		if !isCurrToken && !isPrevToken {
+			return ValidatedSession{}, ErrUnauthenticated
+		}
+
+		// find user from session (since session attached its user id)
+		user, err := s.Repository.FindUserByID(ctx, session.UserID)
+		if errors.Is(err, errNotFound) {
+			return ValidatedSession{}, ErrUnauthenticated
+		}
+		if err != nil {
+			return ValidatedSession{}, err
+		}
+		if !user.IsActive {
+			return ValidatedSession{}, ErrUnauthenticated
+		}
+
+		var rotatedToken string
+
+		// check if its overdue to token rotation
+		rotationDue := !now.Before(session.RotatedAt.Add(s.Policy.RotationInterval))
+
+		// (apply only to isCurrToken and the token is rotationDue)
+		// if theres a 2 request (even at a short period amount of time, as long its timestamp different)
+		// this block below will not be executed (as it will counted as isPrevToken)
+		if isCurrToken && rotationDue {
+			rotatedToken, err := s.RotateSession(ctx, session, now)
+			if errors.Is(err, errRotationConflict) {
+				continue // avoid race condition if theres 2 token requested simultaneously (same timestamp)
+			}
+			if err != nil {
+				return ValidatedSession{}, err
+			}
+
+			// gives old token into PreviousTokenHash 
+			// also add PreviousValidUntil relatives to its added grace period
+			previousHash := session.TokenHash
+			graceUntill := s.graceUntil(session, now)
+
+			session.PreviousTokenHash = &previousHash
+			session.PreviousValidUntil = &graceUntill
+
+			// provides a new token
+			session.TokenHash = tokenHash(rotatedToken)
+			session.RotatedAt = now
+		}
+
+		// update session
+		errTouchSession := s.Repository.TouchSession(ctx, session.ID, now)
+		if errTouchSession != nil {
+			return ValidatedSession{}, errTouchSession
+		}
+
+		if now.After(session.LastSeenAt){
+			session.LastSeenAt = now
+		}
+
+		// return success
+		return ValidatedSession{
+			Principal: Principal{
+				User: userResponse(user),
+				SessionID: session.ID,
+			},
+			Session: session,
+			RotatedToken: rotatedToken,
+		}, nil
+	}
+
+	// if race condition still keeps happening after more than 2 attems, just return conflict
+	return ValidatedSession{}, errRotationConflict
 }
 
-// RotateSession replaces a token while preserving the original absolute expiration.
+// replaces a token while preserving the original absolute expiration
+// this func is basically abstraction wrapper from the db query func RotateSession() on auth_repository
 func (s *Service) RotateSession(ctx context.Context, session models.Session, now time.Time) (string, error) {
-	// TODO Generate a new random token and save its hash with the previous hash.
-	// TODO Update rotated time and grace atomically with a conditional update or lock.
-	// TODO Do not rotate again just because a request used the previous token.
-	// TODO Return the raw token only so middleware can update the cookie.
-	return "", apperror.ErrNotImplemented
+	// generate a new random token and save its hash with the previous hash
+	token, err := newToken()
+	if err != nil  {
+		return "", err
+	}
+
+	// update rotated time and grace atomically with a conditional update or lock
+	// uses RotateSession() from repository
+	errRotateSession := s.Repository.RotateSession(ctx, session.ID, session.TokenHash, tokenHash(token), now, s.graceUntil(session, now))
+	if errRotateSession != nil {
+		return "", errRotateSession
+	}
+
+	return token, nil
 }
 
-// Logout revokes a session on the server.
+// revoke a session on the server
+// basically a wrapper from RevokeSession() on auth_repository 
 func (s *Service) Logout(ctx context.Context, actor Principal, now time.Time) error {
-	// TODO Revoke the validated session before the handler expires its cookie.
-	// TODO Make an already revoked session harmless without reviving it.
-	return apperror.ErrNotImplemented
+	return s.Repository.RevokeSession(ctx, actor.SessionID, now)
 }
 
-// RevokeUserSessions invalidates all sessions after an account access change.
+// invalidates all sessions after an account access change
+// basically a wrapper from RevokeUserSession() on auth_repository
 func (s *Service) RevokeUserSessions(ctx context.Context, userID string, now time.Time) error {
-	// TODO Revoke all active sessions for the user on the backend.
-	// TODO Require a fresh login and new token after a privilege increase.
-	return apperror.ErrNotImplemented
+	return s.Repository.RevokeUserSessions(ctx, userID, now)
 }
 
-// ValidateCSRF checks a request token against its session.
+// checkscsrd token
 func (s *Service) ValidateCSRF(ctx context.Context, session models.Session, token string) error {
-	// TODO Reject missing tokens and compare token hashes in constant time.
-	// TODO Use a separate CSRF token rather than exposing the session cookie value.
-	return apperror.ErrNotImplemented
+	if len(token) != 43 {
+		return ErrCSRF
+	}
+
+	actual := tokenHash(token)
+
+	if subtle.ConstantTimeCompare([]byte(actual), []byte(session.CSRFTokenHash)) != 1 {
+		return ErrCSRF
+	}
+
+	return nil
 }

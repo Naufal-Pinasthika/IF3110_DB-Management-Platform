@@ -1,6 +1,8 @@
 package auth
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	ErrInvalidPasswordlength= errors.New("password must contain 1-72 bytes")
@@ -10,3 +12,4 @@ var (
 	errNotFound = errors.New("data record not found")
 	errRotationConflict = errors.New("session rotation conflict")	
 )
+
