@@ -261,6 +261,33 @@ func TestUpdateUser(t *testing.T) {
 		}
 	})
 
+	t.Run("revokes sessions on platform admin change", func(t *testing.T) {
+		var revoke bool
+		var saved models.User
+		repo := &mockRepository{
+			getUserFn: func(context.Context, string) (models.User, error) {
+				return models.User{ID: "u1", Username: "alice", IsPlatformAdmin: false}, nil
+			},
+			updateUserFn: func(_ context.Context, u models.User, revokeSessions bool, _ time.Time) (models.User, error) {
+				revoke = revokeSessions
+				saved = u
+				return u, nil
+			},
+		}
+		svc := newService(repo)
+		isAdmin := true
+		updated, err := svc.UpdateUser(ctx, adminPrincipal, "u1", api.UpdateUserRequest{IsPlatformAdmin: &isAdmin}, now)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !revoke {
+			t.Fatal("platform admin change did not revoke sessions")
+		}
+		if !saved.IsPlatformAdmin || !updated.IsPlatformAdmin {
+			t.Fatalf("saved=%+v updated=%+v, want IsPlatformAdmin=true", saved, updated)
+		}
+	})
+
 	t.Run("repository error propagated", func(t *testing.T) {
 		repo := &mockRepository{getUserFn: func(context.Context, string) (models.User, error) {
 			return models.User{}, errUnavailable
