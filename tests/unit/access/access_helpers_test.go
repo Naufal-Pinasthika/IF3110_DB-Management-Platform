@@ -1,7 +1,8 @@
-package access
+package access_test
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
@@ -64,3 +65,6 @@ func makeDatabase(id, label, name string) models.ManagedDatabase {
 		IsEnabled:     true,
 	}
 }
+
+// errUnavailable is a sentinel for repository failures in tests.
+var errUnavailable = errors.New("database unavailable")
