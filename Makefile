@@ -23,7 +23,7 @@ test-web:
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test'; exit 1; }
 	mkdir -p tests/artifacts
-	REQUIRE_INTEGRATION_TESTS=1 go -C tests test -race -count=1 -timeout=3m -coverpkg=$(MODULE)/src/app,$(MODULE)/src/api,$(MODULE)/src/internal/auth,$(MODULE)/src/internal/store -coverprofile=artifacts/integration-coverage.out ./integration/auth
+	REQUIRE_INTEGRATION_TESTS=1 go -C tests test -race -count=1 -timeout=3m -coverpkg=$(MODULE)/src/app,$(MODULE)/src/api,$(MODULE)/src/internal/auth,$(MODULE)/src/internal/store,$(MODULE)/src/internal/admin,$(MODULE)/src/internal/access -coverprofile=artifacts/integration-coverage.out ./integration/auth ./integration/admin
 
 browser-install:
 	npm --prefix tests ci
