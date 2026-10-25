@@ -93,8 +93,11 @@ func (r *PostgresRepository) GetTableDetail(ctx context.Context, databaseID, sch
 	}
 
 	detail := api.TableDetail{
-		Schema: schema,
-		Table:  table,
+		Schema:      schema,
+		Table:       table,
+		Columns:     []api.TableColumn{},
+		Constraints: []api.TableConstraint{},
+		Indexes:     []api.TableIndex{},
 	}
 
 	// 1. Columns

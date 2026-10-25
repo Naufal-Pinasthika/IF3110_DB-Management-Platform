@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/access"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
@@ -18,14 +19,16 @@ type Handler struct {
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, apperror.ErrNotFound):
+	case errors.Is(err, apperror.ErrNotFound), errors.Is(err, access.ErrNotFound):
 		api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-	case errors.Is(err, apperror.ErrForbidden):
+	case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
 		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 	case errors.Is(err, apperror.ErrInvalidInput):
 		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, apperror.ErrConflict):
 		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, access.ErrUnauthenticated), errors.Is(err, auth.ErrUnauthenticated):
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing or invalid token")
 	default:
 		api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 	}

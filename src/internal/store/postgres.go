@@ -155,13 +155,13 @@ func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDataba
 
 	pass, err := s.Cipher.Decrypt(encryptedPass)
 	if err != nil {
-		return nil, errors.New("failed to decrypt target credentials")
+		return nil, fmt.Errorf("failed to decrypt target credentials: %w", err)
 	}
 
 	dsn := buildDSN(db, username, pass)
 	pool, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, errors.New("failed to open database pool")
+		return nil, fmt.Errorf("failed to open database pool: %w", err)
 	}
 
 	pool.SetMaxOpenConns(10)
@@ -172,7 +172,7 @@ func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDataba
 	defer cancel()
 	if err := pool.PingContext(pingCtx); err != nil {
 		pool.Close()
-		return nil, errors.New("could not establish connection to target database")
+		return nil, fmt.Errorf("could not establish connection to target database: %w", err)
 	}
 
 	s.pools.Store(cacheKey, pool)

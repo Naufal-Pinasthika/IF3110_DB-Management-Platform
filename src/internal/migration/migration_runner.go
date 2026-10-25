@@ -50,7 +50,7 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 		if rbErr := tx.Rollback(); rbErr != nil {
 			return fmt.Errorf("execute failed: %v, rollback also failed: %w", err, rbErr)
 		}
-		return fmt.Errorf("migration failed and safely rolled back: %w", err)
+		return fmt.Errorf("%w: migration failed and safely rolled back: %v", apperror.ErrInvalidInput, err)
 	}
 
 	if err := tx.Commit(); err != nil {

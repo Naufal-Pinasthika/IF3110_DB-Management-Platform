@@ -39,6 +39,10 @@ type ConnectionTester interface {
 	TestConnection(context.Context, string) error
 }
 
+type poolInvalidator interface {
+	InvalidateTargetPools(string)
+}
+
 // Service maps persistence models to the existing API response types.
 type Service struct {
 	Repository   Repository
@@ -403,6 +407,10 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+
 	return api.ManagedDatabaseSummary{
 		ID:           updated.ID,
 		Label:        updated.Label,
@@ -419,7 +427,13 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 	if databaseID == "" {
 		return apperror.New("database id required")
 	}
-	return s.Repository.DisableDatabase(ctx, databaseID)
+	if err := s.Repository.DisableDatabase(ctx, databaseID); err != nil {
+		return err
+	}
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+	return nil
 }
 
 // TestDatabaseConnection checks a registered target connection.

@@ -108,7 +108,7 @@ func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, dat
 		DatabaseID: databaseID,
 		Name:       input.Name,
 		SQLText:    input.SQLText,
-		CreatedBy:  actor.SessionID,
+		CreatedBy:  actor.User.ID,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -163,7 +163,7 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}
 	defer release()
 
-	running, err := s.Repository.MarkRunning(ctx, databaseID, migrationID, actor.SessionID, now)
+	running, err := s.Repository.MarkRunning(ctx, databaseID, migrationID, actor.User.ID, now)
 	if err != nil {
 		return api.MigrationExecuted{}, err
 	}
@@ -172,14 +172,14 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	completionTime := time.Now()
 
 	if execErr != nil {
-		_, failErr := s.Repository.MarkFailed(ctx, databaseID, migrationID, actor.SessionID, execErr.Error(), completionTime)
+		_, failErr := s.Repository.MarkFailed(ctx, databaseID, migrationID, actor.User.ID, execErr.Error(), completionTime)
 		if failErr != nil {
 			return api.MigrationExecuted{}, failErr
 		}
 		return api.MigrationExecuted{}, execErr
 	}
 
-	applied, err := s.Repository.MarkApplied(ctx, databaseID, migrationID, actor.SessionID, completionTime)
+	applied, err := s.Repository.MarkApplied(ctx, databaseID, migrationID, actor.User.ID, completionTime)
 	if err != nil {
 		return api.MigrationExecuted{}, err
 	}

@@ -13,6 +13,10 @@ type PostgresRepository struct {
 	DB *gorm.DB
 }
 
+func (r *PostgresRepository) GetDB() *gorm.DB {
+	return r.DB
+}
+
 // FindUserByUsername loads an account for password verification.
 func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (models.User, error) {
 	var user models.User
