@@ -592,7 +592,7 @@ func renderNode(sb *strings.Builder, node api.ExplainNode, depth int) {
 	line := fmt.Sprintf("%s%s %s  %s", indent, arrow, label, cost)
 
 	if node.ActualTotalTime != nil && node.ActualRows != nil {
-		actual := fmt.Sprintf("(actual time=%.3f..%.3f rows=%d loops=%d)",
+		actual := fmt.Sprintf("(actual time=%.3f..%.3f rows=%g loops=%d)",
 			*node.ActualStartupTime, *node.ActualTotalTime, *node.ActualRows, *node.ActualLoops)
 		line += "  " + actual
 	}
