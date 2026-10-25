@@ -24,6 +24,7 @@ services:
       dockerfile: src/Dockerfile
     environment:
       APP_ADDR: ":8080"
+      DB_CREDENTIAL_ENCRYPTION_KEY: "${DB_CREDENTIAL_ENCRYPTION_KEY}"
       PLATFORM_DATABASE_URL: "postgres://admin:root@postgres:5432/platform_db?sslmode=disable"
       PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://localhost:28080}"
       SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
