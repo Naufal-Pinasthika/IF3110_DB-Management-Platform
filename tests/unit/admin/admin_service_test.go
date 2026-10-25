@@ -433,17 +433,83 @@ func TestCreateManagedDatabase(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing required fields", func(t *testing.T) {
-		svc := newService(&mockRepository{})
-		cases := []api.CreateDatabaseRequest{
-			{},
-			{Label: "x", Host: "h", DatabaseName: "d", SSLMode: "s", Port: 0, ReaderUsername: "r", ReaderPassword: "p", MigratorUsername: "m", MigratorPassword: "mp"},
-			{Label: "x", Host: "h", DatabaseName: "d", SSLMode: "s", Port: 5432, ReaderUsername: "", ReaderPassword: "p", MigratorUsername: "m", MigratorPassword: "mp"},
+	t.Run("rejects empty label", func(t *testing.T) {
+		svc := &admin.Service{
+			Repository: &mockRepository{},
+			Access:     &mockAccess{},
+			Cipher:     &mockCipher{},
 		}
-		for i, input := range cases {
-			if _, err := svc.CreateManagedDatabase(ctx, adminPrincipal, input); err == nil {
-				t.Fatalf("case %d accepted, want error", i)
-			}
+
+		input := api.CreateDatabaseRequest{
+			Label: "   ", // whitespace only
+		}
+
+		_, err := svc.CreateManagedDatabase(ctx, adminPrincipal, input)
+		if err == nil {
+			t.Fatal("expected error for missing label, got nil")
+		}
+	})
+
+	
+	t.Run("applies default values when optional fields are omitted", func(t *testing.T) {
+		var capturedDB models.ManagedDatabase
+
+		repo := &mockRepository{
+			createDatabaseFn: func(ctx context.Context, db models.ManagedDatabase) (models.ManagedDatabase, error) {
+				capturedDB = db
+				db.ID = "db-123"
+				return db, nil
+			},
+		}
+
+		svc := &admin.Service{
+			Repository: repo,
+			Access:     &mockAccess{},
+			Cipher:     &mockCipher{},
+		}
+
+		// Provide only the required connection label
+		input := api.CreateDatabaseRequest{
+			Label: "Production Replica",
+		}
+
+		summary, err := svc.CreateManagedDatabase(ctx, adminPrincipal, input)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Assert output summary
+		if summary.ID != "db-123" {
+			t.Errorf("ID = %q, want %q", summary.ID, "db-123")
+		}
+		if summary.Label != "Production Replica" {
+			t.Errorf("Label = %q, want %q", summary.Label, "Production Replica")
+		}
+
+		// Assert that default values were populated before saving to the repository
+		if capturedDB.Host != "postgres" {
+			t.Errorf("Host = %q, want default %q", capturedDB.Host, "postgres")
+		}
+		if capturedDB.Port != 5432 {
+			t.Errorf("Port = %d, want default %d", capturedDB.Port, 5432)
+		}
+		if capturedDB.DatabaseName != "target_db" {
+			t.Errorf("DatabaseName = %q, want default %q", capturedDB.DatabaseName, "target_db")
+		}
+		if capturedDB.SSLMode != "disable" {
+			t.Errorf("SSLMode = %q, want default %q", capturedDB.SSLMode, "disable")
+		}
+		if capturedDB.ReaderUsername != "admin" {
+			t.Errorf("ReaderUsername = %q, want default %q", capturedDB.ReaderUsername, "admin")
+		}
+		if capturedDB.ReaderPasswordEnc != "enc:root" {
+			t.Errorf("ReaderPasswordEnc = %q, want encrypted default %q", capturedDB.ReaderPasswordEnc, "enc:root")
+		}
+		if capturedDB.MigratorUsername != "admin" {
+			t.Errorf("MigratorUsername = %q, want default %q", capturedDB.MigratorUsername, "admin")
+		}
+		if capturedDB.MigratorPasswordEnc != "enc:root" {
+			t.Errorf("MigratorPasswordEnc = %q, want encrypted default %q", capturedDB.MigratorPasswordEnc, "enc:root")
 		}
 	})
 

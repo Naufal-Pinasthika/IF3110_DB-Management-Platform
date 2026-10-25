@@ -40,7 +40,7 @@ func TestPlatformAdminMiddleware(t *testing.T) {
 		reached := false
 		mw := svc.PlatformAdminMiddleware(nextHandler(&reached))
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
-		ctx := auth.SetPrincipalContext(req.Context(), makePrincipal("user-1", false))
+		ctx := auth.SetValidatedPrincipalContext(req.Context(), makePrincipal("user-1", false))
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		mw.ServeHTTP(rr, req)
@@ -56,7 +56,7 @@ func TestPlatformAdminMiddleware(t *testing.T) {
 		reached := false
 		mw := svc.PlatformAdminMiddleware(nextHandler(&reached))
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
-		ctx := auth.SetPrincipalContext(req.Context(), makePrincipal("user-1", true))
+		ctx := auth.SetValidatedPrincipalContext(req.Context(), makePrincipal("user-1", true))
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		mw.ServeHTTP(rr, req)
@@ -90,7 +90,7 @@ func TestDatabaseAccessMiddleware(t *testing.T) {
 		reached := false
 		mw := svc.DatabaseAccessMiddleware(api.AccessViewOnly)(nextHandler(&reached))
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/databases/", nil)
-		ctx := auth.SetPrincipalContext(req.Context(), makePrincipal("user-1", false))
+		ctx := auth.SetValidatedPrincipalContext(req.Context(), makePrincipal("user-1", false))
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		mw.ServeHTTP(rr, req)
@@ -109,7 +109,7 @@ func TestDatabaseAccessMiddleware(t *testing.T) {
 		reached := false
 		mw := svc.DatabaseAccessMiddleware(api.AccessViewEdit)(nextHandler(&reached))
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/databases/db-1/migrations", nil)
-		ctx := auth.SetPrincipalContext(req.Context(), makePrincipal("user-1", false))
+		ctx := auth.SetValidatedPrincipalContext(req.Context(), makePrincipal("user-1", false))
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		mw.ServeHTTP(rr, req)
@@ -128,7 +128,7 @@ func TestDatabaseAccessMiddleware(t *testing.T) {
 		reached := false
 		mw := svc.DatabaseAccessMiddleware(api.AccessViewEdit)(nextHandler(&reached))
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/databases/db-1/migrations", nil)
-		ctx := auth.SetPrincipalContext(req.Context(), makePrincipal("user-1", false))
+		ctx := auth.SetValidatedPrincipalContext(req.Context(), makePrincipal("user-1", false))
 		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		mw.ServeHTTP(rr, req)
@@ -143,7 +143,7 @@ func TestDatabaseAccessMiddleware(t *testing.T) {
 
 func TestPrincipalContextRoundTrip(t *testing.T) {
 	principal := makePrincipal("user-1", true)
-	ctx := auth.SetPrincipalContext(context.Background(), principal)
+	ctx := auth.SetValidatedPrincipalContext(context.Background(), principal)
 	got, ok := auth.PrincipalFromContext(ctx)
 	if !ok {
 		t.Fatal("principal missing from context")

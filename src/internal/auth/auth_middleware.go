@@ -29,9 +29,13 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 }
 
 
-// stores the Principal in request context.
+// stores the Principal in request context
 func SetPrincipalContext(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, principalContextKey, principal)
+}
+
+func SetValidatedPrincipalContext(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, ValidatedSession{Principal: principal})
 }
 
 

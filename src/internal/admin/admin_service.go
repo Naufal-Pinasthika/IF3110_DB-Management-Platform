@@ -278,6 +278,7 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseSummary{}, err
 	}
+
 	input.Label = strings.TrimSpace(input.Label)
 	if input.Label == "" {
 		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: connection label is required", apperror.ErrInvalidInput)
@@ -311,11 +312,11 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 
 	readerEnc, err := s.Cipher.Encrypt(input.ReaderPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %w", apperror.ErrInternal, err)
 	}
 	migratorEnc, err := s.Cipher.Encrypt(input.MigratorPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %w", apperror.ErrInternal, err)
 	}
 
 	db := models.ManagedDatabase{
