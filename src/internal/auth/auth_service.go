@@ -15,7 +15,7 @@ import (
 type Repository interface {
 	FindUserByUsername(ctx context.Context, username string) (models.User, error)
 	FindUserByID(ctx context.Context, userID string) (models.User, error)
-	CreateSession(ctx context.Context, session models.Session) error
+	CreateSession(ctx context.Context, session *models.Session) error
 	FindSessionByTokenHash(ctx context.Context, tokenHash string) (models.Session, error)
 	TouchSession(ctx context.Context, sessionID string, now time.Time) error
 	RotateSession(ctx context.Context, sessionID, expectedHash string, nextHash string, now time.Time, graceUntil time.Time) error
@@ -27,6 +27,14 @@ type Service struct {
 	Repository Repository
 	Policy config.SessionConfig
 	tempPasswordHash string
+}
+
+func NewService(repo Repository, policy config.SessionConfig) (*Service, error) {
+	dummyHash, err := HashPassword("dummy-password-for-timing")
+	if err != nil {
+		return nil, err
+	}
+	return &Service{Repository: repo, Policy: policy, tempPasswordHash: dummyHash}, nil
 }
 
 // this section mostly helper methods
@@ -99,7 +107,7 @@ func (s *Service) Login(ctx context.Context, input api.LoginRequest, now time.Ti
 		AbsoluteExpiresAt: now.Add(s.Policy.AbsoluteTimeout),
 	}
 
-	errCreateSession := s.Repository.CreateSession(ctx, session)
+	errCreateSession := s.Repository.CreateSession(ctx, &session)
 	if errCreateSession != nil {
 		return LoginResult{}, errCreateSession
 	}
@@ -151,7 +159,7 @@ func (s *Service) ValidateSession(ctx context.Context, token string, now time.Ti
 		}
 
 		// check if session revokes, expired, or idle timeout
-		if session.RevokedAt != nil || !now.Before(session.AbsoluteExpiresAt) || now.Before(session.LastSeenAt.Add(s.Policy.IdleTimeout)) {
+		if session.RevokedAt != nil || !now.Before(session.AbsoluteExpiresAt) || !now.Before(session.LastSeenAt.Add(s.Policy.IdleTimeout)) {
 			return ValidatedSession{}, ErrUnauthenticated
 		}
 
@@ -186,7 +194,7 @@ func (s *Service) ValidateSession(ctx context.Context, token string, now time.Ti
 		// if theres a 2 request (even at a short period amount of time, as long its timestamp different)
 		// this block below will not be executed (as it will counted as isPrevToken)
 		if isCurrToken && rotationDue {
-			rotatedToken, err := s.RotateSession(ctx, session, now)
+			rotatedToken, err = s.RotateSession(ctx, session, now)
 			if errors.Is(err, errRotationConflict) {
 				continue // avoid race condition if theres 2 token requested simultaneously (same timestamp)
 			}
@@ -194,7 +202,7 @@ func (s *Service) ValidateSession(ctx context.Context, token string, now time.Ti
 				return ValidatedSession{}, err
 			}
 
-			// gives old token into PreviousTokenHash 
+			// gives old token into PreviousTokenHash
 			// also add PreviousValidUntil relatives to its added grace period
 			previousHash := session.TokenHash
 			graceUntill := s.graceUntil(session, now)
@@ -252,7 +260,7 @@ func (s *Service) RotateSession(ctx context.Context, session models.Session, now
 }
 
 // revoke a session on the server
-// basically a wrapper from RevokeSession() on auth_repository 
+// basically a wrapper from RevokeSession() on auth_repository
 func (s *Service) Logout(ctx context.Context, actor Principal, now time.Time) error {
 	return s.Repository.RevokeSession(ctx, actor.SessionID, now)
 }

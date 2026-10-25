@@ -1,0 +1,244 @@
+{{define "users"}}<section class="panel">
+<div class="panel-toolbar">
+<h2>Platform accounts</h2>
+<span class="muted">Database access is assigned through groups.</span>
+</div>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>Username</th>
+<th>Platform role</th>
+<th>Status</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="user-list">
+<tr>
+<td colspan="4" class="empty-cell">Loading users…</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<dialog id="user-dialog" aria-labelledby="user-dialog-title">
+<form method="post" id="user-form">
+<div class="dialog-heading">
+<h2 id="user-dialog-title">New user</h2>
+<button class="button quiet" type="button" data-close>Close</button>
+</div>
+<input type="hidden" name="id">
+<label for="user-username">Username</label>
+<input id="user-username" name="username" maxlength="64" required autocomplete="off">
+<label for="user-password">Password</label>
+<input id="user-password" name="password" type="password" autocomplete="new-password" required>
+<p class="helper-text" id="user-password-help">Use a password of up to 72 bytes.</p>
+<label class="checkbox-label" id="user-admin-field">
+<input type="checkbox" name="is_platform_admin">Platform administrator</label>
+<label class="checkbox-label" id="user-active-field" hidden>
+<input type="checkbox" name="is_active">Account active</label>
+<p class="helper-text">Disabling an account or changing its password revokes its sessions.</p>
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save user</button>
+</div>
+</form>
+</dialog>{{end}}
+
+{{define "groups"}}<section class="panel">
+<div class="panel-toolbar">
+<h2>Groups</h2>
+<span class="muted">A user can belong to more than one group.</span>
+</div>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>Group name</th>
+<th>Group ID</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="group-list">
+<tr>
+<td colspan="3" class="empty-cell">Loading groups…</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<div class="admin-actions-layout section-gap">
+<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>Group membership</h2>
+<p>Add or remove a user from a group.</p>
+</div>
+</div>
+<form method="post" id="membership-form" class="panel-form">
+<label for="member-group">Group</label>
+<select id="member-group" name="group_id" required>
+<option value="">Select a group</option>
+</select>
+<label for="member-user">User</label>
+<select id="member-user" name="user_id" required>
+<option value="">Select a user</option>
+</select>
+<label for="member-action">Action</label>
+<select id="member-action" name="action">
+<option value="add">Add to group</option>
+<option value="remove">Remove from group</option>
+</select>
+<div class="form-message" role="alert" hidden>
+</div>
+<button class="button" type="submit">Update membership</button>
+</form>
+</section>
+<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>Database access</h2>
+<p>Set or revoke a group's access to a database.</p>
+</div>
+</div>
+<form method="post" id="grant-form" class="panel-form">
+<label for="grant-group">Group</label>
+<select id="grant-group" name="group_id" required>
+<option value="">Select a group</option>
+</select>
+<label for="grant-database">Database</label>
+<select id="grant-database" name="database_id" required>
+<option value="">Select a database</option>
+</select>
+<label for="grant-level">Access level</label>
+<select id="grant-level" name="access_level">
+<option value="VIEW_ONLY">Read only</option>
+<option value="VIEW_EDIT">Read + migrations</option>
+<option value="REVOKE">Revoke access</option>
+</select>
+<p class="helper-text">Migration access allows creating and executing migrations. SQL queries remain read only.</p>
+<div class="form-message" role="alert" hidden>
+</div>
+<button class="button" type="submit">Update access</button>
+</form>
+</section>
+</div>
+<dialog id="group-dialog" aria-labelledby="group-dialog-title">
+<form method="post" id="group-form">
+<div class="dialog-heading">
+<h2 id="group-dialog-title">New group</h2>
+<button class="button quiet" type="button" data-close>Close</button>
+</div>
+<input type="hidden" name="id">
+<label for="group-name">Group name</label>
+<input id="group-name" name="name" required maxlength="100">
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save group</button>
+</div>
+</form>
+</dialog>{{end}}
+
+{{define "connections"}}<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>Registered connections</h2>
+<p>Reader and migrator credentials are stored separately.</p>
+</div>
+<button type="button" class="button small" id="refresh">Refresh</button>
+</div>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>Connection</th>
+<th>Database name</th>
+<th>Status</th>
+<th>Actions</th>
+</tr>
+</thead>
+<tbody id="connection-list">
+<tr>
+<td colspan="4" class="empty-cell">Loading connections…</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<dialog id="connection-dialog" class="wide-dialog" aria-labelledby="connection-dialog-title">
+<form method="post" id="connection-form">
+<div class="dialog-heading">
+<h2 id="connection-dialog-title">Add connection</h2>
+<button class="button quiet" type="button" data-close>Close</button>
+</div>
+<input type="hidden" name="id">
+<label for="connection-label">Connection label</label>
+<input id="connection-label" name="label" placeholder="e.g. Production inventory" required>
+<div class="form-columns">
+<div>
+<label for="connection-host">Host</label>
+<input id="connection-host" name="host" required placeholder="postgres.example.com">
+</div>
+<div>
+<label for="connection-port">Port</label>
+<input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required>
+</div>
+</div>
+<div class="form-columns">
+<div>
+<label for="connection-database">Database name</label>
+<input id="connection-database" name="database_name" required>
+</div>
+<div>
+<label for="connection-ssl">SSL mode</label>
+<select id="connection-ssl" name="ssl_mode">
+<option value="require">Require</option>
+<option value="verify-full">Verify full</option>
+<option value="verify-ca">Verify CA</option>
+<option value="disable">Disable (local only)</option>
+</select>
+</div>
+</div>
+<fieldset>
+<legend>Reader credentials</legend>
+<p class="helper-text">Used for schema browsing and read-only queries.</p>
+<div class="form-columns">
+<div>
+<label for="reader-username">Username</label>
+<input id="reader-username" name="reader_username" autocomplete="off" required>
+</div>
+<div>
+<label for="reader-password">Password</label>
+<input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required>
+</div>
+</div>
+</fieldset>
+<fieldset>
+<legend>Migrator credentials</legend>
+<p class="helper-text">Used to execute authorized migrations.</p>
+<div class="form-columns">
+<div>
+<label for="migrator-username">Username</label>
+<input id="migrator-username" name="migrator_username" autocomplete="off" required>
+</div>
+<div>
+<label for="migrator-password">Password</label>
+<input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" required>
+</div>
+</div>
+</fieldset>
+<p class="helper-text" id="connection-password-help">Passwords are never displayed after saving.</p>
+<label class="checkbox-label" id="connection-enabled-field" hidden>
+<input type="checkbox" name="is_enabled">Connection enabled</label>
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save connection</button>
+</div>
+</form>
+</dialog>{{end}}

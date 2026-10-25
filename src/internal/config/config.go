@@ -7,8 +7,6 @@ import (
 	"os"
 	"strconv"
 	"time"
-
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 )
 
 type Config struct {

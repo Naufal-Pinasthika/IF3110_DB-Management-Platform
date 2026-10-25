@@ -1,0 +1,13 @@
+{
+  "name": "if3110-platform-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test unit/frontend/*_test.mjs",
+    "test:syntax": "node --input-type=module --check < ../web/static/app.js && node --check ../web/static/api.mjs",
+    "browser:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}
