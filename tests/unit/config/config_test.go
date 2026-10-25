@@ -12,7 +12,8 @@ func configEnv(t *testing.T) {
 	for _, key := range []string{"APP_ADDR", "PUBLIC_ORIGIN", "SESSION_COOKIE_SECURE", "SESSION_IDLE_TIMEOUT", "SESSION_ABSOLUTE_TIMEOUT", "SESSION_ROTATION_INTERVAL", "SESSION_GRACE_PERIOD"} {
 		t.Setenv(key, "")
 	}
-	t.Setenv("PLATFORM_DATABASE_URL", "postgres://user:secret@localhost/platform_db")
+	t.Setenv("PLATFORM_DATABASE_URL", "postgres://user:***@localhost/platform_db")
+	t.Setenv("DB_CREDENTIAL_ENCRYPTION_KEY", "testYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=") // base64 of 32 'a' bytes
 }
 
 func TestLoadDefaults(t *testing.T) {
