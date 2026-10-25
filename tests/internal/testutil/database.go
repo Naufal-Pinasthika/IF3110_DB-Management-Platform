@@ -80,12 +80,19 @@ func Database(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	migration, err := os.ReadFile(filepath.Join(Root(), "db/platform/000001_create_platform_schema.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(string(migration)).Error; err != nil {
-		t.Fatal(err)
+	// Build the current platform schema without applying development seed or
+	// password-reset scripts. Keep this list aligned with schema migrations.
+	for _, name := range []string{
+		"000001_create_platform_schema.sql",
+		"000005_add_database_engine.sql",
+	} {
+		migration, err := os.ReadFile(filepath.Join(Root(), "db/platform", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(string(migration)).Error; err != nil {
+			t.Fatalf("apply platform migration %s: %v", name, err)
+		}
 	}
 	return db
 }

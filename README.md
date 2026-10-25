@@ -91,11 +91,12 @@ curl http://localhost:28080/health
 ## Menjalankan Test
 
 ```bash
-make check             # go vet + syntax check frontend
-make test              # unit test (Go + frontend) tanpa butuh PostgreSQL
-make test-integration  # integration test (butuh TEST_DATABASE_URL ke database *_test)
-make test-browser      # browser/E2E test (butuh TEST_DATABASE_URL + Playwright)
-make build             # build binary server ke tests/artifacts/
+make check              # go vet + syntax check frontend
+make test               # unit test (Go + frontend) tanpa butuh PostgreSQL
+make test-db-up         # starts the disposable PostgreSQL test service on port 15433
+make test-integration   # integration test (butuh link TEST_DATABASE_URL ke database bernamae "*_test")
+make test-browser       # also requires TEST_DATABASE_URL and Playwright
+make build              # build binary server ke tests/artifacts/
 ```
 
 ## Struktur Proyek
