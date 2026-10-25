@@ -14,7 +14,7 @@ func configEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	t.Setenv("PLATFORM_DATABASE_URL", "postgres://user:***@localhost/platform_db")
-	t.Setenv("DB_CREDENTIAL_ENCRYPTION_KEY", ${{ secrets.DB_CREDENTIAL_ENCRYPTION_KEY }}) // base64 of 32 'a' bytes
+	t.Setenv("DB_CREDENTIAL_ENCRYPTION_KEY", "testYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=") // base64 of 32 'a' bytes
 }
 
 func TestLoadDefaults(t *testing.T) {
