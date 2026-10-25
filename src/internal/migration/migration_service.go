@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"errors"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
@@ -38,7 +39,6 @@ type SQLExplainer interface {
 type SchemaComparator interface {
 	Compare(ctx context.Context, databaseID, desiredDDL string) (api.SchemaDiffResult, error)
 }
-
 type Service struct {
 	Repository Repository
 	Access     AccessChecker
@@ -47,9 +47,31 @@ type Service struct {
 	SchemaDiff SchemaComparator
 }
 
+// requirePostgresTarget keeps PostgreSQL-specific explain and schema-diff
+// operations away from MySQL targets until those implementations are available.
+func (s *Service) requirePostgresTarget(ctx context.Context, actor auth.Principal, databaseID string) error {
+	provider, ok := s.Access.(interface {
+		GetDatabase(context.Context, auth.Principal, string) (api.UserDatabase, error)
+	})
+	if !ok {
+		return nil
+	}
+	database, err := provider.GetDatabase(ctx, actor, databaseID)
+	if err != nil {
+		return err
+	}
+	if database.Engine == models.EngineMySQL {
+		return fmt.Errorf("%w: query plan and schema diff analysis currently support PostgreSQL only", apperror.ErrInvalidInput)
+	}
+	return nil
+}
+
 // CompareSchema checks a complete desired DDL description against the target.
 func (s *Service) CompareSchema(ctx context.Context, actor auth.Principal, databaseID string, input api.SchemaDiffRequest) (api.SchemaDiffResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.SchemaDiffResult{}, err
+	}
+	if err := s.requirePostgresTarget(ctx, actor, databaseID); err != nil {
 		return api.SchemaDiffResult{}, err
 	}
 	if s.SchemaDiff == nil {
@@ -61,6 +83,9 @@ func (s *Service) CompareSchema(ctx context.Context, actor auth.Principal, datab
 // ExplainMigration previews a draft without committing any statement effects.
 func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, analyze bool) (api.ExplainResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.ExplainResult{}, err
+	}
+	if err := s.requirePostgresTarget(ctx, actor, databaseID); err != nil {
 		return api.ExplainResult{}, err
 	}
 	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
@@ -207,6 +232,9 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	completionTime := time.Now()
 
 	if execErr != nil {
+		if errors.Is(execErr, apperror.ErrTransactionOutcomeUnknown) {
+			return api.MigrationExecuted{}, execErr
+		}
 		errSummary := execErr.Error()
 		if idx := strings.Index(errSummary, "pq: "); idx != -1 {
 			errSummary = errSummary[idx:]

@@ -3,6 +3,8 @@ package api
 import "net/http"
 
 type RouteHandlers struct {
+	ListAccessSnapshot        http.Handler
+	TestConnectionDraft       http.Handler
 	Health                    http.Handler
 	Login                     http.Handler
 	Me                        http.Handler
@@ -95,6 +97,9 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "GET", "/api/v1/admin/users", handlers.ListUsers, session, admin)
 	registerRoute(mux, "POST", "/api/v1/admin/users", handlers.CreateUser, session, admin, csrf)
 	registerRoute(mux, "PATCH", "/api/v1/admin/users/{userId}", handlers.UpdateUser, session, admin, csrf)
+
+	registerRoute(mux, "GET", "/api/v1/admin/access", handlers.ListAccessSnapshot, session, admin)
+	registerRoute(mux, "POST", "/api/v1/admin/databases/test-connection", handlers.TestConnectionDraft, session, admin, csrf)
 
 	// Admin groups and membership
 	registerRoute(mux, "GET", "/api/v1/admin/groups", handlers.ListGroups, session, admin)

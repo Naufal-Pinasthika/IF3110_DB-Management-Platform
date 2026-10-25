@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"strings"
 	"time"
 
@@ -190,7 +191,7 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 func (r *PostgresRepository) ListDatabases(ctx context.Context) ([]models.ManagedDatabase, error) {
 	var dbs []models.ManagedDatabase
 	err := r.DB.WithContext(ctx).
-		Select("id", "label", "host", "port", "database_name", "ssl_mode", "reader_username", "reader_password_enc", "migrator_username", "migrator_password_enc", "is_enabled").
+		Select("id", "engine", "label", "host", "port", "database_name", "ssl_mode", "reader_username", "reader_password_enc", "migrator_username", "migrator_password_enc", "is_enabled").
 		Order("label").
 		Find(&dbs).Error
 	return dbs, err
@@ -221,6 +222,7 @@ func (r *PostgresRepository) CreateDatabase(ctx context.Context, database models
 func (r *PostgresRepository) UpdateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error) {
 	updates := map[string]interface{}{
 		"label":                 database.Label,
+		"engine":                database.TargetEngine(),
 		"host":                  database.Host,
 		"port":                  database.Port,
 		"database_name":         database.DatabaseName,
@@ -325,4 +327,19 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 
 		return nil
 	})
+}
+
+// ListAccessSnapshot reads memberships and grants from the same database snapshot.
+func (r *PostgresRepository) ListAccessSnapshot(ctx context.Context) (api.AccessSnapshot, error) {
+	result := api.AccessSnapshot{Members: []api.GroupMember{}, Grants: []api.GroupDatabaseAccess{}}
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY").Error; err != nil {
+			return err
+		}
+		if err := tx.Table("user_groups").Select("group_id, user_id").Order("group_id, user_id").Scan(&result.Members).Error; err != nil {
+			return err
+		}
+		return tx.Table("group_access").Select("group_id, database_id, access_level").Order("group_id, database_id").Scan(&result.Grants).Error
+	})
+	return result, err
 }

@@ -134,6 +134,7 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 				ID:              db.ID,
 				Label:           db.Label,
 				DatabaseName:    db.DatabaseName,
+				Engine:          db.TargetEngine(),
 				EffectiveAccess: api.AccessViewEdit,
 			})
 			continue
@@ -150,6 +151,7 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 			ID:              db.ID,
 			Label:           db.Label,
 			DatabaseName:    db.DatabaseName,
+			Engine:          db.TargetEngine(),
 			EffectiveAccess: effective,
 		})
 	}
@@ -180,6 +182,7 @@ func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databas
 		ID:              db.ID,
 		Label:           db.Label,
 		DatabaseName:    db.DatabaseName,
+		Engine:          db.TargetEngine(),
 		EffectiveAccess: effective,
 	}, nil
 }

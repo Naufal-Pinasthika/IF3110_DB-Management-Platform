@@ -1,5 +1,5 @@
 # Database metadata platform	platform_db
-# Database target test_db_1, test_db_2, test_db3
+# PostgreSQL targets and one MySQL target
 services:
   target-db-1:
     image: postgres:17
@@ -39,6 +39,19 @@ services:
     volumes:
       - target_db_3_data:/var/lib/postgresql/data
       - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+  target-mysql:
+    image: mysql:8.0
+    container_name: target_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: target_mysql_root_12345
+      MYSQL_DATABASE: target_db
+      MYSQL_USER: target_db_user
+      MYSQL_PASSWORD: target_db_password_12345
+    ports:
+      - "3307:3306"
+    volumes:
+      - target_mysql_data:/var/lib/mysql
 
   postgres:
     image: postgres:17
@@ -86,3 +99,4 @@ volumes:
   target_db_1_data:
   target_db_2_data:
   target_db_3_data:
+  target_mysql_data:

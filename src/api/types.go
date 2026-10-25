@@ -129,35 +129,40 @@ type GroupDatabaseAccess struct {
 // ------------------------------------------------------------
 // POST /api/v1/admin/databases request body
 type CreateDatabaseRequest struct {
-	Label            string `json:"label"`
-	Host             string `json:"host"`
-	Port             int    `json:"port"`
-	DatabaseName     string `json:"database_name"`
-	SSLMode          string `json:"ssl_mode"`
-	ReaderUsername   string `json:"reader_username"`
-	ReaderPassword   string `json:"reader_password"`
-	MigratorUsername string `json:"migrator_username"`
-	MigratorPassword string `json:"migrator_password"`
+	Engine               string `json:"engine"`
+	UseReaderCredentials bool   `json:"use_reader_credentials,omitempty"`
+	Label                string `json:"label"`
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	DatabaseName         string `json:"database_name"`
+	SSLMode              string `json:"ssl_mode"`
+	ReaderUsername       string `json:"reader_username"`
+	ReaderPassword       string `json:"reader_password"`
+	MigratorUsername     string `json:"migrator_username"`
+	MigratorPassword     string `json:"migrator_password"`
 }
 
 // PATCH /api/v1/admin/databases/{dbId} request body
 type UpdateDatabaseRequest struct {
-	Label            *string `json:"label,omitempty"`
-	Host             *string `json:"host,omitempty"`
-	Port             *int    `json:"port,omitempty"`
-	DatabaseName     *string `json:"database_name,omitempty"`
-	SSLMode          *string `json:"ssl_mode,omitempty"`
-	ReaderUsername   *string `json:"reader_username,omitempty"`
-	ReaderPassword   *string `json:"reader_password,omitempty"`
-	MigratorUsername *string `json:"migrator_username,omitempty"`
-	MigratorPassword *string `json:"migrator_password,omitempty"`
-	IsEnabled        *bool   `json:"is_enabled,omitempty"`
+	Engine               *string `json:"engine,omitempty"`
+	UseReaderCredentials bool    `json:"use_reader_credentials,omitempty"`
+	Label                *string `json:"label,omitempty"`
+	Host                 *string `json:"host,omitempty"`
+	Port                 *int    `json:"port,omitempty"`
+	DatabaseName         *string `json:"database_name,omitempty"`
+	SSLMode              *string `json:"ssl_mode,omitempty"`
+	ReaderUsername       *string `json:"reader_username,omitempty"`
+	ReaderPassword       *string `json:"reader_password,omitempty"`
+	MigratorUsername     *string `json:"migrator_username,omitempty"`
+	MigratorPassword     *string `json:"migrator_password,omitempty"`
+	IsEnabled            *bool   `json:"is_enabled,omitempty"`
 }
 
 // GET /api/v1/admin/databases response body ([]ManagedDatabaseSummary)
 // POST /api/v1/admin/databases response body (ManagedDatabaseSummary)
 // PATCH /api/v1/admin/databases/{dbId} response body (ManagedDatabaseSummary)
 type ManagedDatabaseSummary struct {
+	Engine       string `json:"engine"`
 	ID           string `json:"id"`
 	Label        string `json:"label"`
 	DatabaseName string `json:"database_name"`
@@ -166,6 +171,7 @@ type ManagedDatabaseSummary struct {
 
 // GET /api/v1/admin/databases/{dbId} response body
 type ManagedDatabaseDetail struct {
+	Engine           string `json:"engine"`
 	ID               string `json:"id"`
 	Label            string `json:"label"`
 	Host             string `json:"host"`
@@ -189,6 +195,7 @@ type TestConnectionResult struct {
 // GET /api/v1/databases response body ([]UserDatabase)
 // GET /api/v1/databases/{dbId} (UserDatabase)
 type UserDatabase struct {
+	Engine          string      `json:"engine"`
 	ID              string      `json:"id"`
 	Label           string      `json:"label"`
 	DatabaseName    string      `json:"database_name"`
@@ -429,4 +436,16 @@ type MigrationDetail struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 	ExecutedAt   *time.Time      `json:"executed_at"`
 	ErrorSummary *string         `json:"error_summary"`
+}
+
+// AccessSnapshot contains only membership identifiers and group grants, never credentials.
+type AccessSnapshot struct {
+	Members []GroupMember         `json:"members"`
+	Grants  []GroupDatabaseAccess `json:"grants"`
+}
+
+// TestConnectionRequest tests unsaved settings, retaining omitted secrets when editing.
+type TestConnectionRequest struct {
+	DatabaseID string `json:"database_id,omitempty"`
+	UpdateDatabaseRequest
 }
