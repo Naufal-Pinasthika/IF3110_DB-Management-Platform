@@ -22,11 +22,8 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 	authHandler := &auth.Handler{Service: service, PublicOrigin: cfg.PublicOrigin}
 
 	var db *gorm.DB
-	switch r := repo.(type) {
-	case interface{ DB() *gorm.DB }:
-		db = r.DB()
-	case *auth.PostgresRepository:
-		db = r.DB
+	if pr, ok := repo.(*auth.PostgresRepository); ok {
+		db = pr.DB
 	}
 
 	// Access service (also satisfies admin.AdminChecker via RequirePlatformAdmin)
