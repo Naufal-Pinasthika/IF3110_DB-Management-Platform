@@ -173,7 +173,13 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	completionTime := time.Now()
 
 	if execErr != nil {
-		_, failErr := s.Repository.MarkFailed(ctx, databaseID, migrationID, actor.User.ID, execErr.Error(), completionTime)
+		errSummary := execErr.Error()
+		if idx := strings.Index(errSummary, "pq: "); idx != -1 {
+			errSummary = errSummary[idx:]
+		} else if strings.HasPrefix(errSummary, "invalid input provided: ") {
+			errSummary = strings.TrimPrefix(errSummary, "invalid input provided: ")
+		}
+		_, failErr := s.Repository.MarkFailed(ctx, databaseID, migrationID, actor.User.ID, errSummary, completionTime)
 		if failErr != nil {
 			return api.MigrationExecuted{}, failErr
 		}

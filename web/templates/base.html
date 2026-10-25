@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>{{.Title}} · Database Platform</title>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <script src="/static/app.js" type="module">
 </script>
 </head>
@@ -81,7 +82,7 @@
 <span class="connection-status" title="No connection test has been performed.">Not tested</span>
 </div>
 {{else}}<span class="engine-label">PostgreSQL</span>{{end}}
-<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet" id="logout">Sign out</button></div>
+<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet small" id="logout">Sign out</button></div>
 </header>
 <main id="main" class="content" tabindex="-1">
 <div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="button small" id="retry" hidden>Try again</button></div>
@@ -148,12 +149,12 @@
 <div class="form-columns">
 <div>
 <label for="connection-database">Database name</label>
-<input id="connection-database" name="database_name" required placeholder="inventory_db" value="inventory_db">
+<input id="connection-database" name="database_name" required placeholder="target_db" value="target_db">
 </div>
 <div>
 <label for="connection-ssl">SSL mode</label>
 <select id="connection-ssl" name="ssl_mode">
-<option value="disable" selected>Disable (local / Docker)</option>
+<option value="disable" selected>Disable</option>
 <option value="require">Require</option>
 <option value="verify-full">Verify full</option>
 <option value="verify-ca">Verify CA</option>

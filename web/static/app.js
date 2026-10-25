@@ -94,9 +94,10 @@ function submit(id, work) {
 
 function badge(value) {
   const labels = { VIEW_ONLY: "Read only", VIEW_EDIT: "Read + migrations", DRAFT: "Draft", RUNNING: "Running", APPLIED: "Applied", FAILED: "Failed", ACTIVE: "Active", DISABLED: "Disabled" };
-  const colors = { APPLIED: "green", ACTIVE: "green", FAILED: "red", RUNNING: "amber" };
+  const colors = { APPLIED: "green", ACTIVE: "green", FAILED: "red", DISABLED: "red", RUNNING: "amber", VIEW_EDIT: "blue", VIEW_ONLY: "purple" };
   return node("span", labels[value] || value, "badge " + (colors[value] || ""));
 }
+
 
 function date(value) {
   if (!value) return "--";
@@ -154,16 +155,37 @@ function dataTable(id, columns, records) {
   target.append(table);
 }
 
-function options(id, data, label) {
+function options(id, data, label, placeholderText) {
   const select = $(id);
+  if (!select) return;
   const previous = select.value;
-  while (select.options.length > 1) select.remove(1);
-  for (const item of data || []) {
+  select.replaceChildren();
+  // Always add a disabled placeholder first option
+  const ph = node("option", placeholderText || "Select…");
+  ph.value = "";
+  ph.disabled = true;
+  ph.selected = true;
+  select.append(ph);
+  if (!data?.length) {
+    const emptyOption = node("option", "No items available");
+    emptyOption.value = "";
+    emptyOption.disabled = true;
+    select.append(emptyOption);
+    select.dataset.empty = "";
+    delete select.dataset.placeholder;
+    return;
+  }
+  delete select.dataset.empty;
+  select.dataset.placeholder = "";
+  for (const item of data) {
     const option = node("option", label(item));
     option.value = item.id;
     select.append(option);
   }
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  if (previous && [...select.options].some(option => option.value === previous)) {
+    select.value = previous;
+    delete select.dataset.placeholder;
+  }
 }
 
 function confirmAction(title, description, label) {
@@ -220,7 +242,7 @@ async function openConnection(id) {
   if (!id) {
     if (!form.elements.host.value) form.elements.host.value = "postgres";
     if (!form.elements.port.value) form.elements.port.value = "5432";
-    if (!form.elements.database_name.value) form.elements.database_name.value = "inventory_db";
+    if (!form.elements.database_name.value) form.elements.database_name.value = "target_db";
     if (!form.elements.ssl_mode.value) form.elements.ssl_mode.value = "disable";
     if (!form.elements.reader_username.value) form.elements.reader_username.value = "admin";
     if (!form.elements.reader_password.value) form.elements.reader_password.value = "root";
@@ -534,6 +556,20 @@ function migrationPage() {
   let draft = creating;
   let executing = false;
   const markSaved = () => { savedSQL = $("sql").value; dirty = false; };
+
+  if (creating) {
+    const template = sessionStorage.getItem("clone_migration");
+    if (template) {
+      sessionStorage.removeItem("clone_migration");
+      try {
+        const data = JSON.parse(template);
+        if ($("migration-name") && data.name) $("migration-name").value = data.name;
+        if ($("sql") && data.sql) $("sql").value = data.sql;
+        markSaved();
+      } catch {}
+    }
+  }
+
   $("sql").addEventListener("input", () => {
     dirty = $("sql").value !== savedSQL;
     if (!creating) $("execute-migration").disabled = dirty || !draft || !canEdit || executing;
@@ -563,26 +599,32 @@ function migrationPage() {
     $("migration-save-note").textContent = "Executing on " + activeDatabase.database_name + "…";
     try {
       await api(endpoint + "/execute", { method: "POST" });
+      clearNotice();
       await reload();
       notice("Migration execution completed. Review its status below.", "success");
     } catch (error) {
-      try { await reload(); } catch {}
-      if (!error.status || error.status >= 500) throw new Error("Execution could not be confirmed. Check migration history before attempting it again.");
-      throw error;
+      clearNotice();
+      try {
+        await reload();
+        // reload() already renders the formatted failure card on the migration detail page
+        return;
+      } catch (reloadErr) {
+        fail(reloadErr);
+      }
     } finally {
       executing = false;
       $("sql").readOnly = !canEdit || !draft;
       $("save-migration").disabled = false;
       $("migration-save-note").textContent = draft ? "Changes execute together in a transaction." : "Executed SQL is read only.";
     }
-  }).catch(error => fail(error)).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
+  }).catch(error => { if (error) fail(error); }).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
   reload = async () => {
     if (creating) { $("sql").readOnly = !canEdit; return; }
     const migration = await api(endpoint);
     draft = migration.status === "DRAFT";
     $("migration-status").replaceChildren(badge(migration.status));
-    $("migration-version").textContent = migration.version ?? "--";
-    $("migration-executor").textContent = migration.executed_by || "--";
+    $("migration-version").textContent = migration.version ?? "—";
+    $("migration-executor").textContent = migration.executed_by || "—";
     $("migration-time").textContent = date(migration.executed_at);
     document.querySelector("h1").textContent = migration.name;
     if (!dirty) { $("sql").value = migration.sql_text; markSaved(); }
@@ -591,8 +633,30 @@ function migrationPage() {
     $("execute-migration").hidden = !canEdit || !draft;
     $("execute-migration").disabled = !draft || !canEdit || dirty || executing;
     $("migration-help").textContent = draft ? "Saving a draft does not execute SQL." : "Executed migrations are read only. Create a new draft for further changes.";
-    $("migration-error").hidden = !migration.error_summary;
-    $("migration-error").textContent = migration.error_summary || "";
+    
+    const errBox = $("migration-error");
+    if (errBox) {
+      errBox.hidden = !migration.error_summary;
+      const errText = $("migration-error-text");
+      if (errText) errText.textContent = migration.error_summary || "";
+    }
+
+    const cloneAction = () => {
+      sessionStorage.setItem("clone_migration", JSON.stringify({
+        name: migration.name + (migration.status === "FAILED" ? " (retry)" : " (copy)"),
+        sql: migration.sql_text,
+      }));
+      location.assign(databasePath + "/migrations/new");
+    };
+
+    for (const cloneId of ["clone-migration-btn"]) {
+      const btn = $(cloneId);
+      if (btn) {
+        btn.hidden = !canEdit || draft;
+        btn.onclick = cloneAction;
+      }
+    }
+
     if (migration.status === "RUNNING") notice("This migration is running or awaiting confirmation. Refresh its status before taking further action.", "", true);
   };
 }
@@ -636,31 +700,79 @@ async function groupsPage() {
     }, "danger"));
     return [node("strong", group.name), node("span", group.id, "mono"), controls];
   }, 3, "No groups yet. Create a group to assign database access.");
-  options("member-group", groups, item => item.name);
-  options("grant-group", groups, item => item.name);
+  options("member-group", groups, item => item.name, "Select a group…");
+  options("grant-group", groups, item => item.name, "Select a group…");
   const results = await Promise.allSettled([api("/api/v1/admin/users"), api("/api/v1/admin/databases")]);
-  if (results[0].status === "fulfilled") options("member-user", results[0].value, item => item.username);
+  if (results[0].status === "fulfilled") options("member-user", results[0].value, item => item.username, "Select a user…");
   else fail(results[0].reason);
-  if (results[1].status === "fulfilled") options("grant-database", results[1].value, item => item.label);
+  if (results[1].status === "fulfilled") options("grant-database", results[1].value, item => item.label, "Select a database…");
   else fail(results[1].reason);
 }
 
 function bindGroupForms() {
+  // Dynamic submit button label for membership form
+  const membershipForm = $("membership-form");
+  const membershipSubmit = $("membership-submit");
+  if (membershipForm && membershipSubmit) {
+    const updateMembershipLabel = () => {
+      const action = membershipForm.elements["action"]?.value;
+      membershipSubmit.textContent = action === "remove" ? "Remove from group" : "Add to group";
+      membershipSubmit.className = action === "remove"
+        ? "button danger full-width"
+        : "button success full-width";
+    };
+    membershipForm.querySelectorAll('input[name="action"]').forEach(radio => {
+      radio.addEventListener("change", updateMembershipLabel);
+    });
+    updateMembershipLabel();
+  }
+
+  // Dynamic submit button label for grant form
+  const grantForm = $("grant-form");
+  const grantSubmit = $("grant-submit");
+  if (grantForm && grantSubmit) {
+    const updateGrantLabel = () => {
+      const level = grantForm.elements["access_level"]?.value;
+      if (level === "REVOKE") {
+        grantSubmit.textContent = "Revoke database access";
+        grantSubmit.className = "button danger full-width";
+      } else if (level === "VIEW_EDIT") {
+        grantSubmit.textContent = "Grant read + migration access";
+        grantSubmit.className = "button primary full-width";
+      } else {
+        grantSubmit.textContent = "Grant read-only access";
+        grantSubmit.className = "button primary full-width";
+      }
+    };
+    grantForm.querySelectorAll('input[name="access_level"]').forEach(radio => {
+      radio.addEventListener("change", updateGrantLabel);
+    });
+    updateGrantLabel();
+  }
+
   submit("group-form", async data => {
     const id = data.get("id");
     await api("/api/v1/admin/groups" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: { name: data.get("name") } });
     $("group-dialog").close(); await reload(); notice("Group saved.", "success");
   });
   submit("membership-form", async data => {
+    const groupId = data.get("group_id");
+    const userId = data.get("user_id");
+    if (!groupId) throw new Error("Please select a group.");
+    if (!userId) throw new Error("Please select a user.");
     const remove = data.get("action") === "remove";
     if (remove && !await confirmAction("Remove group member?", "The user may lose database access provided by this group.", "Remove member")) return;
-    await api("/api/v1/admin/groups/" + encode(data.get("group_id")) + "/members/" + encode(data.get("user_id")), { method: remove ? "DELETE" : "PUT" });
+    await api("/api/v1/admin/groups/" + encode(groupId) + "/members/" + encode(userId), { method: remove ? "DELETE" : "PUT" });
     notice(remove ? "Member removed from group." : "Member added to group.", "success");
   });
   submit("grant-form", async data => {
+    const groupId = data.get("group_id");
+    const databaseId = data.get("database_id");
+    if (!groupId) throw new Error("Please select a group.");
+    if (!databaseId) throw new Error("Please select a database.");
     const revoke = data.get("access_level") === "REVOKE";
     if (revoke && !await confirmAction("Revoke database access?", "Members may lose access to this database unless another group provides it.", "Revoke access")) return;
-    await api("/api/v1/admin/groups/" + encode(data.get("group_id")) + "/databases/" + encode(data.get("database_id")) + "/access", { method: revoke ? "DELETE" : "PUT", ...(revoke ? {} : { data: { access_level: data.get("access_level") } }) });
+    await api("/api/v1/admin/groups/" + encode(groupId) + "/databases/" + encode(databaseId) + "/access", { method: revoke ? "DELETE" : "PUT", ...(revoke ? {} : { data: { access_level: data.get("access_level") } }) });
     notice(revoke ? "Database access revoked." : "Database access updated.", "success");
   });
 }
@@ -669,16 +781,33 @@ async function connectionsPage() {
   const connections = await api("/api/v1/admin/databases");
   rows("connection-list", connections, connection => {
     const controls = node("div", undefined, "toolbar-actions");
-    controls.append(action("Edit", () => openConnection(connection.id)), action("Test connection", async () => {
-      const result = await api("/api/v1/admin/databases/" + encode(connection.id) + "/test-connection", { method: "POST" });
-      notice(result.connected ? "Reader and migrator connections succeeded." : ("Connection test failed: " + (result.message || "Could not reach target database.")), result.connected ? "success" : "error");
-    }));
-    if (connection.is_enabled) controls.append(action("Disable", async () => {
-      if (!await confirmAction("Disable connection?", "Users will no longer be able to access " + connection.label + ". Migration history is preserved.", "Disable connection")) return;
-      await api("/api/v1/admin/databases/" + encode(connection.id), { method: "DELETE" });
-      await reload(); notice("Connection disabled.", "success");
-    }, "danger"));
-    return [node("strong", connection.label), node("span", connection.database_name, "mono"), node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge"), controls];
+    controls.append(
+      action("Edit", () => openConnection(connection.id)),
+      action("Test", async () => {
+        const result = await api("/api/v1/admin/databases/" + encode(connection.id) + "/test-connection", { method: "POST" });
+        notice(
+          result.connected
+            ? "Reader and migrator connections succeeded."
+            : ("Connection test failed: " + (result.message || "Could not reach target database.")),
+          result.connected ? "success" : "error"
+        );
+      })
+    );
+    if (connection.is_enabled) {
+      controls.append(action("Disable", async () => {
+        if (!await confirmAction("Disable connection?", "Users will no longer be able to access " + connection.label + ". Migration history is preserved.", "Disable connection")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id), { method: "DELETE" });
+        await reload(); notice("Connection disabled.", "success");
+      }, "danger"));
+    } else {
+      controls.append(action("Re-enable", async () => {
+        if (!await confirmAction("Re-enable connection?", "Users with group access will be able to connect to " + connection.label + " again.", "Re-enable")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id), { method: "PATCH", data: { is_enabled: true } });
+        await reload(); notice("Connection re-enabled.", "success");
+      }, "success"));
+    }
+    const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
+    return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
   }, 4, "No connections yet. Add a PostgreSQL connection to get started.");
 }
 

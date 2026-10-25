@@ -191,7 +191,7 @@ func buildDSN(db models.ManagedDatabase, username, password string) string {
 	}
 	dbName := db.DatabaseName
 	if dbName == "" {
-		dbName = "inventory_db"
+		dbName = "target_db"
 	}
 	ssl := db.SSLMode
 	if ssl == "" {

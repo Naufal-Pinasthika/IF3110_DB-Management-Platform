@@ -232,7 +232,7 @@ func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, grou
 		return api.GroupMember{}, err
 	}
 	if groupID == "" || userID == "" {
-		return api.GroupMember{}, apperror.New("group id and user id required")
+		return api.GroupMember{}, fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
 	}
 	ug, err := s.Repository.AddGroupMember(ctx, groupID, userID, now)
 	if err != nil {
@@ -247,7 +247,7 @@ func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, g
 		return err
 	}
 	if groupID == "" || userID == "" {
-		return apperror.New("group id and user id required")
+		return fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.RemoveGroupMember(ctx, groupID, userID, now)
 }
@@ -291,7 +291,7 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		input.Port = 5432
 	}
 	if strings.TrimSpace(input.DatabaseName) == "" {
-		input.DatabaseName = "inventory_db"
+		input.DatabaseName = "target_db"
 	}
 	if strings.TrimSpace(input.SSLMode) == "" {
 		input.SSLMode = "disable"
@@ -480,10 +480,10 @@ func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Princip
 		return api.GroupDatabaseAccess{}, err
 	}
 	if groupID == "" || databaseID == "" {
-		return api.GroupDatabaseAccess{}, apperror.New("group id and database id required")
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
 	if input.AccessLevel != api.AccessViewOnly && input.AccessLevel != api.AccessViewEdit {
-		return api.GroupDatabaseAccess{}, apperror.New("access level must be VIEW_ONLY or VIEW_EDIT")
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: access level must be VIEW_ONLY or VIEW_EDIT", apperror.ErrInvalidInput)
 	}
 
 	grant := models.GroupAccess{
@@ -510,7 +510,7 @@ func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Prin
 		return err
 	}
 	if groupID == "" || databaseID == "" {
-		return apperror.New("group id and database id required")
+		return fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
 }
