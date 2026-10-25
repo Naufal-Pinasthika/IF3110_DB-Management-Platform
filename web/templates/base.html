@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>{{.Title}} · Database Platform</title>
+<title>{{.Title}} - Database Platform</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <script src="/static/app.js" type="module">
@@ -139,87 +139,20 @@
 </section>
 <section class="connection-section" aria-labelledby="connection-credentials-title"><h3 id="connection-credentials-title">Credentials</h3>
 <p class="helper-text">Platform permissions control allowed actions. PostgreSQL roles control what those credentials can do; use a least-privilege reader role.</p>
-<h4>Reader</h4><div class="form-columns"><div><label for="reader-username">Username</label><input id="reader-username" name="reader_username" autocomplete="off" required></div><div class="secret-field"><label for="reader-password">Password</label><div id="reader-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-reader-password">Change password</button></div><input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-reader-password" hidden>Keep stored password</button></div></div>
+<h4>Reader</h4><div class="form-columns"><div><label for="reader-username">Username</label><input id="reader-username" name="reader_username" autocomplete="off" required></div><div class="secret-field"><label for="reader-password">Password</label><div id="reader-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-reader-password">Change password</button></div><input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-reader-password" hidden>Keep stored password</button><button type="button" class="button quiet small" data-password-target="reader-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
 <div class="credential-heading"><h4>Migrator</h4><label class="checkbox-label"><input type="checkbox" id="same-credentials">Use reader credentials</label></div>
 <p class="helper-text" id="shared-credential-note" hidden>The migrator will use the reader's PostgreSQL role and password. That role needs migration privileges; its database privileges do not become read only.</p>
-<div class="form-columns" id="migrator-fields"><div><label for="migrator-username">Username</label><input id="migrator-username" name="migrator_username" autocomplete="off" required></div><div class="secret-field"><label for="migrator-password">Password</label><div id="migrator-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-migrator-password">Change password</button></div><input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-migrator-password" hidden>Keep stored password</button></div></div>
+<div class="form-columns" id="migrator-fields"><div><label for="migrator-username">Username</label><input id="migrator-username" name="migrator_username" autocomplete="off" required></div><div class="secret-field"><label for="migrator-password">Password</label><div id="migrator-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-migrator-password">Change password</button></div><input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-migrator-password" hidden>Keep stored password</button><button type="button" class="button quiet small" data-password-target="migrator-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
 </section>
 <section class="connection-section" aria-labelledby="connection-advanced-title"><h3 id="connection-advanced-title">Advanced settings</h3>
-<label for="connection-ssl">SSL mode</label><select id="connection-ssl" name="ssl_mode" aria-describedby="ssl-description"><option value="verify-full" selected>Verify full</option><option value="verify-ca">Verify CA</option><option value="require">Require</option><option value="disable">Disable — trusted local networks only</option></select>
+<label for="connection-ssl">SSL mode</label><select id="connection-ssl" name="ssl_mode" aria-describedby="ssl-description"><option value="verify-full" selected>Verify full</option><option value="verify-ca">Verify CA</option><option value="require">Require</option><option value="disable">Disable -- trusted local networks only</option></select>
 <p class="helper-text" id="ssl-description">Verify full encrypts traffic and verifies the server's identity. The server must trust the database certificate.</p>
 <label class="checkbox-label" id="connection-enabled-field" hidden><input type="checkbox" name="is_enabled">Connection enabled</label>
 <p class="helper-text" id="connection-impact" hidden>Changing the host, credentials, or enabled status affects future database operations. Test these settings before saving.</p>
 </section>
 </div>
-<<<<<<< Updated upstream
 <div class="connection-footer"><div class="form-message" role="alert" hidden></div><p id="connection-test-result" class="test-result" role="status" aria-live="polite" hidden></p><div class="form-actions"><button class="button" type="button" id="test-connection">Test connection</button><div class="toolbar-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save connection</button></div></div></div>
 </form></dialog>
-=======
-<div>
-<label for="connection-port">Port</label>
-<input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required>
-</div>
-</div>
-<div class="form-columns">
-<div>
-<label for="connection-database">Database name</label>
-<input id="connection-database" name="database_name" required placeholder="target_db" value="target_db">
-</div>
-<div>
-<label for="connection-ssl">SSL mode</label>
-<select id="connection-ssl" name="ssl_mode">
-<option value="disable" selected>Disable</option>
-<option value="require">Require</option>
-<option value="verify-full">Verify full</option>
-<option value="verify-ca">Verify CA</option>
-</select>
-</div>
-</div>
-<fieldset>
-<legend>Reader credentials</legend>
-<p class="helper-text">Used for schema browsing and read-only queries.</p>
-<div class="form-columns">
-<div>
-<label for="reader-username">Username</label>
-<input id="reader-username" name="reader_username" autocomplete="off" required placeholder="admin" value="admin">
-</div>
-<div>
-<label for="reader-password">Password</label>
-<div class="password-control"><input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required placeholder="root" value="root"><button type="button" class="password-toggle" data-password-target="reader-password" aria-label="Show reader password" aria-pressed="false">Show</button></div>
-</div>
-</div>
-</fieldset>
-<fieldset id="migrator-fieldset">
-<div class="fieldset-header">
-<legend>Migrator credentials</legend>
-<label class="checkbox-label" style="margin: 0; font-weight: normal; font-size: 0.875rem;">
-<input type="checkbox" id="same-credentials" checked> Same as Reader
-</label>
-</div>
-<p class="helper-text">Used to execute authorized migrations.</p>
-<div class="form-columns" id="migrator-fields" hidden>
-<div>
-<label for="migrator-username">Username</label>
-<input id="migrator-username" name="migrator_username" autocomplete="off" placeholder="admin" value="admin">
-</div>
-<div>
-<label for="migrator-password">Password</label>
-<div class="password-control"><input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" placeholder="root" value="root"><button type="button" class="password-toggle" data-password-target="migrator-password" aria-label="Show migrator password" aria-pressed="false">Show</button></div>
-</div>
-</div>
-</fieldset>
-<p class="helper-text" id="connection-password-help">Passwords are never displayed after saving.</p>
-<label class="checkbox-label" id="connection-enabled-field" hidden>
-<input type="checkbox" name="is_enabled">Connection enabled</label>
-<div class="form-message" role="alert" hidden>
-</div>
-<div class="form-actions">
-<button class="button" type="button" data-close>Cancel</button>
-<button class="button primary" type="submit">Save connection</button>
-</div>
-</form>
-</dialog>
->>>>>>> Stashed changes
 </body>
 </html>{{end}}
 

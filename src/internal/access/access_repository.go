@@ -57,6 +57,18 @@ func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID st
 	return databases, nil
 }
 
+// lists every enabled target for platform administrators.
+func (r *PostgresRepository) ListEnabledDatabases(ctx context.Context) ([]models.ManagedDatabase, error) {
+	var databases []models.ManagedDatabase
+	err := r.DB.WithContext(ctx).
+		Model(&models.ManagedDatabase{}).
+		Select("id, label, database_name, is_enabled").
+		Where("is_enabled = ?", true).
+		Order("label, id").
+		Find(&databases).Error
+	return databases, err
+}
+
 // loads safe target metadata (public fields only).
 func (r *PostgresRepository) GetDatabaseSummary(ctx context.Context, databaseID string) (models.ManagedDatabase, error) {
 	var db models.ManagedDatabase

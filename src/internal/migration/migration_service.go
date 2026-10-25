@@ -23,11 +23,9 @@ type Repository interface {
 	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error)
 }
 
-
 type AccessChecker interface {
 	RequireDatabase(ctx context.Context, actor auth.Principal, databaseID string, level api.AccessLevel) error
 }
-
 
 type SQLRunner interface {
 	Execute(ctx context.Context, databaseID, sqlText string) error
@@ -37,25 +35,49 @@ type SQLExplainer interface {
 	ExplainSQL(ctx context.Context, databaseID, sqlText string, analyze bool) (api.ExplainResult, error)
 }
 
+type SchemaComparator interface {
+	Compare(ctx context.Context, databaseID, desiredDDL string) (api.SchemaDiffResult, error)
+}
 
 type Service struct {
 	Repository Repository
 	Access     AccessChecker
 	Runner     SQLRunner
 	Explainer  SQLExplainer
+	SchemaDiff SchemaComparator
+}
+
+// CompareSchema checks a complete desired DDL description against the target.
+func (s *Service) CompareSchema(ctx context.Context, actor auth.Principal, databaseID string, input api.SchemaDiffRequest) (api.SchemaDiffResult, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.SchemaDiffResult{}, err
+	}
+	if s.SchemaDiff == nil {
+		return api.SchemaDiffResult{}, fmt.Errorf("%w: schema comparison is unavailable", apperror.ErrInternal)
+	}
+	return s.SchemaDiff.Compare(ctx, databaseID, input.DesiredDDL)
 }
 
 // ExplainMigration previews a draft without committing any statement effects.
 func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, analyze bool) (api.ExplainResult, error) {
-	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil { return api.ExplainResult{}, err }
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.ExplainResult{}, err
+	}
 	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
-	if err != nil { return api.ExplainResult{}, err }
-	if m.Status != models.MigrationDraft { return api.ExplainResult{}, apperror.ErrConflict }
-	if err := validateDMLSQL(m.SQLText); err != nil { return api.ExplainResult{}, err }
-	if s.Explainer == nil { return api.ExplainResult{}, fmt.Errorf("%w: migration plan analysis is unavailable", apperror.ErrInternal) }
+	if err != nil {
+		return api.ExplainResult{}, err
+	}
+	if m.Status != models.MigrationDraft {
+		return api.ExplainResult{}, apperror.ErrConflict
+	}
+	if err := validateDMLSQL(m.SQLText); err != nil {
+		return api.ExplainResult{}, err
+	}
+	if s.Explainer == nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: migration plan analysis is unavailable", apperror.ErrInternal)
+	}
 	return s.Explainer.ExplainSQL(ctx, databaseID, m.SQLText, analyze)
 }
-
 
 // ListMigrations returns linear history and draft summaries.
 func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error) {
@@ -83,7 +105,6 @@ func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, data
 	return summaries, nil
 }
 
-
 // GetMigration returns SQL and audit details for a visible migration.
 func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
@@ -110,7 +131,6 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 		ErrorSummary: m.ErrorSummary,
 	}, nil
 }
-
 
 // CreateMigration creates a SQL draft for an editor.
 func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, databaseID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error) {
@@ -145,7 +165,6 @@ func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
-
 // UpdateMigration changes SQL before execution.
 func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.UpdateMigrationRequest, now time.Time) (api.MigrationUpdated, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
@@ -167,7 +186,6 @@ func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, dat
 		Version: updated.Version,
 	}, nil
 }
-
 
 // ExecuteMigration coordinates a target transaction and persistent history.
 func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {

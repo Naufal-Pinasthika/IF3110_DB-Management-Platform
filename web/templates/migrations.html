@@ -71,6 +71,18 @@
 <pre class="migration-error-code"><code id="migration-error-text"></code></pre>
 </div>
 </div>
+{{if eq .Kind "migration-new"}}<section class="panel schema-diff-panel" data-edit-only hidden aria-labelledby="schema-diff-title">
+<div class="panel-toolbar"><div><h2 id="schema-diff-title">Generate from schema</h2><p>Describe the complete desired schema across all user schemas with CREATE SCHEMA, CREATE TABLE, and CREATE INDEX statements. Unlisted supported objects will be removed; generated SQL may contain DROP statements.</p></div></div>
+<label for="desired-schema-ddl">Desired schema DDL</label>
+<textarea id="desired-schema-ddl" class="sql-editor schema-ddl-editor" spellcheck="false" placeholder="CREATE TABLE public.customers (
+  id bigint PRIMARY KEY,
+  email text NOT NULL
+);
+
+CREATE INDEX customers_email_idx ON public.customers (email);"></textarea>
+<div class="editor-footer"><span id="schema-diff-status" class="muted" role="status">No comparison run</span><button type="button" class="button primary" id="compare-schema">Compare schemas</button></div>
+<div id="schema-diff-results" class="schema-diff-results" aria-live="polite"></div>
+</section>{{end}}
 <form method="post" id="migration-form" class="panel">
 <div class="panel-toolbar">
 <div>
@@ -91,8 +103,8 @@
 <div class="editor-footer">
 <span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>
 <div class="toolbar-actions">
-<button type="button" class="button small" id="explain-migration" data-edit-only hidden disabled>Analyze plan</button>
 <button class="button primary" type="submit" id="save-migration" data-edit-only hidden>Save draft</button>
+<button type="button" class="button small" id="explain-migration" data-edit-only hidden disabled>Analyze plan</button>
 <button class="button danger" type="button" id="execute-migration" data-edit-only hidden {{if eq .Kind "migration-new"}}disabled{{end}}>Execute migration</button>
 </div>
 </div>

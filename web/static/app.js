@@ -312,7 +312,6 @@ function bindDialogs() {
     else if (button.dataset.open === "group-dialog") openGroup();
     else openConnection().catch(error => fail(error));
   }));
-<<<<<<< Updated upstream
   async function dismiss(dialog) {
     const form = dialog.querySelector("form");
     if (form?.getAttribute("aria-busy") === "true" || dialog.dataset.dismissing) return;
@@ -322,21 +321,17 @@ function bindDialogs() {
       dialog.close();
     } finally { delete dialog.dataset.dismissing; }
   }
+  
   document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => dismiss(button.closest("dialog"))));
   document.querySelectorAll("dialog:not(#confirm-dialog)").forEach(dialog => {
     dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(dialog); });
     dialog.addEventListener("close", () => {
-      dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
-      delete dialog.querySelector("form").dataset.saved;
+      dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
+      resetPasswordToggles(dialog);
+      const form = dialog.querySelector("form");
+      if (form) delete form.dataset.saved;
     });
   });
-=======
-  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => {
-    const dialog = button.closest("dialog");
-    dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
-    resetPasswordToggles(dialog);
-    dialog.close();
-  }));
   document.querySelectorAll("[data-password-target]").forEach(button => button.addEventListener("click", () => {
     const input = $(button.dataset.passwordTarget);
     if (!input) return;
@@ -346,11 +341,6 @@ function bindDialogs() {
     button.setAttribute("aria-label", (visible ? "Hide" : "Show") + " password");
     button.setAttribute("aria-pressed", String(visible));
   }));
-  document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("close", () => {
-    dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
-    resetPasswordToggles(dialog);
-  }));
->>>>>>> Stashed changes
 }
 
 async function loadDatabaseContext() {
@@ -378,7 +368,7 @@ function permissionCell(level) {
   const access = accessCapabilities(level);
   const cell = node("div");
   cell.append(node("span", access.label, "permission-name"));
-  cell.append(node("span", level === "VIEW_EDIT" ? "SELECT · create & execute migrations" : level === "VIEW_ONLY" ? "SELECT · schema · history" : "Permissions not verified", "permission-detail"));
+  cell.append(node("span", level === "VIEW_EDIT" ? "SELECT - create & execute migrations" : level === "VIEW_ONLY" ? "SELECT - schema - history" : "Permissions not verified", "permission-detail"));
   cell.title = access.detail;
   return cell;
 }
@@ -392,7 +382,7 @@ async function databasesPage() {
     const emptyMessage = query
       ? "No databases match your filter."
       : currentUser?.is_platform_admin
-      ? "No databases registered yet. Click 'Add database' to connect your first PostgreSQL database."
+      ? "No enabled databases available. Add a database connection in Administration to get started."
       : "No databases are assigned to your groups. Ask an administrator for access.";
     rows("database-list", visible, item => [
       link(item.label, "/databases/" + encode(item.id)),
@@ -598,15 +588,15 @@ function queryPage() {
     try {
       const result = await api(databaseAPI + "/queries", { method: "POST", data: { sql: data.get("sql"), max_rows: Number(data.get("max_rows")) } });
       dataTable("query-results", result.columns, result.rows);
-      $("query-summary").textContent = result.row_count + (result.row_count === 1 ? " row" : " rows") + " · " + ((performance.now() - started) / 1000).toFixed(2) + "s" + (result.truncated ? " · Row limit reached" : "");
+      $("query-summary").textContent = result.row_count + (result.row_count === 1 ? " row" : " rows") + " - " + ((performance.now() - started) / 1000).toFixed(2) + "s" + (result.truncated ? " - Row limit reached" : "");
       try {
         const plan = await api(databaseAPI + "/queries/explain", { method: "POST", data: { sql: data.get("sql"), analyze: true } });
         renderPlans("query-plan", plan);
-        $("query-plan-summary").textContent = "EXPLAIN ANALYZE · rolled back · actual timings and rows";
+        $("query-plan-summary").textContent = "EXPLAIN ANALYZE - rolled back - actual timings and rows";
       } catch (error) { $("query-plan").replaceChildren(node("p", error.message, "inline-state")); $("query-plan-summary").textContent = "Plan unavailable"; }
       $("query-results").focus();
     } catch (error) {
-      $("query-summary").textContent = "Query failed · " + ((performance.now() - started) / 1000).toFixed(2) + "s";
+      $("query-summary").textContent = "Query failed - " + ((performance.now() - started) / 1000).toFixed(2) + "s";
       throw error;
     } finally { $("query-results").removeAttribute("aria-busy"); }
   });
@@ -622,7 +612,7 @@ function renderPlans(targetId, result) {
   const draw = (plan, depth, container) => {
     const card = node("div", undefined, "plan-node");
     card.style.setProperty("--plan-depth", Math.min(depth, 8));
-    const title = (plan.node_type || "Plan") + (plan.relation_name ? " · " + (plan.schema ? plan.schema + "." : "") + plan.relation_name : "") + (plan.index_name ? " · " + plan.index_name : "");
+    const title = (plan.node_type || "Plan") + (plan.relation_name ? " - " + (plan.schema ? plan.schema + "." : "") + plan.relation_name : "") + (plan.index_name ? " - " + plan.index_name : "");
     card.append(node("strong", title));
     const metrics = node("div", undefined, "plan-metrics");
     if (plan.join_type) metrics.append(metric("Join", plan.join_type));
@@ -644,7 +634,7 @@ function renderPlans(targetId, result) {
     const summary = [];
     if (plan.planning_time != null) summary.push("Planning " + Number(plan.planning_time).toFixed(3) + " ms");
     if (plan.execution_time != null) summary.push("Execution " + Number(plan.execution_time).toFixed(3) + " ms");
-    if (summary.length) section.append(node("p", summary.join(" · "), "plan-total"));
+    if (summary.length) section.append(node("p", summary.join(" - "), "plan-total"));
     target.append(section);
   }
   if (!target.children.length) target.append(node("p", result.raw_text || "The database did not produce an execution plan for these statements.", "inline-state"));
@@ -678,6 +668,35 @@ function migrationPage() {
         markSaved();
       } catch {}
     }
+  }
+
+  if (creating && $("compare-schema")) {
+    $("compare-schema").addEventListener("click", () => busy($("compare-schema"), async () => {
+      const desiredDDL = $("desired-schema-ddl").value;
+      $("schema-diff-status").textContent = "Comparing schemas…";
+      $("schema-diff-results").replaceChildren();
+      const result = await api(databaseAPI + "/migrations/schema-diff", {
+        method: "POST",
+        data: { desired_ddl: desiredDDL },
+      });
+      renderSchemaDiff(result);
+      if (!result.has_changes) {
+        $("schema-diff-status").textContent = "No supported schema changes found";
+        return;
+      }
+      const includesDrops = result.changes.some(change => change.action === "removed");
+      $("schema-diff-status").textContent = result.changes.length + (result.changes.length === 1 ? " change" : " changes") +
+        (includesDrops ? " - candidate includes DROP statements" : "") + " - generated SQL is an editable candidate";
+      if ($("sql").value.trim() && $("sql").value !== result.generated_sql) {
+        if (!await confirmAction("Replace migration SQL?", "The generated candidate will replace the SQL currently in the editor.", "Replace SQL")) return;
+      }
+      $("sql").value = result.generated_sql;
+      $("sql").dispatchEvent(new Event("input", { bubbles: true }));
+      if (!$("migration-name").value.trim()) $("migration-name").value = "Generated schema migration";
+    }).catch(error => {
+      $("schema-diff-status").textContent = "Schema comparison failed";
+      fail(error);
+    }));
   }
 
   $("sql").addEventListener("input", () => {
@@ -738,7 +757,7 @@ function migrationPage() {
     const result = await api(endpoint + "/explain", { method: "POST", data: { analyze: true } });
     renderPlans("migration-plan", result);
     $("migration-plan-surface").hidden = false;
-    $("migration-plan-summary").textContent = "Rolled back preview · " + ((performance.now() - started) / 1000).toFixed(2) + "s · actual timings are estimates for this run";
+    $("migration-plan-summary").textContent = "Rolled back preview - " + ((performance.now() - started) / 1000).toFixed(2) + "s - actual timings are estimates for this run";
   }).catch(error => fail(error)));
   reload = async () => {
     if (creating) {
@@ -749,8 +768,8 @@ function migrationPage() {
     const migration = await api(endpoint);
     draft = migration.status === "DRAFT";
     $("migration-status").replaceChildren(badge(migration.status));
-    $("migration-version").textContent = migration.version ?? "—";
-    $("migration-executor").textContent = migration.executed_by || "—";
+    $("migration-version").textContent = migration.version ?? "--";
+    $("migration-executor").textContent = migration.executed_by || "--";
     $("migration-time").textContent = date(migration.executed_at);
     document.querySelector("h1").textContent = migration.name;
     if (!dirty) { $("sql").value = migration.sql_text; markSaved(); }
@@ -789,6 +808,36 @@ function migrationPage() {
 
     if (migration.status === "RUNNING") notice("This migration is running or awaiting confirmation. Refresh its status before taking further action.", "", true);
   };
+}
+
+function renderSchemaDiff(result) {
+  const target = $("schema-diff-results");
+  target.replaceChildren();
+  if (result.excluded_object_count > 0) {
+    target.append(node("p", result.excluded_object_count + " existing views, sequences, partitions, or other unsupported relations are outside this diff and will not be changed.", "helper-text"));
+  }
+  if (!result.has_changes) {
+      target.append(node("p", "Supported schema objects match. No migration is needed.", "inline-state"));
+    return;
+  }
+  const titles = { added: "Added", modified: "Modified", removed: "Removed" };
+  for (const actionName of ["added", "modified", "removed"]) {
+    const changes = (result.changes || []).filter(change => change.action === actionName);
+    if (!changes.length) continue;
+    const group = node("section", undefined, "schema-diff-group");
+    group.append(node("h3", titles[actionName] + " - " + changes.length));
+    for (const change of changes) {
+      const item = node("div", undefined, "schema-diff-item " + actionName);
+      const objectName = change.kind === "schema"
+        ? change.schema
+        : [change.schema, change.table, change.name !== change.table ? change.name : ""].filter(Boolean).join(".");
+      item.append(node("strong", (change.kind || "object") + " - " + objectName));
+      if (change.before) item.append(node("code", "Current: " + change.before));
+      if (change.after) item.append(node("code", "Desired: " + change.after));
+      group.append(item);
+    }
+    target.append(group);
+  }
 }
 
 async function usersPage() {
@@ -877,7 +926,7 @@ function renderGroup() {
   const members = groupData.users.filter(user => memberships.some(member => member.user_id === user.id));
   const grants = groupData.grants.filter(grant => grant.group_id === group.id);
   $("selected-group-name").textContent = group.name;
-  $("group-summary").textContent = `${members.length} member${members.length === 1 ? "" : "s"} · ${grants.length} database${grants.length === 1 ? "" : "s"}`;
+  $("group-summary").textContent = `${members.length} member${members.length === 1 ? "" : "s"} - ${grants.length} database${grants.length === 1 ? "" : "s"}`;
   $("group-actions").replaceChildren(action("Rename", () => openGroup(group)), action("Delete group", async () => {
     if (!await confirmAction("Delete " + group.name + "?", "This removes the group, its memberships, and database grants. Access provided by other groups or administrator roles remains. Affected sessions will refresh.", "Delete group")) return;
     await api("/api/v1/admin/groups/" + encode(group.id), {method:"DELETE"});
@@ -998,16 +1047,12 @@ async function connectionsPage() {
         if (!await confirmAction("Re-enable connection?", "Users with group access will be able to connect to " + connection.label + " again.", "Re-enable")) return;
         await api("/api/v1/admin/databases/" + encode(connection.id), { method: "PATCH", data: { is_enabled: true } });
         await reload(); notice("Connection re-enabled.", "success");
-<<<<<<< Updated upstream
       }, "primary"));
-=======
-      }, "success"));
       controls.append(action("Delete", async () => {
         if (!await confirmAction("Delete disabled connection?", "Permanently remove " + connection.label + ". Existing migration history is preserved and prevents deletion.", "Delete connection")) return;
         await api("/api/v1/admin/databases/" + encode(connection.id) + "/delete", { method: "DELETE" });
         await reload(); notice("Connection deleted.", "success");
       }, "danger"));
->>>>>>> Stashed changes
     }
     const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
     return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
@@ -1064,29 +1109,10 @@ function bindConnectionForm() {
     });
   };
   submit("connection-form", async (data, form) => {
-<<<<<<< Updated upstream
     const id = data.get("id"), payload = connectionPayload(data);
     const label = payload.label;
     await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:payload});
     $("connection-dialog").close(); await reload(); notice("Connection saved. " + label + " is ready.", "success");
-=======
-    const id = data.get("id");
-    const same = $("same-credentials")?.checked;
-    const payload = {};
-    for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
-      if (id && key.endsWith("_password") && !data.get(key)) continue;
-      payload[key] = data.get(key);
-    }
-    if (same) {
-      payload.migrator_username = payload.reader_username;
-      payload.migrator_password = payload.reader_password;
-    }
-    payload.port = Number(data.get("port")) || 5432;
-    if (id) payload.is_enabled = data.has("is_enabled");
-    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: payload });
-    form.querySelectorAll('input[name$="_password"]').forEach(input => { input.value = ""; input.type = "password"; });
-    $("connection-dialog").close(); await reload(); notice("Connection saved.", "success");
->>>>>>> Stashed changes
   });
 }
 

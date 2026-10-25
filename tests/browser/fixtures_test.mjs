@@ -140,7 +140,7 @@ try {
   assert.equal(await page.inputValue("#sql"), "SELECT 42 AS answer;");
   queryUnavailable = false;
   await page.click('#query-form [type="submit"]');
-  await page.locator("#query-summary").filter({ hasText: /^1 row ·/ }).waitFor();
+  await page.locator("#query-summary").filter({ hasText: /^1 row -/ }).waitFor();
   assert.match(await page.locator("#query-results").textContent(), /42/);
   const query = requests.find(request => request.path.endsWith("/queries"));
   assert.deepEqual(query.data, { sql: "SELECT 42 AS answer;", max_rows: 50 });

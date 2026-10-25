@@ -109,11 +109,13 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 			Targets: targetStore,
 			Timeout: queryTimeout,
 		}
+		schemaDiffer := &migration.SchemaDiffer{Targets: targetStore, Timeout: queryTimeout}
 		migrationService := &migration.Service{
 			Repository: migrationRepo,
 			Access:     accessService,
 			Runner:     migrationRunner,
 			Explainer:  explorerRepo,
+			SchemaDiff: schemaDiffer,
 		}
 		migrationHandler := &migration.Handler{Service: migrationService}
 
@@ -160,6 +162,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.UpdateMigration = http.HandlerFunc(migrationHandler.UpdateMigration)
 		routeHandlers.ExecuteMigration = http.HandlerFunc(migrationHandler.ExecuteMigration)
 		routeHandlers.ExplainMigration = http.HandlerFunc(migrationHandler.ExplainMigration)
+		routeHandlers.CompareSchema = http.HandlerFunc(migrationHandler.CompareSchema)
 
 		// Middlewares
 		routeMiddleware.PlatformAdmin = accessService.PlatformAdminMiddleware

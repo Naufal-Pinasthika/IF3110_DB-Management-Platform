@@ -12,12 +12,9 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
 
-
 type Handler struct {
 	Service *Service
 }
-
-
 
 // ListMigrations handles GET /api/v1/databases/{dbId}/migrations.
 func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +31,6 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, summaries)
 }
 
-
 // GetMigration handles GET /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
@@ -49,7 +45,6 @@ func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
-
 
 // CreateMigration handles POST /api/v1/databases/{dbId}/migrations.
 func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
@@ -68,10 +63,9 @@ func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	
+
 	api.WriteDataResponse(w, http.StatusCreated, created)
 }
-
 
 // UpdateMigration handles PATCH /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +89,6 @@ func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, updated)
 }
 
-
 // ExecuteMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute.
 func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
@@ -115,13 +108,37 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	dbID, migrationID := r.PathValue("dbId"), r.PathValue("migrationId")
 	principal, _ := auth.PrincipalFromContext(r.Context())
-	var req struct { Analyze bool `json:"analyze"` }
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024)).Decode(&req); err != nil { api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body"); return }
+	var req struct {
+		Analyze bool `json:"analyze"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024)).Decode(&req); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+		return
+	}
 	result, err := h.Service.ExplainMigration(r.Context(), principal, dbID, migrationID, req.Analyze)
-	if err != nil { writeError(w, err); return }
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	api.WriteDataResponse(w, http.StatusOK, result)
 }
 
+// CompareSchema handles POST /api/v1/databases/{dbId}/migrations/schema-diff.
+func (h *Handler) CompareSchema(w http.ResponseWriter, r *http.Request) {
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
+	var req api.SchemaDiffRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid schema DDL request")
+		return
+	}
+	result, err := h.Service.CompareSchema(r.Context(), principal, r.PathValue("dbId"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.WriteDataResponse(w, http.StatusOK, result)
+}
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {
