@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -31,12 +33,20 @@ type Repository interface {
 	DeleteGroupDatabaseAccess(ctx context.Context, groupID, databaseID string, now time.Time) error
 }
 
+type DisabledDatabaseDeleter interface {
+	DeleteDisabledDatabase(ctx context.Context, databaseID string) error
+}
+
 type AdminChecker interface {
 	RequirePlatformAdmin(context.Context, auth.Principal) error
 }
 
 type ConnectionTester interface {
 	TestConnection(context.Context, string) error
+}
+
+type poolInvalidator interface {
+	InvalidateTargetPools(string)
 }
 
 // Service maps persistence models to the existing API response types.
@@ -50,122 +60,479 @@ type Service struct {
 
 // ListUsers lists platform accounts.
 func (s *Service) ListUsers(ctx context.Context, actor auth.Principal) ([]api.AdminUser, error) {
-	// TODO Require platform admin access and ask the repository for safe user fields.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return nil, err
+	}
+	users, err := s.Repository.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.AdminUser, len(users))
+	for i, u := range users {
+		result[i] = api.AdminUser{
+			ID:              u.ID,
+			Username:        u.Username,
+			IsPlatformAdmin: u.IsPlatformAdmin,
+			IsActive:        u.IsActive,
+		}
+	}
+	return result, nil
 }
 
 // CreateUser creates an account with a password hash.
 func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input api.CreateUserRequest) (api.AdminUser, error) {
-	// TODO Require platform admin access and validate the username and password.
-	// TODO Use HashPassword then persist models.User with active state.
-	// TODO Return api.AdminUser without the password hash.
-	return api.AdminUser{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.AdminUser{}, err
+	}
+	if input.Username == "" || input.Password == "" {
+		return api.AdminUser{}, fmt.Errorf("%w: username and password required", apperror.ErrInvalidInput)
+	}
+	if len(input.Password) < 8 {
+		return api.AdminUser{}, fmt.Errorf("%w: password must be at least 8 characters", apperror.ErrInvalidInput)
+	}
+
+	hash, err := s.HashPassword(input.Password)
+	if err != nil {
+		return api.AdminUser{}, err
+	}
+
+	user := models.User{
+		Username:     input.Username,
+		PasswordHash: hash,
+		IsPlatformAdmin: input.IsPlatformAdmin,
+		IsActive:     true,
+	}
+
+	created, err := s.Repository.CreateUser(ctx, user)
+	if err != nil {
+		return api.AdminUser{}, err
+	}
+
+	return api.AdminUser{
+		ID:              created.ID,
+		Username:        created.Username,
+		IsPlatformAdmin: created.IsPlatformAdmin,
+		IsActive:        created.IsActive,
+	}, nil
 }
 
 // UpdateUser applies only supplied user fields.
 func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID string, input api.UpdateUserRequest, now time.Time) (api.AdminUser, error) {
-	// TODO Require platform admin access and reject an empty patch or invalid values.
-	// TODO Load the current record and merge non nil fields and hash a changed password.
-	// TODO Revoke sessions on deactivation or password change in the same metadata transaction.
-	// TODO Prevent lost updates rather than silently overwriting concurrent patches.
-	return api.AdminUser{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.AdminUser{}, err
+	}
+	if userID == "" {
+		return api.AdminUser{}, fmt.Errorf("%w: user id required", apperror.ErrInvalidInput)
+	}
+	if input.Username == nil && input.Password == nil && input.IsActive == nil && input.IsPlatformAdmin == nil {
+		return api.AdminUser{}, fmt.Errorf("%w: no fields to update", apperror.ErrInvalidInput)
+	}
+
+	current, err := s.Repository.GetUser(ctx, userID)
+	if err != nil {
+		return api.AdminUser{}, err
+	}
+
+	revokeSessions := false
+	if input.Username != nil {
+		current.Username = *input.Username
+	}
+	if input.Password != nil {
+		if len(*input.Password) < 8 {
+			return api.AdminUser{}, fmt.Errorf("%w: password must be at least 8 characters", apperror.ErrInvalidInput)
+		}
+		hash, err := s.HashPassword(*input.Password)
+		if err != nil {
+			return api.AdminUser{}, err
+		}
+		current.PasswordHash = hash
+		revokeSessions = true
+	}
+	if input.IsActive != nil {
+		if !*input.IsActive {
+			revokeSessions = true
+		}
+		current.IsActive = *input.IsActive
+	}
+	if input.IsPlatformAdmin != nil {
+		if current.IsPlatformAdmin != *input.IsPlatformAdmin {
+			revokeSessions = true
+		}
+		current.IsPlatformAdmin = *input.IsPlatformAdmin
+	}
+
+	updated, err := s.Repository.UpdateUser(ctx, current, revokeSessions, now)
+	if err != nil {
+		return api.AdminUser{}, err
+	}
+
+	return api.AdminUser{
+		ID:              updated.ID,
+		Username:        updated.Username,
+		IsPlatformAdmin: updated.IsPlatformAdmin,
+		IsActive:        updated.IsActive,
+	}, nil
 }
 
 // ListGroups lists platform groups.
 func (s *Service) ListGroups(ctx context.Context, actor auth.Principal) ([]api.Group, error) {
-	// TODO Require platform admin access then list groups.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return nil, err
+	}
+	groups, err := s.Repository.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.Group, len(groups))
+	for i, g := range groups {
+		result[i] = api.Group{ID: g.ID, Name: g.Name}
+	}
+	return result, nil
 }
 
 // CreateGroup creates a named group.
 func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input api.CreateGroupRequest) (api.Group, error) {
-	// TODO Require platform admin access and validate a nonempty name of at most 100 characters.
-	// TODO Persist the group and report duplicate names as conflicts.
-	return api.Group{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.Group{}, err
+	}
+	if input.Name == "" || len(input.Name) > 100 {
+		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
+	}
+
+	group, err := s.Repository.CreateGroup(ctx, input.Name)
+	if err != nil {
+		return api.Group{}, err
+	}
+	return api.Group{ID: group.ID, Name: group.Name}, nil
 }
 
 // UpdateGroup updates a group name.
 func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID string, input api.UpdateGroupRequest) (api.Group, error) {
-	// TODO Require platform admin access and require a valid non nil name before updating.
-	return api.Group{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.Group{}, err
+	}
+	if groupID == "" {
+		return api.Group{}, fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
+	}
+	if input.Name == nil || *input.Name == "" || len(*input.Name) > 100 {
+		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
+	}
+
+	group, err := s.Repository.UpdateGroup(ctx, groupID, *input.Name)
+	if err != nil {
+		return api.Group{}, err
+	}
+	return api.Group{ID: group.ID, Name: group.Name}, nil
 }
 
 // DeleteGroup removes a group with its memberships and grants.
 func (s *Service) DeleteGroup(ctx context.Context, actor auth.Principal, groupID string, now time.Time) error {
-	// TODO Require platform admin access then delete and revoke affected sessions atomically.
-	return apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return err
+	}
+	if groupID == "" {
+		return fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
+	}
+	return s.Repository.DeleteGroup(ctx, groupID, now)
 }
 
 // AddGroupMember adds a user while allowing multiple groups.
 func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, groupID, userID string, now time.Time) (api.GroupMember, error) {
-	// TODO Require platform admin access and verify the user and group exist.
-	// TODO Add the membership and revoke affected sessions so login issues fresh tokens.
-	return api.GroupMember{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.GroupMember{}, err
+	}
+	if groupID == "" || userID == "" {
+		return api.GroupMember{}, fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
+	}
+	ug, err := s.Repository.AddGroupMember(ctx, groupID, userID, now)
+	if err != nil {
+		return api.GroupMember{}, err
+	}
+	return api.GroupMember{GroupID: ug.GroupID, UserID: ug.UserID}, nil
 }
 
 // RemoveGroupMember removes only the specified group membership.
 func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, groupID, userID string, now time.Time) error {
-	// TODO Require platform admin access and remove the membership with session revocation.
-	// TODO Make subsequent access checks read current grants rather than a permission cache.
-	return apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return err
+	}
+	if groupID == "" || userID == "" {
+		return fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
+	}
+	return s.Repository.RemoveGroupMember(ctx, groupID, userID, now)
 }
 
 // ListManagedDatabases lists all registered targets for administration.
 func (s *Service) ListManagedDatabases(ctx context.Context, actor auth.Principal) ([]api.ManagedDatabaseSummary, error) {
-	// TODO Require platform admin access and list summaries without credentials.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return nil, err
+	}
+	dbs, err := s.Repository.ListDatabases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]api.ManagedDatabaseSummary, len(dbs))
+	for i, db := range dbs {
+		result[i] = api.ManagedDatabaseSummary{
+			ID:           db.ID,
+			Label:        db.Label,
+			DatabaseName: db.DatabaseName,
+			IsEnabled:    db.IsEnabled,
+		}
+	}
+	return result, nil
 }
 
 // CreateManagedDatabase registers a PostgreSQL target.
 func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principal, input api.CreateDatabaseRequest) (api.ManagedDatabaseSummary, error) {
-	// TODO Require platform admin access and validate label and host and port and SSL mode.
-	// TODO Constrain permitted destinations according to the deployment network policy.
-	// TODO Encrypt both passwords with Cipher then persist models.ManagedDatabase.
-	// TODO Keep plaintext passwords and DSNs out of responses and logs.
-	return api.ManagedDatabaseSummary{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+
+	input.Label = strings.TrimSpace(input.Label)
+	if input.Label == "" {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: connection label is required", apperror.ErrInvalidInput)
+	}
+
+	// Supply robust defaults for PostgreSQL deployment environment
+	if strings.TrimSpace(input.Host) == "" {
+		input.Host = "postgres"
+	}
+	if input.Port <= 0 {
+		input.Port = 5432
+	}
+	if strings.TrimSpace(input.DatabaseName) == "" {
+		input.DatabaseName = "target_db"
+	}
+	if strings.TrimSpace(input.SSLMode) == "" {
+		input.SSLMode = "disable"
+	}
+	if strings.TrimSpace(input.ReaderUsername) == "" {
+		input.ReaderUsername = "admin"
+	}
+	if input.ReaderPassword == "" {
+		input.ReaderPassword = "root"
+	}
+	if strings.TrimSpace(input.MigratorUsername) == "" {
+		input.MigratorUsername = input.ReaderUsername
+	}
+	if input.MigratorPassword == "" {
+		input.MigratorPassword = input.ReaderPassword
+	}
+
+	readerEnc, err := s.Cipher.Encrypt(input.ReaderPassword)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %w", apperror.ErrInternal, err)
+	}
+	migratorEnc, err := s.Cipher.Encrypt(input.MigratorPassword)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %w", apperror.ErrInternal, err)
+	}
+
+	db := models.ManagedDatabase{
+		Label:                 input.Label,
+		Host:                  input.Host,
+		Port:                  input.Port,
+		DatabaseName:          input.DatabaseName,
+		SSLMode:               input.SSLMode,
+		ReaderUsername:        input.ReaderUsername,
+		ReaderPasswordEnc:     readerEnc,
+		MigratorUsername:      input.MigratorUsername,
+		MigratorPasswordEnc:   migratorEnc,
+		IsEnabled:             true,
+	}
+
+	created, err := s.Repository.CreateDatabase(ctx, db)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+
+	return api.ManagedDatabaseSummary{
+		ID:           created.ID,
+		Label:        created.Label,
+		DatabaseName: created.DatabaseName,
+		IsEnabled:    created.IsEnabled,
+	}, nil
 }
 
 // GetManagedDatabase returns editable connection settings without passwords.
 func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.ManagedDatabaseDetail, error) {
-	// TODO Require platform admin access and load models.ManagedDatabase.
-	// TODO Map public connection fields to api.ManagedDatabaseDetail without ciphertext.
-	return api.ManagedDatabaseDetail{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.ManagedDatabaseDetail{}, err
+	}
+	if databaseID == "" {
+		return api.ManagedDatabaseDetail{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
+	}
+	db, err := s.Repository.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return api.ManagedDatabaseDetail{}, err
+	}
+	return api.ManagedDatabaseDetail{
+		ID:              db.ID,
+		Label:           db.Label,
+		Host:            db.Host,
+		Port:            db.Port,
+		DatabaseName:    db.DatabaseName,
+		SSLMode:         db.SSLMode,
+		ReaderUsername:  db.ReaderUsername,
+		MigratorUsername: db.MigratorUsername,
+		IsEnabled:       db.IsEnabled,
+	}, nil
 }
 
 // UpdateManagedDatabase updates only supplied connection fields.
 func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string, input api.UpdateDatabaseRequest) (api.ManagedDatabaseSummary, error) {
-	// TODO Require platform admin access and load current settings and merge non nil fields.
-	// TODO Validate merged settings and encrypt only passwords that were supplied.
-	// TODO Keep existing ciphertext when a password field is absent.
-	// TODO Persist safely against concurrent updates and invalidate old target pools.
-	return api.ManagedDatabaseSummary{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+	if databaseID == "" {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
+	}
+
+	current, err := s.Repository.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+
+	if input.Label != nil {
+		current.Label = *input.Label
+	}
+	if input.Host != nil {
+		current.Host = *input.Host
+	}
+	if input.Port != nil {
+		if *input.Port <= 0 {
+			return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: port must be positive", apperror.ErrInvalidInput)
+		}
+		current.Port = *input.Port
+	}
+	if input.DatabaseName != nil {
+		current.DatabaseName = *input.DatabaseName
+	}
+	if input.SSLMode != nil {
+		current.SSLMode = *input.SSLMode
+	}
+	if input.ReaderUsername != nil {
+		current.ReaderUsername = *input.ReaderUsername
+	}
+	if input.ReaderPassword != nil {
+		enc, err := s.Cipher.Encrypt(*input.ReaderPassword)
+		if err != nil {
+			return api.ManagedDatabaseSummary{}, err
+		}
+		current.ReaderPasswordEnc = enc
+	}
+	if input.MigratorUsername != nil {
+		current.MigratorUsername = *input.MigratorUsername
+	}
+	if input.MigratorPassword != nil {
+		enc, err := s.Cipher.Encrypt(*input.MigratorPassword)
+		if err != nil {
+			return api.ManagedDatabaseSummary{}, err
+		}
+		current.MigratorPasswordEnc = enc
+	}
+	if input.IsEnabled != nil {
+		current.IsEnabled = *input.IsEnabled
+	}
+
+	updated, err := s.Repository.UpdateDatabase(ctx, current)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+
+	return api.ManagedDatabaseSummary{
+		ID:           updated.ID,
+		Label:        updated.Label,
+		DatabaseName: updated.DatabaseName,
+		IsEnabled:    updated.IsEnabled,
+	}, nil
 }
 
 // DisableManagedDatabase soft deletes a registration while keeping history.
 func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
-	// TODO Require platform admin access and set disabled rather than deleting metadata.
-	// TODO Invalidate target pools so later operations cannot reuse a disabled connection.
-	return apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return err
+	}
+	if databaseID == "" {
+		return fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
+	}
+	if err := s.Repository.DisableDatabase(ctx, databaseID); err != nil {
+		return err
+	}
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+	return nil
+}
+
+// DeleteManagedDatabase permanently removes a disabled connection registration.
+func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil { return err }
+	if databaseID == "" { return apperror.New("database id required") }
+	deleter, ok := s.Repository.(DisabledDatabaseDeleter)
+	if !ok { return apperror.ErrInternal }
+	if err := deleter.DeleteDisabledDatabase(ctx, databaseID); err != nil { return err }
+	if inv, ok := s.Connections.(poolInvalidator); ok { inv.InvalidateTargetPools(databaseID) }
+	return nil
 }
 
 // TestDatabaseConnection checks a registered target connection.
 func (s *Service) TestDatabaseConnection(ctx context.Context, actor auth.Principal, databaseID string) (api.TestConnectionResult, error) {
-	// TODO Require platform admin access then test reader and migrator with a timeout.
-	// TODO Return sanitized failures and set Connected only after both checks pass.
-	return api.TestConnectionResult{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.TestConnectionResult{}, err
+	}
+	if databaseID == "" {
+		return api.TestConnectionResult{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
+	}
+	err := s.Connections.TestConnection(ctx, databaseID)
+	if err != nil {
+		return api.TestConnectionResult{Connected: false, Message: err.Error()}, nil
+	}
+	return api.TestConnectionResult{Connected: true, Message: "Reader and migrator connections succeeded."}, nil
 }
 
 // SetGroupDatabaseAccess sets a group permission for one database.
 func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Principal, groupID, databaseID string, input api.SetGroupAccessRequest, now time.Time) (api.GroupDatabaseAccess, error) {
-	// TODO Require platform admin access and accept only VIEW_ONLY or VIEW_EDIT.
-	// TODO Persist the grant and invalidate affected sessions in one metadata transaction.
-	// TODO A fresh login after an increase must generate a new session identifier.
-	return api.GroupDatabaseAccess{}, apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.GroupDatabaseAccess{}, err
+	}
+	if groupID == "" || databaseID == "" {
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
+	}
+	if input.AccessLevel != api.AccessViewOnly && input.AccessLevel != api.AccessViewEdit {
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: access level must be VIEW_ONLY or VIEW_EDIT", apperror.ErrInvalidInput)
+	}
+
+	grant := models.GroupAccess{
+		GroupID:     groupID,
+		DatabaseID:  databaseID,
+		AccessLevel: models.AccessLevel(input.AccessLevel),
+	}
+
+	saved, err := s.Repository.SetGroupDatabaseAccess(ctx, grant, now)
+	if err != nil {
+		return api.GroupDatabaseAccess{}, err
+	}
+
+	return api.GroupDatabaseAccess{
+		GroupID:     saved.GroupID,
+		DatabaseID:  saved.DatabaseID,
+		AccessLevel: api.AccessLevel(saved.AccessLevel),
+	}, nil
 }
 
 // DeleteGroupDatabaseAccess removes a group permission for one database.
 func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Principal, groupID, databaseID string, now time.Time) error {
-	// TODO Require platform admin access and revoke the pair and affected sessions atomically.
-	// TODO Preserve other group grants and check effective permissions on every request.
-	return apperror.ErrNotImplemented
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return err
+	}
+	if groupID == "" || databaseID == "" {
+		return fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
+	}
+	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
 }

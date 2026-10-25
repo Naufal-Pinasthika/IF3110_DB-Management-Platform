@@ -1,12 +1,14 @@
-// Package config reads process settings and validates them before startup.
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 )
 
 type Config struct {
@@ -19,7 +21,6 @@ type Config struct {
 	QueryMaxRows              int
 }
 
-// SessionConfig holds team policy rather than values required by the assignment.
 type SessionConfig struct {
 	CookieName       string
 	CookieSecure     bool
@@ -59,7 +60,20 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration", setting.name)
 		}
 	}
-	// Target credential encryption belongs to the unfinished database management module.
+	// Database credential encryption key (base64-encoded 32-byte key for AES-256-GCM)
+	encKeyB64 := os.Getenv("DB_CREDENTIAL_ENCRYPTION_KEY")
+	if encKeyB64 == "" {
+		return Config{}, apperror.New("DB_CREDENTIAL_ENCRYPTION_KEY is required")
+	}
+	encKey, err := base64.StdEncoding.DecodeString(encKeyB64)
+	if err != nil {
+		return Config{}, apperror.New("DB_CREDENTIAL_ENCRYPTION_KEY must be valid base64")
+	}
+	if len(encKey) != 32 {
+		return Config{}, apperror.New("DB_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes (256 bits)")
+	}
+	cfg.DBCredentialEncryptionKey = encKey
+
 	return cfg, cfg.Validate()
 }
 
@@ -74,6 +88,9 @@ func (c Config) Validate() error {
 	}
 	if origin.Scheme == "https" && !c.Session.CookieSecure {
 		return fmt.Errorf("SESSION_COOKIE_SECURE must be true for HTTPS")
+	}
+	if len(c.DBCredentialEncryptionKey) != 32 {
+		return fmt.Errorf("DB_CREDENTIAL_ENCRYPTION_KEY must be 32 bytes")
 	}
 	s := c.Session
 	if s.CookieName == "" || s.IdleTimeout <= 0 || s.GracePeriod <= 0 || s.RotationInterval <= s.GracePeriod || s.AbsoluteTimeout <= s.RotationInterval {

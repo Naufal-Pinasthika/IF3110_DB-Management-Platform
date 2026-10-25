@@ -8,7 +8,15 @@ import (
 
 )
 
+type contextKey string
+
+const (
+	// key used to store/retrieve Principal from request context
+	principalContextKey contextKey = "principal"
+)
+
 type sessionContextKey struct{}
+
 
 // reads identity written by session middleware.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
@@ -19,6 +27,17 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	}
 	return session.Principal, true
 }
+
+
+// stores the Principal in request context
+func SetPrincipalContext(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalContextKey, principal)
+}
+
+func SetValidatedPrincipalContext(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, ValidatedSession{Principal: principal})
+}
+
 
 // validates a cookie before calling the protected handler.
 func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
@@ -54,16 +73,33 @@ func (h *Handler) sameOrigin(r *http.Request) bool {
 		return false
 	}
 
-	if origin := r.Header.Get("Origin"); origin != "" {
-		return origin == h.PublicOrigin
+	target := r.Header.Get("Origin")
+	if target == "" {
+		referer, err := url.Parse(r.Header.Get("Referer"))
+		if err == nil && referer.Scheme != "" && referer.Host != "" {
+			target = referer.Scheme + "://" + referer.Host
+		}
 	}
 
-	referer, err := url.Parse(r.Header.Get("Referer"))
-	if err != nil || referer.Scheme == "" || referer.Host == "" {
+	if target == "" {
 		return false
 	}
 
-	return referer.Scheme+"://"+referer.Host == h.PublicOrigin
+	if target == h.PublicOrigin {
+		return true
+	}
+
+	uTarget, err1 := url.Parse(target)
+	uPublic, err2 := url.Parse(h.PublicOrigin)
+	if err1 == nil && err2 == nil && uTarget.Scheme == uPublic.Scheme && uTarget.Port() == uPublic.Port() {
+		h1 := uTarget.Hostname()
+		h2 := uPublic.Hostname()
+		if (h1 == "localhost" || h1 == "127.0.0.1") && (h2 == "localhost" || h2 == "127.0.0.1") {
+			return true
+		}
+	}
+
+	return false
 }
 
 

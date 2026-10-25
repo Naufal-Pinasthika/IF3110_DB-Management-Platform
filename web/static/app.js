@@ -10,10 +10,27 @@ let canEdit = false;
 let dirty = false;
 let savedSQL = "";
 let activeDatabase = null;
+let currentUser = null;
 let selectedSchema = state.schema || "";
 let explorerEntries = new Map();
 let explorerVersion = 0;
 let schemaRequest = 0;
+let selectedGroupID = "";
+let groupData = { groups: [], users: [], databases: [], members: [], grants: [] };
+let groupTab = "members";
+let connectionVersion = 0;
+
+function formSignature(form) {
+  return JSON.stringify([...form.querySelectorAll("input, select, textarea")].map(field => [field.id || field.name, field.type === "checkbox" || field.type === "radio" ? field.checked : field.value]));
+}
+function showFormDialog(dialog) {
+  clearNotice();
+  const form = dialog.querySelector("form");
+  form.dataset.saved = formSignature(form);
+  dialog.showModal();
+}
+function formChanged(form) { return form?.dataset.saved !== undefined && form.dataset.saved !== formSignature(form); }
+
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -70,20 +87,25 @@ function action(label, work, className = "") {
 
 function submit(id, work) {
   const form = $(id);
-  if (!form) return;
+  if (!form || form._boundSubmit) return;
+  form._boundSubmit = true;
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const message = form.querySelector(".form-message");
     if (message) message.hidden = true;
     clearNotice();
+    if (form.getAttribute("aria-busy") === "true") return;
     const data = new FormData(form);
     const fields = [...form.querySelectorAll("input, select, textarea")].map(field => [field, field.disabled]);
     fields.forEach(([field]) => { field.disabled = true; });
+    const otherButtons = [...form.querySelectorAll('button:not([type="submit"])')].map(button => [button, button.disabled]);
+    otherButtons.forEach(([button]) => { button.disabled = true; });
     form.setAttribute("aria-busy", "true");
     try { await busy(form.querySelector('[type="submit"]'), () => work(data, form)); }
     catch (error) { fail(error, form); }
     finally {
       fields.forEach(([field, disabled]) => { field.disabled = disabled; });
+      otherButtons.forEach(([button, disabled]) => { button.disabled = disabled; });
       form.removeAttribute("aria-busy");
       if (form.id === "login-form" && !$("login-error").hidden) $("password").focus();
     }
@@ -92,14 +114,15 @@ function submit(id, work) {
 
 function badge(value) {
   const labels = { VIEW_ONLY: "Read only", VIEW_EDIT: "Read + migrations", DRAFT: "Draft", RUNNING: "Running", APPLIED: "Applied", FAILED: "Failed", ACTIVE: "Active", DISABLED: "Disabled" };
-  const colors = { APPLIED: "green", ACTIVE: "green", FAILED: "red", RUNNING: "amber" };
+  const colors = { APPLIED: "green", ACTIVE: "green", FAILED: "red", DISABLED: "red", RUNNING: "amber", VIEW_EDIT: "blue", VIEW_ONLY: "purple" };
   return node("span", labels[value] || value, "badge " + (colors[value] || ""));
 }
 
+
 function date(value) {
-  if (!value) return "—";
+  if (!value) return "--";
   const result = new Date(value);
-  return Number.isNaN(result.getTime()) ? "—" : result.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(result.getTime()) ? "--" : result.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 function tableRow(values) {
@@ -107,7 +130,7 @@ function tableRow(values) {
   for (const value of values) {
     const td = node("td");
     if (value instanceof Node) td.append(value);
-    else td.textContent = value ?? "—";
+    else td.textContent = value ?? "--";
     tr.append(td);
   }
   return tr;
@@ -152,16 +175,37 @@ function dataTable(id, columns, records) {
   target.append(table);
 }
 
-function options(id, data, label) {
+function options(id, data, label, placeholderText) {
   const select = $(id);
+  if (!select) return;
   const previous = select.value;
-  while (select.options.length > 1) select.remove(1);
-  for (const item of data || []) {
+  select.replaceChildren();
+  // Always add a disabled placeholder first option
+  const ph = node("option", placeholderText || "Select…");
+  ph.value = "";
+  ph.disabled = true;
+  ph.selected = true;
+  select.append(ph);
+  if (!data?.length) {
+    const emptyOption = node("option", "No items available");
+    emptyOption.value = "";
+    emptyOption.disabled = true;
+    select.append(emptyOption);
+    select.dataset.empty = "";
+    delete select.dataset.placeholder;
+    return;
+  }
+  delete select.dataset.empty;
+  select.dataset.placeholder = "";
+  for (const item of data) {
     const option = node("option", label(item));
     option.value = item.id;
     select.append(option);
   }
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  if (previous && [...select.options].some(option => option.value === previous)) {
+    select.value = previous;
+    delete select.dataset.placeholder;
+  }
 }
 
 function confirmAction(title, description, label) {
@@ -188,6 +232,17 @@ function resetDialog(id, title) {
   return { dialog, form };
 }
 
+function resetPasswordToggles(dialog) {
+  dialog.querySelectorAll("[data-password-target]").forEach(button => {
+    const input = $(button.dataset.passwordTarget);
+    if (!input) return;
+    input.type = "password";
+    button.textContent = "Show";
+    button.setAttribute("aria-label", "Show password");
+    button.setAttribute("aria-pressed", "false");
+  });
+}
+
 function openUser(user) {
   const { dialog, form } = resetDialog("user-dialog", user ? "Edit user" : "New user");
   $("user-admin-field").hidden = Boolean(user);
@@ -199,22 +254,41 @@ function openUser(user) {
     form.elements.username.value = user.username;
     form.elements.is_active.checked = user.is_active;
   }
-  dialog.showModal();
+  showFormDialog(dialog);
 }
 
 function openGroup(group) {
   const { dialog, form } = resetDialog("group-dialog", group ? "Rename group" : "New group");
   if (group) { form.elements.id.value = group.id; form.elements.name.value = group.name; }
-  dialog.showModal();
+  showFormDialog(dialog);
 }
 
+function setPasswordEditing(role, editing) {
+  const form = $("connection-form");
+  const stored = Boolean(form.elements.id.value);
+  $(role + "-secret-state").hidden = !stored || editing;
+  $(role + "-password").hidden = stored && !editing;
+  $(role + "-password").required = !stored || editing;
+  $(role + "-password").disabled = stored && !editing;
+  $("keep-" + role + "-password").hidden = !stored || !editing;
+  if (!editing) $(role + "-password").value = "";
+}
+function updateCredentialFields() {
+  const same = $("same-credentials").checked;
+  $("migrator-fields").hidden = same;
+  $("shared-credential-note").hidden = !same;
+  $("migrator-username").disabled = same;
+  $("migrator-password").disabled = same || $("migrator-password").hidden;
+}
 async function openConnection(id) {
+  const version = ++connectionVersion;
+  const connection = id ? await api("/api/v1/admin/databases/" + encode(id)) : null;
+  if (version !== connectionVersion) return;
   const { dialog, form } = resetDialog("connection-dialog", id ? "Edit connection" : "Add connection");
+  resetPasswordToggles(dialog);
   $("connection-enabled-field").hidden = !id;
-  for (const name of ["reader_password", "migrator_password"]) form.elements[name].required = !id;
-  $("connection-password-help").textContent = id ? "Leave passwords blank to keep the stored credentials." : "Passwords are never displayed after saving.";
-  if (id) {
-    const connection = await api("/api/v1/admin/databases/" + encode(id));
+  $("connection-impact").hidden = !id;
+  if (connection) {
     for (const [key, value] of Object.entries(connection)) {
       const field = form.elements.namedItem(key);
       if (!field) continue;
@@ -222,7 +296,14 @@ async function openConnection(id) {
       else field.value = value;
     }
   }
-  dialog.showModal();
+  // Matching usernames do not imply matching stored passwords.
+  $("same-credentials").checked = false;
+  for (const role of ["reader", "migrator"]) setPasswordEditing(role, !id);
+  updateCredentialFields();
+  $("connection-test-result").hidden = true;
+  updateSSLDescription();
+  showFormDialog(dialog);
+  dialog.querySelector(".dialog-body").scrollTop = 0;
 }
 
 function bindDialogs() {
@@ -231,13 +312,34 @@ function bindDialogs() {
     else if (button.dataset.open === "group-dialog") openGroup();
     else openConnection().catch(error => fail(error));
   }));
-  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => {
-    const dialog = button.closest("dialog");
-    dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
-    dialog.close();
-  }));
-  document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("close", () => {
-    dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
+  async function dismiss(dialog) {
+    const form = dialog.querySelector("form");
+    if (form?.getAttribute("aria-busy") === "true" || dialog.dataset.dismissing) return;
+    dialog.dataset.dismissing = "true";
+    try {
+      if (formChanged(form) && !await confirmAction("Discard unsaved changes?", "Your changes have not been saved. Discard them and close this dialog?", "Discard changes")) return;
+      dialog.close();
+    } finally { delete dialog.dataset.dismissing; }
+  }
+  
+  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => dismiss(button.closest("dialog"))));
+  document.querySelectorAll("dialog:not(#confirm-dialog)").forEach(dialog => {
+    dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(dialog); });
+    dialog.addEventListener("close", () => {
+      dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
+      resetPasswordToggles(dialog);
+      const form = dialog.querySelector("form");
+      if (form) delete form.dataset.saved;
+    });
+  });
+  document.querySelectorAll("[data-password-target]").forEach(button => button.addEventListener("click", () => {
+    const input = $(button.dataset.passwordTarget);
+    if (!input) return;
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    button.textContent = visible ? "Hide" : "Show";
+    button.setAttribute("aria-label", (visible ? "Hide" : "Show") + " password");
+    button.setAttribute("aria-pressed", String(visible));
   }));
 }
 
@@ -253,6 +355,12 @@ async function loadDatabaseContext() {
   canEdit = database.effective_access === "VIEW_EDIT";
   document.querySelectorAll("[data-edit-only]").forEach(element => { element.hidden = !canEdit; });
   if ($("migration-permission")) $("migration-permission").textContent = canEdit ? "Only drafts can be edited or executed. SELECT queries remain read only." : "Read only. Creating or executing migrations requires migration access.";
+  const statusEl = document.querySelector(".connection-status");
+  if (statusEl) {
+    statusEl.textContent = "Connected";
+    statusEl.title = "Target database reachable";
+    statusEl.style.color = "var(--green)";
+  }
   return database;
 }
 
@@ -260,7 +368,7 @@ function permissionCell(level) {
   const access = accessCapabilities(level);
   const cell = node("div");
   cell.append(node("span", access.label, "permission-name"));
-  cell.append(node("span", level === "VIEW_EDIT" ? "SELECT · create & execute migrations" : level === "VIEW_ONLY" ? "SELECT · schema · history" : "Permissions not verified", "permission-detail"));
+  cell.append(node("span", level === "VIEW_EDIT" ? "SELECT - create & execute migrations" : level === "VIEW_ONLY" ? "SELECT - schema - history" : "Permissions not verified", "permission-detail"));
   cell.title = access.detail;
   return cell;
 }
@@ -271,12 +379,17 @@ async function databasesPage() {
     const query = $("database-filter").value.toLowerCase();
     const visible = (databases || []).filter(item => (item.label + " " + item.database_name).toLowerCase().includes(query));
     $("database-count").textContent = visible.length + (query ? " of " + (databases?.length || 0) : "") + (visible.length === 1 ? " connection" : " connections");
+    const emptyMessage = query
+      ? "No databases match your filter."
+      : currentUser?.is_platform_admin
+      ? "No enabled databases available. Add a database connection in Administration to get started."
+      : "No databases are assigned to your groups. Ask an administrator for access.";
     rows("database-list", visible, item => [
       link(item.label, "/databases/" + encode(item.id)),
       node("span", item.database_name, "mono"),
       permissionCell(item.effective_access),
       link("Open", "/databases/" + encode(item.id), "button small open-database"),
-    ], 4, query ? "No databases match your filter." : "No databases are assigned to your groups. Ask an administrator for access.");
+    ], 4, emptyMessage);
   };
   $("database-filter").oninput = filter;
   filter();
@@ -475,10 +588,15 @@ function queryPage() {
     try {
       const result = await api(databaseAPI + "/queries", { method: "POST", data: { sql: data.get("sql"), max_rows: Number(data.get("max_rows")) } });
       dataTable("query-results", result.columns, result.rows);
-      $("query-summary").textContent = result.row_count + (result.row_count === 1 ? " row" : " rows") + " · " + ((performance.now() - started) / 1000).toFixed(2) + "s" + (result.truncated ? " · Row limit reached" : "");
+      $("query-summary").textContent = result.row_count + (result.row_count === 1 ? " row" : " rows") + " - " + ((performance.now() - started) / 1000).toFixed(2) + "s" + (result.truncated ? " - Row limit reached" : "");
+      try {
+        const plan = await api(databaseAPI + "/queries/explain", { method: "POST", data: { sql: data.get("sql"), analyze: true } });
+        renderPlans("query-plan", plan);
+        $("query-plan-summary").textContent = "EXPLAIN ANALYZE - rolled back - actual timings and rows";
+      } catch (error) { $("query-plan").replaceChildren(node("p", error.message, "inline-state")); $("query-plan-summary").textContent = "Plan unavailable"; }
       $("query-results").focus();
     } catch (error) {
-      $("query-summary").textContent = "Query failed · " + ((performance.now() - started) / 1000).toFixed(2) + "s";
+      $("query-summary").textContent = "Query failed - " + ((performance.now() - started) / 1000).toFixed(2) + "s";
       throw error;
     } finally { $("query-results").removeAttribute("aria-busy"); }
   });
@@ -487,13 +605,48 @@ function queryPage() {
   });
 }
 
+function renderPlans(targetId, result) {
+  const target = $(targetId);
+  target.replaceChildren();
+  const metric = (label, value) => node("span", label + ": " + value, "plan-metric");
+  const draw = (plan, depth, container) => {
+    const card = node("div", undefined, "plan-node");
+    card.style.setProperty("--plan-depth", Math.min(depth, 8));
+    const title = (plan.node_type || "Plan") + (plan.relation_name ? " - " + (plan.schema ? plan.schema + "." : "") + plan.relation_name : "") + (plan.index_name ? " - " + plan.index_name : "");
+    card.append(node("strong", title));
+    const metrics = node("div", undefined, "plan-metrics");
+    if (plan.join_type) metrics.append(metric("Join", plan.join_type));
+    if (plan.total_cost != null) metrics.append(metric("Cost", Number(plan.startup_cost || 0).toFixed(2) + "–" + Number(plan.total_cost).toFixed(2)));
+    metrics.append(metric("Est. rows", plan.plan_rows ?? 0));
+    if (plan.actual_rows != null) metrics.append(metric("Actual rows × loops", plan.actual_rows + " × " + (plan.actual_loops || 1)));
+    if (plan.actual_total_time != null) metrics.append(metric("Time", Number(plan.actual_total_time).toFixed(3) + " ms"));
+    if (plan.shared_hit_blocks != null || plan.shared_read_blocks != null) metrics.append(metric("Buffers hit/read", (plan.shared_hit_blocks || 0) + "/" + (plan.shared_read_blocks || 0)));
+    card.append(metrics);
+    if (plan.filter) card.append(node("code", "Filter: " + plan.filter, "plan-filter"));
+    container.append(card);
+    for (const child of plan.plans || []) draw(child, depth + 1, container);
+  };
+  for (const [i, plan] of (result.plans || []).entries()) {
+    const section = node("article", undefined, "plan-statement");
+    if ((result.plans || []).length > 1 || plan.statement_index) section.append(node("h3", "Statement " + (plan.statement_index || i + 1)));
+    if (plan.error) { section.append(node("p", "No execution plan: " + plan.error, "inline-state")); target.append(section); continue; }
+    draw(plan.plan, 0, section);
+    const summary = [];
+    if (plan.planning_time != null) summary.push("Planning " + Number(plan.planning_time).toFixed(3) + " ms");
+    if (plan.execution_time != null) summary.push("Execution " + Number(plan.execution_time).toFixed(3) + " ms");
+    if (summary.length) section.append(node("p", summary.join(" - "), "plan-total"));
+    target.append(section);
+  }
+  if (!target.children.length) target.append(node("p", result.raw_text || "The database did not produce an execution plan for these statements.", "inline-state"));
+}
+
 async function migrationsPage() {
   const filter = $("migration-filter").value;
   const migrations = await api(databaseAPI + "/migrations" + (filter ? "?status=" + encode(filter) : ""));
   rows("migration-list", migrations, migration => [
     link(migration.name, databasePath + "/migrations/" + encode(migration.id)),
-    migration.version === null ? "—" : migration.version, badge(migration.status),
-    migration.executed_by || "—", date(migration.executed_at),
+    migration.version === null ? "--" : migration.version, badge(migration.status),
+    migration.executed_by || "--", date(migration.executed_at),
   ], 5, "No migrations found. Users with edit access can create a draft.");
 }
 
@@ -503,9 +656,53 @@ function migrationPage() {
   let draft = creating;
   let executing = false;
   const markSaved = () => { savedSQL = $("sql").value; dirty = false; };
+
+  if (creating) {
+    const template = sessionStorage.getItem("clone_migration");
+    if (template) {
+      sessionStorage.removeItem("clone_migration");
+      try {
+        const data = JSON.parse(template);
+        if ($("migration-name") && data.name) $("migration-name").value = data.name;
+        if ($("sql") && data.sql) $("sql").value = data.sql;
+        markSaved();
+      } catch {}
+    }
+  }
+
+  if (creating && $("compare-schema")) {
+    $("compare-schema").addEventListener("click", () => busy($("compare-schema"), async () => {
+      const desiredDDL = $("desired-schema-ddl").value;
+      $("schema-diff-status").textContent = "Comparing schemas…";
+      $("schema-diff-results").replaceChildren();
+      const result = await api(databaseAPI + "/migrations/schema-diff", {
+        method: "POST",
+        data: { desired_ddl: desiredDDL },
+      });
+      renderSchemaDiff(result);
+      if (!result.has_changes) {
+        $("schema-diff-status").textContent = "No supported schema changes found";
+        return;
+      }
+      const includesDrops = result.changes.some(change => change.action === "removed");
+      $("schema-diff-status").textContent = result.changes.length + (result.changes.length === 1 ? " change" : " changes") +
+        (includesDrops ? " - candidate includes DROP statements" : "") + " - generated SQL is an editable candidate";
+      if ($("sql").value.trim() && $("sql").value !== result.generated_sql) {
+        if (!await confirmAction("Replace migration SQL?", "The generated candidate will replace the SQL currently in the editor.", "Replace SQL")) return;
+      }
+      $("sql").value = result.generated_sql;
+      $("sql").dispatchEvent(new Event("input", { bubbles: true }));
+      if (!$("migration-name").value.trim()) $("migration-name").value = "Generated schema migration";
+    }).catch(error => {
+      $("schema-diff-status").textContent = "Schema comparison failed";
+      fail(error);
+    }));
+  }
+
   $("sql").addEventListener("input", () => {
     dirty = $("sql").value !== savedSQL;
     if (!creating) $("execute-migration").disabled = dirty || !draft || !canEdit || executing;
+    if ($("explain-migration")) $("explain-migration").disabled = dirty || !draft || !canEdit || executing;
     $("migration-save-note").textContent = dirty ? "Unsaved changes. Save the draft before executing." : "Changes execute together in a transaction.";
   });
   $("migration-name")?.addEventListener("input", () => { dirty = true; });
@@ -519,6 +716,7 @@ function migrationPage() {
     if (creating) location.assign(databasePath + "/migrations/" + encode(result.id));
     else {
       $("execute-migration").disabled = false;
+      if ($("explain-migration")) $("explain-migration").disabled = !draft || !canEdit || executing;
       $("migration-save-note").textContent = "Draft saved. Review the SQL before executing.";
       notice("Migration draft saved.", "success");
     }
@@ -527,30 +725,51 @@ function migrationPage() {
     if (creating || !draft || !canEdit || dirty || executing) return;
     if (!await confirmAction("Execute migration?", "Run the saved SQL against " + activeDatabase.database_name + " (" + activeDatabase.label + ")? All statements must succeed for the transaction to commit.", "Execute migration")) return;
     executing = true;
+    if ($("explain-migration")) $("explain-migration").disabled = true;
     $("sql").readOnly = true;
     $("save-migration").disabled = true;
     $("migration-save-note").textContent = "Executing on " + activeDatabase.database_name + "…";
     try {
       await api(endpoint + "/execute", { method: "POST" });
+      clearNotice();
       await reload();
       notice("Migration execution completed. Review its status below.", "success");
     } catch (error) {
-      if (!error.status || error.status >= 500) throw new Error("Execution could not be confirmed. Check migration history before attempting it again.");
-      throw error;
+      clearNotice();
+      try {
+        await reload();
+        // reload() already renders the formatted failure card on the migration detail page
+        return;
+      } catch (reloadErr) {
+        fail(reloadErr);
+      }
     } finally {
       executing = false;
       $("sql").readOnly = !canEdit || !draft;
       $("save-migration").disabled = false;
+      if ($("explain-migration")) $("explain-migration").disabled = !draft || dirty || !canEdit || executing;
       $("migration-save-note").textContent = draft ? "Changes execute together in a transaction." : "Executed SQL is read only.";
     }
-  }).catch(error => fail(error)).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
+  }).catch(error => { if (error) fail(error); }).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
+  $("explain-migration")?.addEventListener("click", () => busy($("explain-migration"), async () => {
+    if (creating || !draft || dirty || !canEdit) throw new Error("Save the draft before analyzing its plan.");
+    const started = performance.now();
+    const result = await api(endpoint + "/explain", { method: "POST", data: { analyze: true } });
+    renderPlans("migration-plan", result);
+    $("migration-plan-surface").hidden = false;
+    $("migration-plan-summary").textContent = "Rolled back preview - " + ((performance.now() - started) / 1000).toFixed(2) + "s - actual timings are estimates for this run";
+  }).catch(error => fail(error)));
   reload = async () => {
-    if (creating) { $("sql").readOnly = !canEdit; return; }
+    if (creating) {
+      $("sql").readOnly = !canEdit;
+      if ($("explain-migration")) { $("explain-migration").hidden = true; $("explain-migration").disabled = true; }
+      return;
+    }
     const migration = await api(endpoint);
     draft = migration.status === "DRAFT";
     $("migration-status").replaceChildren(badge(migration.status));
-    $("migration-version").textContent = migration.version ?? "—";
-    $("migration-executor").textContent = migration.executed_by || "—";
+    $("migration-version").textContent = migration.version ?? "--";
+    $("migration-executor").textContent = migration.executed_by || "--";
     $("migration-time").textContent = date(migration.executed_at);
     document.querySelector("h1").textContent = migration.name;
     if (!dirty) { $("sql").value = migration.sql_text; markSaved(); }
@@ -558,11 +777,67 @@ function migrationPage() {
     $("save-migration").hidden = !canEdit || !draft;
     $("execute-migration").hidden = !canEdit || !draft;
     $("execute-migration").disabled = !draft || !canEdit || dirty || executing;
+    if ($("explain-migration")) {
+      $("explain-migration").hidden = !draft || !canEdit;
+      $("explain-migration").disabled = !draft || !canEdit || dirty || executing;
+    }
     $("migration-help").textContent = draft ? "Saving a draft does not execute SQL." : "Executed migrations are read only. Create a new draft for further changes.";
-    $("migration-error").hidden = !migration.error_summary;
-    $("migration-error").textContent = migration.error_summary || "";
+    
+    const errBox = $("migration-error");
+    if (errBox) {
+      errBox.hidden = !migration.error_summary;
+      const errText = $("migration-error-text");
+      if (errText) errText.textContent = migration.error_summary || "";
+    }
+
+    const cloneAction = () => {
+      sessionStorage.setItem("clone_migration", JSON.stringify({
+        name: migration.name + (migration.status === "FAILED" ? " (retry)" : " (copy)"),
+        sql: migration.sql_text,
+      }));
+      location.assign(databasePath + "/migrations/new");
+    };
+
+    for (const cloneId of ["clone-migration-btn"]) {
+      const btn = $(cloneId);
+      if (btn) {
+        btn.hidden = !canEdit || draft;
+        btn.onclick = cloneAction;
+      }
+    }
+
     if (migration.status === "RUNNING") notice("This migration is running or awaiting confirmation. Refresh its status before taking further action.", "", true);
   };
+}
+
+function renderSchemaDiff(result) {
+  const target = $("schema-diff-results");
+  target.replaceChildren();
+  if (result.excluded_object_count > 0) {
+    target.append(node("p", result.excluded_object_count + " existing views, sequences, partitions, or other unsupported relations are outside this diff and will not be changed.", "helper-text"));
+  }
+  if (!result.has_changes) {
+      target.append(node("p", "Supported schema objects match. No migration is needed.", "inline-state"));
+    return;
+  }
+  const titles = { added: "Added", modified: "Modified", removed: "Removed" };
+  for (const actionName of ["added", "modified", "removed"]) {
+    const changes = (result.changes || []).filter(change => change.action === actionName);
+    if (!changes.length) continue;
+    const group = node("section", undefined, "schema-diff-group");
+    group.append(node("h3", titles[actionName] + " - " + changes.length));
+    for (const change of changes) {
+      const item = node("div", undefined, "schema-diff-item " + actionName);
+      const objectName = change.kind === "schema"
+        ? change.schema
+        : [change.schema, change.table, change.name !== change.table ? change.name : ""].filter(Boolean).join(".");
+      item.append(node("strong", (change.kind || "object") + " - " + objectName));
+      if (change.before) item.append(node("code", "Current: " + change.before));
+      if (change.after) item.append(node("code", "Desired: " + change.after));
+      group.append(item);
+    }
+    target.append(group);
+  }
 }
 
 async function usersPage() {
@@ -592,44 +867,156 @@ function bindUserForm() {
   });
 }
 
-async function groupsPage() {
-  const groups = await api("/api/v1/admin/groups");
-  rows("group-list", groups, group => {
-    const controls = node("div", undefined, "toolbar-actions");
-    controls.append(action("Rename", () => openGroup(group)), action("Delete", async () => {
-      if (!await confirmAction("Delete group?", "Delete " + group.name + " and its memberships and database grants? Users may lose access.", "Delete group")) return;
-      await api("/api/v1/admin/groups/" + encode(group.id), { method: "DELETE" });
-      await reload();
-      notice("Group deleted.", "success");
-    }, "danger"));
-    return [node("strong", group.name), node("span", group.id, "mono"), controls];
-  }, 3, "No groups yet. Create a group to assign database access.");
-  options("member-group", groups, item => item.name);
-  options("grant-group", groups, item => item.name);
-  const results = await Promise.allSettled([api("/api/v1/admin/users"), api("/api/v1/admin/databases")]);
-  if (results[0].status === "fulfilled") options("member-user", results[0].value, item => item.username);
-  else fail(results[0].reason);
-  if (results[1].status === "fulfilled") options("grant-database", results[1].value, item => item.label);
-  else fail(results[1].reason);
+function selectedGroup() { return groupData.groups.find(group => group.id === selectedGroupID); }
+function groupName(id) { return groupData.groups.find(group => group.id === id)?.name || id; }
+function userAccess(user, database, excludedGroup = "") {
+  if (!user.is_active) return { level: "DISABLED", sources: ["Inactive account"] };
+  if (!database.is_enabled) return { level: "DISABLED", sources: ["Disabled connection"] };
+  if (user.is_platform_admin) return { level: "VIEW_EDIT", sources: ["Platform administrator"] };
+  const memberships = groupData.members.filter(member => member.user_id === user.id && member.group_id !== excludedGroup).map(member => member.group_id);
+  const grants = groupData.grants.filter(grant => memberships.includes(grant.group_id) && grant.database_id === database.id);
+  return { level: grants.some(grant => grant.access_level === "VIEW_EDIT") ? "VIEW_EDIT" : grants.length ? "VIEW_ONLY" : "NONE", sources: grants.map(grant => groupName(grant.group_id)) };
 }
-
+function accessLabel(level) { return {VIEW_ONLY:"Read only", VIEW_EDIT:"Read + migrations", NONE:"No access", DISABLED:"Unavailable"}[level] || level; }
+function switchGroupTab(tab, focus = false) {
+  groupTab = tab;
+  document.querySelectorAll("[data-group-tab]").forEach(button => {
+    const active = button.dataset.groupTab === tab;
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+    $(button.getAttribute("aria-controls")).hidden = !active;
+    if (active && focus) button.focus();
+  });
+}
+function openMembership() {
+  const group = selectedGroup();
+  if (!group) return;
+  const {dialog, form} = resetDialog("membership-dialog");
+  form.elements.group_id.value = group.id;
+  const memberIDs = groupData.members.filter(member => member.group_id === group.id).map(member => member.user_id);
+  options("member-user", groupData.users.filter(user => user.is_active && !memberIDs.includes(user.id)), user => user.username, "Select a user…");
+  $("membership-context").textContent = "Add a user to " + group.name + ".";
+  form.querySelector('[type="submit"]').disabled = !groupData.users.some(user => user.is_active && !memberIDs.includes(user.id));
+  showFormDialog(dialog);
+}
+function describePermission() {
+  const edit = $("grant-form").elements.access_level.value === "VIEW_EDIT";
+  $("permission-description").textContent = edit ? "Inspect schemas, browse data, run read-only queries, and create, edit, or execute migrations. Migrations can change schemas and data." : "Inspect schemas, browse table rows, and run permitted read-only queries. Cannot author or execute migrations.";
+}
+function openGrant(grant) {
+  const group = selectedGroup();
+  if (!group) return;
+  const { dialog, form } = resetDialog("grant-dialog", grant ? "Edit database access" : "Add database access");
+  form.elements.group_id.value = group.id;
+  const available = groupData.databases.filter(database => grant ? database.id === grant.database_id : database.is_enabled && !groupData.grants.some(item => item.group_id === group.id && item.database_id === database.id));
+  options("grant-database", available, database => database.label, "Select a database…");
+  $("grant-database").value = grant ? grant.database_id : "";
+  form.elements.access_level.value = grant?.access_level || "VIEW_ONLY";
+  form.querySelector('[type="submit"]').disabled = !available.length;
+  $("grant-context").textContent = "Permissions for " + group.name + ".";
+  describePermission();
+  showFormDialog(dialog);
+}
+function renderGroup() {
+  const group = selectedGroup();
+  $("group-detail").hidden = !group;
+  if (!group) return;
+  document.querySelectorAll("[data-group-id]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.groupId === group.id)));
+  const memberships = groupData.members.filter(member => member.group_id === group.id);
+  const members = groupData.users.filter(user => memberships.some(member => member.user_id === user.id));
+  const grants = groupData.grants.filter(grant => grant.group_id === group.id);
+  $("selected-group-name").textContent = group.name;
+  $("group-summary").textContent = `${members.length} member${members.length === 1 ? "" : "s"} - ${grants.length} database${grants.length === 1 ? "" : "s"}`;
+  $("group-actions").replaceChildren(action("Rename", () => openGroup(group)), action("Delete group", async () => {
+    if (!await confirmAction("Delete " + group.name + "?", "This removes the group, its memberships, and database grants. Access provided by other groups or administrator roles remains. Affected sessions will refresh.", "Delete group")) return;
+    await api("/api/v1/admin/groups/" + encode(group.id), {method:"DELETE"});
+    await reload(); notice(group.name + " deleted.", "success");
+  }, "danger"));
+  rows("group-members", members, user => [node("strong", user.username), user.is_active ? user.is_platform_admin ? "Administrator" : "User" : "Inactive account", action("Remove", async () => {
+    const retained = groupData.databases.filter(db => db.is_enabled).map(db => db.label + ": " + accessLabel(userAccess(user, db, group.id).level)).join("; ");
+    if (!await confirmAction("Remove " + user.username + " from " + group.name + "?", "Access from other groups or administrator roles remains. After removal: " + (retained || "No enabled databases.") + ". The user's sessions will refresh.", "Remove member")) return;
+    await api("/api/v1/admin/groups/" + encode(group.id) + "/members/" + encode(user.id), {method:"DELETE"});
+    await reload(); notice(user.username + " removed from " + group.name + ".", "success");
+  }, "danger")], 3, "No members yet. Add a user to this group.");
+  rows("group-grants", grants, grant => {
+    const database = groupData.databases.find(db => db.id === grant.database_id);
+    const controls = node("div", undefined, "toolbar-actions");
+    controls.append(action("Edit", () => openGrant(grant)), action("Revoke", async () => {
+      const retained = members.map(user => {
+        const access = userAccess(user, database || {id:grant.database_id,is_enabled:false}, group.id);
+        return user.username + ": " + accessLabel(access.level) + (access.sources.length ? " via " + access.sources.join(", ") : "");
+      }).join("; ");
+      if (!await confirmAction("Revoke " + group.name + " access to " + (database?.label || grant.database_id) + "?", "Members may retain access through other groups or administrator roles. After revoking: " + (retained || "No current members.") + ". Affected sessions will refresh.", "Revoke access")) return;
+      await api("/api/v1/admin/groups/" + encode(group.id) + "/databases/" + encode(grant.database_id) + "/access", {method:"DELETE"});
+      await reload(); notice("Access to " + (database?.label || grant.database_id) + " revoked for " + group.name + ".", "success");
+    }, "danger"));
+    return [database ? database.label + (database.is_enabled ? "" : " (disabled)") : grant.database_id, badge(grant.access_level), controls];
+  }, 3, "No database access yet.");
+  const effective = members.flatMap(user => groupData.databases.filter(db => db.is_enabled).map(database => ({user, database, ...userAccess(user, database)})));
+  rows("effective-access", effective, item => {
+    const sources = node("div");
+    for (const source of item.sources) sources.append(node("span", source, "access-source"));
+    if (!item.sources.length) sources.textContent = "No group grant";
+    return [item.user.username, item.database.label, accessLabel(item.level), sources];
+  }, 4, "Add members and connections to inspect effective access.");
+  switchGroupTab(groupTab);
+}
+async function groupsPage() {
+  try {
+    const [groups, users, databases, snapshot] = await Promise.all([api("/api/v1/admin/groups"), api("/api/v1/admin/users"), api("/api/v1/admin/databases"), api("/api/v1/admin/access")]);
+    groupData = {groups:groups || [], users:users || [], databases:databases || [], members:snapshot.members || [], grants:snapshot.grants || []};
+    if (!groupData.groups.some(group => group.id === selectedGroupID)) selectedGroupID = groupData.groups[0]?.id || "";
+    $("groups-empty").hidden = Boolean(groupData.groups.length);
+    $("groups-layout").hidden = !groupData.groups.length;
+    $("group-list").replaceChildren(...groupData.groups.map(group => {
+      const button = node("button", group.name, "group-choice");
+      button.type = "button"; button.dataset.groupId = group.id;
+      button.onclick = () => { selectedGroupID = group.id; renderGroup(); };
+      return button;
+    }));
+    renderGroup();
+  } catch(error) {
+    $("group-detail").hidden = true;
+    $("groups-empty").hidden = true;
+    $("group-list").replaceChildren(node("p", "Unable to load groups and access. Try again.", "inline-state"));
+    throw error;
+  }
+}
 function bindGroupForms() {
+  $("add-member").onclick = openMembership;
+  $("add-access").onclick = () => openGrant();
+  const tabs = [...document.querySelectorAll("[data-group-tab]")];
+  tabs.forEach((button, index) => {
+    button.onclick = () => switchGroupTab(button.dataset.groupTab);
+    button.onkeydown = event => {
+      let next;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      if (event.key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      if (next !== undefined) { event.preventDefault(); switchGroupTab(tabs[next].dataset.groupTab, true); }
+    };
+  });
+  $("grant-form").addEventListener("change", describePermission);
   submit("group-form", async data => {
     const id = data.get("id");
-    await api("/api/v1/admin/groups" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: { name: data.get("name") } });
-    $("group-dialog").close(); await reload(); notice("Group saved.", "success");
+    const result = await api("/api/v1/admin/groups" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:{name:data.get("name").trim()}});
+    selectedGroupID = result.id;
+    $("group-dialog").close(); await reload(); notice(data.get("name") + " saved.", "success");
   });
   submit("membership-form", async data => {
-    const remove = data.get("action") === "remove";
-    if (remove && !await confirmAction("Remove group member?", "The user may lose database access provided by this group.", "Remove member")) return;
-    await api("/api/v1/admin/groups/" + encode(data.get("group_id")) + "/members/" + encode(data.get("user_id")), { method: remove ? "DELETE" : "PUT" });
-    notice(remove ? "Member removed from group." : "Member added to group.", "success");
+    const groupID = data.get("group_id"), userID = data.get("user_id");
+    if (!groupID || !userID) throw new Error("Select a user to add.");
+    const user = groupData.users.find(user => user.id === userID), name = groupName(groupID);
+    await api("/api/v1/admin/groups/" + encode(groupID) + "/members/" + encode(userID), {method:"PUT"});
+    $("membership-dialog").close(); await reload(); notice(user.username + " added to " + name + ".", "success");
   });
   submit("grant-form", async data => {
-    const revoke = data.get("access_level") === "REVOKE";
-    if (revoke && !await confirmAction("Revoke database access?", "Members may lose access to this database unless another group provides it.", "Revoke access")) return;
-    await api("/api/v1/admin/groups/" + encode(data.get("group_id")) + "/databases/" + encode(data.get("database_id")) + "/access", { method: revoke ? "DELETE" : "PUT", ...(revoke ? {} : { data: { access_level: data.get("access_level") } }) });
-    notice(revoke ? "Database access revoked." : "Database access updated.", "success");
+    const groupID = data.get("group_id"), databaseID = data.get("database_id");
+    if (!groupID || !databaseID) throw new Error("Select a database.");
+    const name = groupName(groupID), database = groupData.databases.find(db => db.id === databaseID);
+    await api("/api/v1/admin/groups/" + encode(groupID) + "/databases/" + encode(databaseID) + "/access", {method:"PUT",data:{access_level:data.get("access_level")}});
+    $("grant-dialog").close(); await reload(); notice("Access to " + database.label + " updated for " + name + ".", "success");
   });
 }
 
@@ -637,32 +1024,95 @@ async function connectionsPage() {
   const connections = await api("/api/v1/admin/databases");
   rows("connection-list", connections, connection => {
     const controls = node("div", undefined, "toolbar-actions");
-    controls.append(action("Edit", () => openConnection(connection.id)), action("Test connection", async () => {
-      const result = await api("/api/v1/admin/databases/" + encode(connection.id) + "/test-connection", { method: "POST" });
-      notice(result.connected ? "Reader and migrator connections succeeded." : "Connection could not be established. Check the connection settings.", result.connected ? "success" : "error");
-    }));
-    if (connection.is_enabled) controls.append(action("Disable", async () => {
-      if (!await confirmAction("Disable connection?", "Users will no longer be able to access " + connection.label + ". Migration history is preserved.", "Disable connection")) return;
-      await api("/api/v1/admin/databases/" + encode(connection.id), { method: "DELETE" });
-      await reload(); notice("Connection disabled.", "success");
-    }, "danger"));
-    return [node("strong", connection.label), node("span", connection.database_name, "mono"), node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge"), controls];
+    controls.append(
+      action("Edit", () => openConnection(connection.id)),
+      action("Test", async () => {
+        const result = await api("/api/v1/admin/databases/" + encode(connection.id) + "/test-connection", { method: "POST" });
+        notice(
+          result.connected
+            ? "Reader and migrator connections succeeded."
+            : ("Connection test failed: " + (result.message || "Could not reach target database.")),
+          result.connected ? "success" : "error"
+        );
+      })
+    );
+    if (connection.is_enabled) {
+      controls.append(action("Disable", async () => {
+        if (!await confirmAction("Disable connection?", "Users will no longer be able to access " + connection.label + ". Migration history is preserved.", "Disable connection")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id), { method: "DELETE" });
+        await reload(); notice("Connection disabled.", "success");
+      }, "danger"));
+    } else {
+      controls.append(action("Re-enable", async () => {
+        if (!await confirmAction("Re-enable connection?", "Users with group access will be able to connect to " + connection.label + " again.", "Re-enable")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id), { method: "PATCH", data: { is_enabled: true } });
+        await reload(); notice("Connection re-enabled.", "success");
+      }, "primary"));
+      controls.append(action("Delete", async () => {
+        if (!await confirmAction("Delete disabled connection?", "Permanently remove " + connection.label + ". Existing migration history is preserved and prevents deletion.", "Delete connection")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id) + "/delete", { method: "DELETE" });
+        await reload(); notice("Connection deleted.", "success");
+      }, "danger"));
+    }
+    const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
+    return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
   }, 4, "No connections yet. Add a PostgreSQL connection to get started.");
 }
 
+function updateSSLDescription() {
+  $("ssl-description").textContent = {
+    "disable":"Traffic is not encrypted. Use only on a trusted local network, such as an internal Docker network.",
+    "require":"Traffic is encrypted; the server's identity is not verified.",
+    "verify-ca":"Traffic is encrypted and the server certificate authority is verified.",
+    "verify-full":"Traffic is encrypted; the certificate authority and server hostname are verified. The server must trust the database certificate."
+  }[$("connection-ssl").value];
+}
+function connectionPayload(data) {
+  const payload = {};
+  for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
+    if (!data.has(key)) continue;
+    payload[key] = key.endsWith("_password") ? data.get(key) : data.get(key).trim();
+  }
+  payload.port = Number(data.get("port"));
+  payload.use_reader_credentials = $("same-credentials").checked;
+  if (data.get("id")) payload.is_enabled = data.has("is_enabled");
+  return payload;
+}
 function bindConnectionForm() {
+  const form = $("connection-form");
+  if (form._boundConnection) return;
+  form._boundConnection = true;
+  $("same-credentials").onchange = updateCredentialFields;
+  $("connection-ssl").onchange = updateSSLDescription;
+  for (const role of ["reader", "migrator"]) {
+    $("change-" + role + "-password").onclick = () => { setPasswordEditing(role, true); $(role + "-password").focus(); };
+    $("keep-" + role + "-password").onclick = () => { setPasswordEditing(role, false); $("change-" + role + "-password").focus(); };
+  }
+  form.addEventListener("input", () => { $("connection-test-result").hidden = true; });
+  $("test-connection").onclick = () => {
+    if (!form.reportValidity() || form.getAttribute("aria-busy") === "true") return;
+    const data = new FormData(form), payload = connectionPayload(data);
+    if (data.get("id")) payload.database_id = data.get("id");
+    const fields = [...form.querySelectorAll("input, select, button")].map(field => [field, field.disabled]);
+    fields.forEach(([field]) => { if (field !== $("test-connection")) field.disabled = true; });
+    form.setAttribute("aria-busy", "true");
+    form.querySelector(".form-message").hidden = true;
+    $("connection-test-result").hidden = true;
+    busy($("test-connection"), async () => {
+      const result = await api("/api/v1/admin/databases/test-connection", {method:"POST",data:payload});
+      $("connection-test-result").textContent = result.message || (result.connected ? "Connection succeeded." : "Connection failed. Check the host and credentials, then try again.");
+      $("connection-test-result").className = "test-result " + (result.connected ? "success" : "error");
+      $("connection-test-result").hidden = false;
+    }).catch(error => fail(error, form)).finally(() => {
+      fields.forEach(([field, disabled]) => { field.disabled = disabled; });
+      form.removeAttribute("aria-busy");
+    });
+  };
   submit("connection-form", async (data, form) => {
-    const id = data.get("id");
-    const payload = {};
-    for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
-      if (id && key.endsWith("_password") && !data.get(key)) continue;
-      payload[key] = data.get(key);
-    }
-    payload.port = Number(data.get("port"));
-    if (id) payload.is_enabled = data.has("is_enabled");
-    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: payload });
-    form.querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
-    $("connection-dialog").close(); await reload(); notice("Connection saved.", "success");
+    const id = data.get("id"), payload = connectionPayload(data);
+    const label = payload.label;
+    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:payload});
+    $("connection-dialog").close(); await reload(); notice("Connection saved. " + label + " is ready.", "success");
   });
 }
 
@@ -692,9 +1142,14 @@ async function start() {
     dirty = false; location.assign("/login");
   }).catch(error => fail(error));
   const user = await api("/api/v1/auth/me");
+  currentUser = user;
   $("account-name").textContent = user.username;
   document.querySelector(".avatar").textContent = user.username.slice(0, 1).toUpperCase();
   $("admin-nav").hidden = !user.is_platform_admin;
+  if (user.is_platform_admin) {
+    document.querySelectorAll("[data-admin-only]").forEach(element => { element.hidden = false; });
+    bindConnectionForm();
+  }
   if (["users", "groups", "connections"].includes(state.page) && !user.is_platform_admin) {
     $("page-content").replaceChildren(node("p", "Administrator access is required to manage this section.", "notice error"));
     $("page-content").inert = false;
@@ -730,11 +1185,12 @@ async function start() {
 }
 
 window.addEventListener("beforeunload", event => {
-  if (dirty) { event.preventDefault(); event.returnValue = ""; }
+  if (dirty || [...document.querySelectorAll("dialog[open] form")].some(formChanged)) { event.preventDefault(); event.returnValue = ""; }
 });
 if (state.page !== "login") {
   bindNavigation();
   bindDialogs();
+  $("dismiss-notice").onclick = clearNotice;
   $("retry").onclick = () => busy($("retry"), start).catch(error => fail(error));
 }
 start().catch(error => fail(error));

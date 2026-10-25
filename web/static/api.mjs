@@ -12,6 +12,15 @@ export function csrfToken(cookie) {
   catch { return ""; }
 }
 
+let redirectingToLogin = false;
+
+function redirectOnUnauthorized(status) {
+  if (status !== 401 || typeof window === "undefined" || window.location.pathname === "/login" || redirectingToLogin) return;
+  redirectingToLogin = true;
+  const next = window.location.pathname + window.location.search + window.location.hash;
+  window.location.replace("/login?next=" + encodeURIComponent(next));
+}
+
 export async function api(path, { method = "GET", data } = {}) {
   const headers = { Accept: "application/json" };
   if (data !== undefined) headers["Content-Type"] = "application/json";
@@ -25,24 +34,40 @@ export async function api(path, { method = "GET", data } = {}) {
   } catch {
     throw new APIError("Unable to reach the server. Check your connection and try again.");
   }
+  // Redirect as soon as the server reports an expired or invalid session.
+  // Keep login failures on the login page so the user can correct credentials.
+  redirectOnUnauthorized(response.status);
   if (response.status === 204) return null;
   let body;
   try { body = await response.json(); }
   catch { throw new APIError("The server returned an unexpected response. Please try again.", response.status); }
+
   if (!response.ok) {
-    const code = body.error?.code || "";
-    let message = body.error?.message || "The request could not be completed.";
+    const code = body.error?.code || body.code || "";
+    const serverMsg = body.error?.message || body.message || "";
+    let categoryMsg = "The request could not be completed.";
+
     if (response.status === 501 || code === "MIDDLEWARE_NOT_CONFIGURED" || code === "NOT_IMPLEMENTED") {
-      message = "This feature is not available yet. Please try again later.";
+      categoryMsg = "Feature Unavailable: This feature is not enabled or implemented yet.";
     } else if (response.status === 403 && code === "CSRF_INVALID") {
-      message = "Your request could not be verified. Refresh the page and try again.";
+      categoryMsg = "Security Verification Failed: Your session state is invalid. Please refresh the page.";
+    } else if (response.status === 409 || code === "RESOURCE_CONFLICT" || code === "MIGRATION_HISTORY_EXISTS") {
+      categoryMsg = "Conflict Error: The operation cannot be completed due to current resource state.";
     } else if (response.status >= 500 && code !== "SESSION_BUSY") {
-      message = "The server could not complete this request. Please try again.";
+      categoryMsg = "Server Failure: An internal server error occurred.";
+    } else if (response.status === 400 || response.status === 422) {
+      categoryMsg = "Validation Error: Invalid input parameters.";
     }
-    throw new APIError(message, response.status, code);
+
+    // Combine the category prefix with the specific server message if present
+    const finalMessage = serverMsg ? `${categoryMsg} (${serverMsg})` : categoryMsg;
+
+    throw new APIError(finalMessage, response.status, code);
   }
+
   return body.data;
 }
+
 
 export function displayValue(value) {
   if (value === null) return "NULL";
@@ -68,13 +93,14 @@ export function accessCapabilities(level) {
   };
   if (level === "VIEW_ONLY") return {
     label: "Read only",
-    detail: "Browse schema and data, run SELECT queries, and review migration history. Changes require migration access.",
+    detail:"Browse schema and data, run SELECT queries, and review migration history. Changes require migration access.",
   };
   return { label: "Access unavailable", detail: "Effective database permissions could not be verified." };
 }
 
 export function columnKeys(column, constraints = []) {
-  const keys = new Set(constraints.filter(item => item.columns?.includes(column)).map(item => item.type.toUpperCase()));
+  const list = constraints || [];
+  const keys = new Set(list.filter(item => item.columns?.includes(column)).map(item => item.type.toUpperCase()));
   return [["PRIMARY KEY", "PK"], ["FOREIGN KEY", "FK"], ["UNIQUE", "Unique"]]
-    .filter(([type]) => keys.has(type)).map(([, label]) => label).join(", ") || "—";
+    .filter(([type]) => keys.has(type)).map(([, label]) => label).join(", ") || "--";
 }

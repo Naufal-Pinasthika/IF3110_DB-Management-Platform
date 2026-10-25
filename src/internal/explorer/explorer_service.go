@@ -2,6 +2,8 @@ package explorer
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
@@ -16,6 +18,26 @@ type Repository interface {
 	RunQuery(ctx context.Context, databaseID string, input api.RunQueryRequest) (api.QueryResult, error)
 }
 
+type QueryExplainer interface {
+	ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error)
+}
+
+// ExplainQuery returns a plan for one read-only query.
+func (s *Service) ExplainQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.ExplainResult{}, err
+	}
+	if strings.TrimSpace(input.SQL) == "" {
+		return api.ExplainResult{}, fmt.Errorf("%w: sql text cannot be empty", apperror.ErrInvalidInput)
+	}
+	if err := ValidateReadOnlySQL(input.SQL); err != nil {
+		return api.ExplainResult{}, err
+	}
+	explainer, ok := s.Repository.(QueryExplainer)
+	if !ok { return api.ExplainResult{}, fmt.Errorf("%w: query plan analysis is unavailable", apperror.ErrInternal) }
+	return explainer.ExplainQuery(ctx, databaseID, input)
+}
+
 type AccessChecker interface {
 	RequireDatabase(context.Context, auth.Principal, string, api.AccessLevel) error
 	ListDatabases(context.Context, auth.Principal) ([]api.UserDatabase, error)
@@ -28,49 +50,97 @@ type Service struct {
 	QueryMaxRows int
 }
 
+
+
 // ListDatabases lists databases visible through group grants.
 func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]api.UserDatabase, error) {
-	// TODO Use Access.ListDatabases so effective permissions have one implementation.
-	return nil, apperror.ErrNotImplemented
+	return s.Access.ListDatabases(ctx, actor)
 }
+
 
 // GetDatabase returns a visible database summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
-	// TODO Use Access.GetDatabase so an admin flag never bypasses target permissions.
-	return api.UserDatabase{}, apperror.ErrNotImplemented
+	return s.Access.GetDatabase(ctx, actor, databaseID)
 }
+
 
 // ListSchemas lists schemas after checking target access.
 func (s *Service) ListSchemas(ctx context.Context, actor auth.Principal, databaseID string) ([]api.SchemaSummary, error) {
-	// TODO Require at least VIEW_ONLY and read current schemas from the target repository.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return nil, err
+	}
+	return s.Repository.ListSchemas(ctx, databaseID)
 }
+
 
 // ListTables lists tables within a visible schema.
 func (s *Service) ListTables(ctx context.Context, actor auth.Principal, databaseID, schema string) ([]api.TableSummary, error) {
-	// TODO Require at least VIEW_ONLY and validate the schema name before reading catalogs.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(schema) == "" {
+		return nil, fmt.Errorf("%w: schema cannot be empty", apperror.ErrInvalidInput)
+	}
+	return s.Repository.ListTables(ctx, databaseID, schema)
 }
+
 
 // GetTableDetail returns live table structure.
 func (s *Service) GetTableDetail(ctx context.Context, actor auth.Principal, databaseID, schema, table string) (api.TableDetail, error) {
-	// TODO Require at least VIEW_ONLY and request columns and constraints and indexes.
-	// TODO Keep target schema metadata live rather than copying it into platform tables.
-	return api.TableDetail{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.TableDetail{}, err
+	}
+	if strings.TrimSpace(schema) == "" || strings.TrimSpace(table) == "" {
+		return api.TableDetail{}, fmt.Errorf("%w: schema and table cannot be empty", apperror.ErrInvalidInput)
+	}
+	return s.Repository.GetTableDetail(ctx, databaseID, schema, table)
 }
+
 
 // GetTableRows returns a bounded page of visible data.
 func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databaseID, schema, table string, limit, offset int) (api.TableRows, error) {
-	// TODO Require at least VIEW_ONLY and validate schema and table names.
-	// TODO Use default limit 50 and maximum 100 and reject a negative offset.
-	// TODO Call the repository only after validation and permission checks.
-	return api.TableRows{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.TableRows{}, err
+	}
+	if strings.TrimSpace(schema) == "" || strings.TrimSpace(table) == "" {
+		return api.TableRows{}, fmt.Errorf("%w: schema and table cannot be empty", apperror.ErrInvalidInput)
+	}
+
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100 // Hard cap on rows to prevent memory exhaustion
+	}
+	if offset < 0 {
+		return api.TableRows{}, fmt.Errorf("%w: offset cannot be negative", apperror.ErrInvalidInput)
+	}
+
+	return s.Repository.GetTableRows(ctx, databaseID, schema, table, limit, offset)
 }
+
 
 // RunQuery runs a supported read only query.
 func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.RunQueryRequest) (api.QueryResult, error) {
-	// TODO Require at least VIEW_ONLY and validate nonempty SQL and MaxRows against the configured cap.
-	// TODO Call ValidateReadOnlySQL before using the reader transaction.
-	// TODO Keep role restrictions and transaction restrictions even after SQL validation.
-	return api.QueryResult{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.QueryResult{}, err
+	}
+	if strings.TrimSpace(input.SQL) == "" {
+		return api.QueryResult{}, fmt.Errorf("%w: sql text cannot be empty", apperror.ErrInvalidInput)
+	}
+
+	// Determine MaxRows based on client request and platform constraints
+	if input.MaxRows <= 0 {
+		input.MaxRows = s.QueryMaxRows
+	} else if input.MaxRows > s.QueryMaxRows {
+		input.MaxRows = s.QueryMaxRows
+	}
+
+	// 1. Static validation against AST rules
+	if err := ValidateReadOnlySQL(input.SQL); err != nil {
+		return api.QueryResult{}, err
+	}
+
+	// 2. Execution wrapped in ReadOnly Tx
+	return s.Repository.RunQuery(ctx, databaseID, input)
 }

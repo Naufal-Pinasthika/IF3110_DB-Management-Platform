@@ -19,3 +19,17 @@ func WriteAPIError(w http.ResponseWriter, status int, code, message string) {
 		Error: APIError{Code: code, Message: message},
 	})
 }
+
+func WriteJSON(w http.ResponseWriter, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func WriteDataResponse[T any](w http.ResponseWriter, status int, data T) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(DataResponse[T]{
+		Data: data,
+	})
+}

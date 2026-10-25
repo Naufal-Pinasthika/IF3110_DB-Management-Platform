@@ -2,6 +2,9 @@ package migration
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"hash/crc32"
 	"time"
 
 	"gorm.io/gorm"
@@ -19,59 +22,159 @@ var _ Repository = (*PostgresRepository)(nil)
 
 // ListMigrations reads history scoped to a target.
 func (r *PostgresRepository) ListMigrations(ctx context.Context, databaseID string, status models.MigrationStatus) ([]models.Migration, error) {
-	// TODO Filter by database ID and optional status with bound values.
-	// TODO Order applied history by version and document draft and failed ordering.
-	return nil, apperror.ErrNotImplemented
+	var migrations []models.Migration
+	query := r.DB.WithContext(ctx).Where("database_id = ?", databaseID)
+
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+
+	// Order applied history by version (nulls last keeps drafts at the end) and created_at
+	err := query.Order("version ASC NULLS LAST, created_at ASC").Find(&migrations).Error
+	return migrations, err
 }
 
 // GetMigration loads a migration only within its target.
 func (r *PostgresRepository) GetMigration(ctx context.Context, databaseID, migrationID string) (models.Migration, error) {
-	// TODO Use both IDs in the query to prevent cross database object access.
-	return models.Migration{}, apperror.ErrNotImplemented
+	var migration models.Migration
+	err := r.DB.WithContext(ctx).
+		Where("database_id = ? AND id = ?", databaseID, migrationID).
+		First(&migration).Error
+
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return migration, apperror.ErrNotFound
+	}
+	return migration, err
 }
 
 // CreateMigration persists an unversioned draft.
 func (r *PostgresRepository) CreateMigration(ctx context.Context, migration models.Migration) (models.Migration, error) {
-	// TODO Create models.Migration with DRAFT status and a nil Version and supplied creator and times.
-	return models.Migration{}, apperror.ErrNotImplemented
+	migration.Status = models.MigrationDraft
+	migration.Version = nil
+	err := r.DB.WithContext(ctx).Create(&migration).Error
+	return migration, err
 }
 
 // UpdateMigration updates SQL only while the record is a draft.
 func (r *PostgresRepository) UpdateMigration(ctx context.Context, databaseID, migrationID string, sqlText string, now time.Time) (models.Migration, error) {
-	// TODO Update selected model fields with GORM using both IDs and status DRAFT.
-	// TODO Check RowsAffected and update updated_at without using Save upserts.
-	// TODO Report a conflict for RUNNING or APPLIED or FAILED records.
-	return models.Migration{}, apperror.ErrNotImplemented
+	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationDraft).
+		Updates(map[string]interface{}{
+			"sql_text":   sqlText,
+			"updated_at": now,
+		})
+
+	if result.Error != nil {
+		return models.Migration{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return models.Migration{}, apperror.ErrConflict
+	}
+
+	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
 // LockDatabase serializes execution and version allocation for a target.
 func (r *PostgresRepository) LockDatabase(ctx context.Context, databaseID string) (func() error, error) {
-	// TODO Pin a dedicated underlying sql.Conn and hold its PostgreSQL advisory lock.
-	// TODO Reserve enough pool capacity for history queries while the lock connection is held.
-	// TODO Return a release function and keep ownership until final history recording.
-	// TODO A per database mutex is an alternative only for one documented server instance.
-	return nil, apperror.ErrNotImplemented
+	sqlDB, err := r.DB.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate a deterministic 32-bit lock ID from the database UUID
+	lockID := int32(crc32.ChecksumIEEE([]byte(databaseID)))
+
+	_, err = conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", lockID)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	release := func() error {
+		defer conn.Close()
+		_, unlockErr := conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", lockID)
+		return unlockErr
+	}
+
+	return release, nil
 }
 
 // MarkRunning claims the exact draft SQL that will be executed.
 func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
-	// TODO Atomically change DRAFT to RUNNING using both IDs and retain version NULL.
-	// TODO Record the executor and return the claimed SQL to prevent concurrent draft edits.
-	// TODO Report a conflict if another request already claimed the draft.
-	return models.Migration{}, apperror.ErrNotImplemented
+	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationDraft).
+		Updates(map[string]interface{}{
+			"status":      models.MigrationRunning,
+			"executed_by": executorID,
+			"updated_at":  now,
+		})
+
+	if result.Error != nil {
+		return models.Migration{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return models.Migration{}, apperror.ErrConflict
+	}
+
+	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
 // MarkApplied records a confirmed target commit with the next version.
 func (r *PostgresRepository) MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
-	// TODO While holding the database lock allocate the next successful version starting at 1.
-	// TODO Update RUNNING to APPLIED with version and executor and completion time atomically.
-	// TODO Keep version uniqueness per database using the existing constraint.
-	return models.Migration{}, apperror.ErrNotImplemented
+	var maxVersion sql.NullInt64
+	r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND status = ?", databaseID, models.MigrationApplied).
+		Select("MAX(version)").Scan(&maxVersion)
+
+	nextVersion := int64(1)
+	if maxVersion.Valid {
+		nextVersion = maxVersion.Int64 + 1
+	}
+
+	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationRunning).
+		Updates(map[string]interface{}{
+			"status":      models.MigrationApplied,
+			"version":     nextVersion,
+			"executed_by": executorID,
+			"executed_at": now,
+			"updated_at":  now,
+		})
+
+	if result.Error != nil {
+		return models.Migration{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return models.Migration{}, apperror.ErrConflict
+	}
+
+	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
 // MarkFailed records a failure only after rollback is confirmed.
 func (r *PostgresRepository) MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error) {
-	// TODO Update RUNNING to FAILED and keep version NULL with executor and completion time.
-	// TODO Use an update map to preserve NULL version and store a sanitized error summary.
-	return models.Migration{}, apperror.ErrNotImplemented
+	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationRunning).
+		Updates(map[string]interface{}{
+			"status":        models.MigrationFailed,
+			"error_summary": errorSummary,
+			"executed_by":   executorID,
+			"executed_at":   now,
+			"updated_at":    now,
+			// version remains NULL as it's not included in the map
+		})
+
+	if result.Error != nil {
+		return models.Migration{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return models.Migration{}, apperror.ErrConflict
+	}
+	
+	return r.GetMigration(ctx, databaseID, migrationID)
 }

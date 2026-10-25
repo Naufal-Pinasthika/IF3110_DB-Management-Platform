@@ -5,7 +5,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || "playwright")
 const origin = process.env.PREVIEW_ORIGIN || "http://127.0.0.1:28081";
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const errors = [];
-const db = { id: "db1", label: "Inventory development", database_name: "inventory_db", effective_access: "VIEW_EDIT" };
+const db = { id: "db1", label: "Inventory development", database_name: "target_db", effective_access: "VIEW_EDIT" };
 let unavailable = false;
 let administrator = true;
 let access = "VIEW_EDIT";
@@ -140,7 +140,7 @@ try {
   assert.equal(await page.inputValue("#sql"), "SELECT 42 AS answer;");
   queryUnavailable = false;
   await page.click('#query-form [type="submit"]');
-  await page.locator("#query-summary").filter({ hasText: /^1 row ·/ }).waitFor();
+  await page.locator("#query-summary").filter({ hasText: /^1 row -/ }).waitFor();
   assert.match(await page.locator("#query-results").textContent(), /42/);
   const query = requests.find(request => request.path.endsWith("/queries"));
   assert.deepEqual(query.data, { sql: "SELECT 42 AS answer;", max_rows: 50 });
@@ -159,7 +159,7 @@ try {
   assert.equal(await page.locator("#execute-migration").isDisabled(), false);
   await page.click("#execute-migration");
   await page.locator("#confirm-dialog[open]").waitFor();
-  assert.match(await page.locator("#confirm-description").textContent(), /inventory_db/);
+  assert.match(await page.locator("#confirm-description").textContent(), /target_db/);
   holdMigrationExecute = true;
   await page.click("#confirm-button");
   await page.waitForFunction(() => document.getElementById("sql").readOnly);

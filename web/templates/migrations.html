@@ -36,42 +36,78 @@
 {{define "migration"}}<div id="migration-metadata" class="metadata-strip" {{if eq .Kind "migration-new"}}hidden{{end}}>
 <div>
 <span>Status</span>
-<strong id="migration-status">—</strong>
+<strong id="migration-status">--</strong>
 </div>
 <div>
 <span>Version</span>
-<strong id="migration-version">—</strong>
+<strong id="migration-version">--</strong>
 </div>
 <div>
 <span>Executed by</span>
-<strong id="migration-executor">—</strong>
+<strong id="migration-executor">--</strong>
 </div>
 <div>
 <span>Executed at</span>
-<strong id="migration-time">—</strong>
+<strong id="migration-time">--</strong>
 </div>
 </div>
-<div id="migration-error" class="notice error" role="alert" hidden>
+<div id="migration-error" class="migration-error-card" role="alert" hidden>
+<div class="migration-error-header">
+<div class="migration-error-title-wrap">
+<svg class="icon migration-error-icon" viewBox="0 0 24 24" aria-hidden="true">
+<circle cx="12" cy="12" r="10"/>
+<line x1="12" y1="8" x2="12" y2="12"/>
+<line x1="12" y1="16" x2="12.01" y2="16"/>
+</svg>
+<div>
+<strong>Execution Failed &amp; Safely Rolled Back</strong>
+<p class="migration-error-subtitle">The transaction failed and changes were reverted. The database schema and data remain unmodified.</p>
 </div>
+</div>
+<span class="badge red">Aborted</span>
+</div>
+<div class="migration-error-body">
+<div class="migration-error-label">Database Error Output</div>
+<pre class="migration-error-code"><code id="migration-error-text"></code></pre>
+</div>
+</div>
+{{if eq .Kind "migration-new"}}<section class="panel schema-diff-panel" data-edit-only hidden aria-labelledby="schema-diff-title">
+<div class="panel-toolbar"><div><h2 id="schema-diff-title">Generate from schema</h2><p>Describe the complete desired schema across all user schemas with CREATE SCHEMA, CREATE TABLE, and CREATE INDEX statements. Unlisted supported objects will be removed; generated SQL may contain DROP statements.</p></div></div>
+<label for="desired-schema-ddl">Desired schema DDL</label>
+<textarea id="desired-schema-ddl" class="sql-editor schema-ddl-editor" spellcheck="false" placeholder="CREATE TABLE public.customers (
+  id bigint PRIMARY KEY,
+  email text NOT NULL
+);
+
+CREATE INDEX customers_email_idx ON public.customers (email);"></textarea>
+<div class="editor-footer"><span id="schema-diff-status" class="muted" role="status">No comparison run</span><button type="button" class="button primary" id="compare-schema">Compare schemas</button></div>
+<div id="schema-diff-results" class="schema-diff-results" aria-live="polite"></div>
+</section>{{end}}
 <form method="post" id="migration-form" class="panel">
 <div class="panel-toolbar">
 <div>
 <h2>{{if eq .Kind "migration-new"}}Migration draft{{else}}SQL changes{{end}}</h2>
 <p id="migration-help">Saving a draft does not execute SQL.</p>
 </div>
+<div class="toolbar-actions">
+<button type="button" class="button small" id="clone-migration-btn" data-edit-only hidden>Clone as new draft</button>
 <a class="button small" href="{{.DatabaseURL}}/migrations">Back to migrations</a>
+</div>
 </div>{{if eq .Kind "migration-new"}}<div class="editor-name">
 <label for="migration-name">Migration name</label>
 <input id="migration-name" name="name" placeholder="e.g. Add customer email index" required maxlength="200">
 </div>{{end}}<label class="sr-only" for="sql">Migration SQL</label>
-<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL here" required {{if eq .Kind "migration"}}readonly{{end}}>
+<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL statements here (e.g. CREATE TABLE items (...);)
+-- All statements execute atomically within a transaction" required {{if eq .Kind "migration"}}readonly{{end}}>
 </textarea>
 <div class="editor-footer">
 <span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>
 <div class="toolbar-actions">
 <button class="button primary" type="submit" id="save-migration" data-edit-only hidden>Save draft</button>
+<button type="button" class="button small" id="explain-migration" data-edit-only hidden disabled>Analyze plan</button>
 <button class="button danger" type="button" id="execute-migration" data-edit-only hidden {{if eq .Kind "migration-new"}}disabled{{end}}>Execute migration</button>
 </div>
 </div>
 </form>
+<section class="query-results-surface" id="migration-plan-surface" hidden aria-label="Migration execution plan"><div class="section-toolbar"><h2>Execution plan</h2><span class="muted" id="migration-plan-summary" role="status"></span></div><div id="migration-plan" class="plan-list"></div></section>
 <p class="helper-text" id="migration-permission">Checking database permissions…</p>{{end}}

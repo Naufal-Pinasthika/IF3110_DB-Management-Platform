@@ -4,8 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>{{.Title}} · Database Platform</title>
+<title>{{.Title}} - Database Platform</title>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <script src="/static/app.js" type="module">
 </script>
 </head>
@@ -36,6 +37,7 @@
 <symbol id="i-arrow" viewBox="0 0 24 24">
 <path d="M5 12h14m-6-6 6 6-6 6"/>
 </symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
 <symbol id="i-plus" viewBox="0 0 24 24">
 <path d="M12 5v14M5 12h14"/>
 </symbol>
@@ -61,7 +63,7 @@
 <div id="schema-list" class="object-tree"><p class="inline-state">Loading schemas…</p></div>
 </details>
 {{end}}
-<details id="admin-nav" class="admin-navigation" hidden {{if or (eq .Kind "users") (eq .Kind "groups") (eq .Kind "connections")}}open{{end}}>
+<details id="admin-nav" class="admin-navigation" hidden open>
 <summary>Administration</summary>
 <nav class="main-nav" aria-label="Administration">
 <a href="/admin/users" {{if eq .Kind "users"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-users"/></svg>Users</a>
@@ -81,13 +83,14 @@
 <span class="connection-status" title="No connection test has been performed.">Not tested</span>
 </div>
 {{else}}<span class="engine-label">PostgreSQL</span>{{end}}
-<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet" id="logout">Sign out</button></div>
+<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet small" id="logout">Sign out</button></div>
 </header>
 <main id="main" class="content" tabindex="-1">
-<div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="button small" id="retry" hidden>Try again</button></div>
+<div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="button small" id="retry" hidden>Try again</button><button type="button" class="button icon-button" id="dismiss-notice" aria-label="Dismiss notification"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
 <div class="page-heading">
 <h1>{{.Title}}</h1>
 <div class="heading-actions" inert>
+{{if eq .Kind "databases"}}<button type="button" class="button primary" data-admin-only hidden data-open="connection-dialog">Add database</button>{{end}}
 {{if or (eq .Kind "database") (eq .Kind "table")}}<button type="button" class="button small" id="refresh">Refresh</button>{{end}}
 {{if eq .Kind "table"}}<button type="button" class="button small" id="copy-object">Copy name</button><a class="button small" href="{{.DatabaseURL}}/query?schema={{.Schema}}&amp;table={{.Table}}">Open in SQL</a>{{end}}
 {{if eq .Kind "users"}}<button type="button" class="button primary" data-open="user-dialog">New user</button>{{end}}
@@ -124,6 +127,32 @@
 </div>
 </form>
 </dialog>
+<dialog id="connection-dialog" class="connection-dialog" aria-labelledby="connection-dialog-title">
+<form method="post" id="connection-form">
+<div class="dialog-heading"><h2 id="connection-dialog-title">Add connection</h2><button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+<div class="dialog-body">
+<input type="hidden" name="id">
+<section aria-labelledby="connection-details-title"><h3 id="connection-details-title">Connection details</h3>
+<label for="connection-label">Connection label</label><input id="connection-label" name="label" placeholder="e.g. Inventory" required autofocus>
+<div class="form-columns host-port"><div><label for="connection-host">Host</label><input id="connection-host" name="host" required placeholder="db.example.com"></div><div><label for="connection-port">Port</label><input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required></div></div>
+<label for="connection-database">Database name</label><input id="connection-database" name="database_name" required placeholder="inventory">
+</section>
+<section class="connection-section" aria-labelledby="connection-credentials-title"><h3 id="connection-credentials-title">Credentials</h3>
+<p class="helper-text">Platform permissions control allowed actions. PostgreSQL roles control what those credentials can do; use a least-privilege reader role.</p>
+<h4>Reader</h4><div class="form-columns"><div><label for="reader-username">Username</label><input id="reader-username" name="reader_username" autocomplete="off" required></div><div class="secret-field"><label for="reader-password">Password</label><div id="reader-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-reader-password">Change password</button></div><input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-reader-password" hidden>Keep stored password</button><button type="button" class="button quiet small" data-password-target="reader-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
+<div class="credential-heading"><h4>Migrator</h4><label class="checkbox-label"><input type="checkbox" id="same-credentials">Use reader credentials</label></div>
+<p class="helper-text" id="shared-credential-note" hidden>The migrator will use the reader's PostgreSQL role and password. That role needs migration privileges; its database privileges do not become read only.</p>
+<div class="form-columns" id="migrator-fields"><div><label for="migrator-username">Username</label><input id="migrator-username" name="migrator_username" autocomplete="off" required></div><div class="secret-field"><label for="migrator-password">Password</label><div id="migrator-secret-state" class="secret-state" hidden><span>Stored password unchanged</span><button type="button" class="button small" id="change-migrator-password">Change password</button></div><input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" required><button type="button" class="button quiet small" id="keep-migrator-password" hidden>Keep stored password</button><button type="button" class="button quiet small" data-password-target="migrator-password" aria-label="Show password" aria-pressed="false">Show</button></div></div>
+</section>
+<section class="connection-section" aria-labelledby="connection-advanced-title"><h3 id="connection-advanced-title">Advanced settings</h3>
+<label for="connection-ssl">SSL mode</label><select id="connection-ssl" name="ssl_mode" aria-describedby="ssl-description"><option value="verify-full" selected>Verify full</option><option value="verify-ca">Verify CA</option><option value="require">Require</option><option value="disable">Disable -- trusted local networks only</option></select>
+<p class="helper-text" id="ssl-description">Verify full encrypts traffic and verifies the server's identity. The server must trust the database certificate.</p>
+<label class="checkbox-label" id="connection-enabled-field" hidden><input type="checkbox" name="is_enabled">Connection enabled</label>
+<p class="helper-text" id="connection-impact" hidden>Changing the host, credentials, or enabled status affects future database operations. Test these settings before saving.</p>
+</section>
+</div>
+<div class="connection-footer"><div class="form-message" role="alert" hidden></div><p id="connection-test-result" class="test-result" role="status" aria-live="polite" hidden></p><div class="form-actions"><button class="button" type="button" id="test-connection">Test connection</button><div class="toolbar-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save connection</button></div></div></div>
+</form></dialog>
 </body>
 </html>{{end}}
 

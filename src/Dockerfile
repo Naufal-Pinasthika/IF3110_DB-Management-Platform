@@ -1,6 +1,8 @@
 # compile
 FROM golang:1.27.1-alpine AS build
 
+RUN apk add --no-cache gcc musl-dev
+
 WORKDIR /app
 
 COPY go.mod go.sum ./
@@ -8,7 +10,7 @@ RUN go mod download
 COPY src ./src
 COPY web ./web
 
-RUN CGO_ENABLED=0 go build -o /server ./src/cmd/server
+RUN CGO_ENABLED=1 go build -o /server ./src/cmd/server
 
 # run
 FROM alpine:3.20
