@@ -2,7 +2,6 @@ package config_test
 
 import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ func configEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 	t.Setenv("PLATFORM_DATABASE_URL", "postgres://user:***@localhost/platform_db")
-	t.Setenv("DB_CREDENTIAL_ENCRYPTION_KEY", "testYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=") // base64 of 32 'a' bytes
+	t.Setenv("DB_CREDENTIAL_ENCRYPTION_KEY", "testYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=")
 }
 
 func TestLoadDefaults(t *testing.T) {
