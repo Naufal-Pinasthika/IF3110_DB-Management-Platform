@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -32,11 +33,27 @@ type SQLRunner interface {
 	Execute(ctx context.Context, databaseID, sqlText string) error
 }
 
+type SQLExplainer interface {
+	ExplainSQL(ctx context.Context, databaseID, sqlText string, analyze bool) (api.ExplainResult, error)
+}
+
 
 type Service struct {
 	Repository Repository
 	Access     AccessChecker
 	Runner     SQLRunner
+	Explainer  SQLExplainer
+}
+
+// ExplainMigration previews a draft without committing any statement effects.
+func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, analyze bool) (api.ExplainResult, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil { return api.ExplainResult{}, err }
+	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
+	if err != nil { return api.ExplainResult{}, err }
+	if m.Status != models.MigrationDraft { return api.ExplainResult{}, apperror.ErrConflict }
+	if err := validateDMLSQL(m.SQLText); err != nil { return api.ExplainResult{}, err }
+	if s.Explainer == nil { return api.ExplainResult{}, fmt.Errorf("%w: migration plan analysis is unavailable", apperror.ErrInternal) }
+	return s.Explainer.ExplainSQL(ctx, databaseID, m.SQLText, analyze)
 }
 
 
@@ -157,7 +174,6 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationExecuted{}, err
 	}
-
 	release, err := s.Repository.LockDatabase(ctx, databaseID)
 	if err != nil {
 		return api.MigrationExecuted{}, apperror.ErrInternal

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -248,6 +249,29 @@ func (r *PostgresRepository) DisableDatabase(ctx context.Context, databaseID str
 		Model(&models.ManagedDatabase{}).
 		Where("id = ?", databaseID).
 		Update("is_enabled", false).Error
+}
+
+// DeleteDisabledDatabase permanently removes a disabled connection. Database
+// history is protected by the migrations foreign key and prevents deletion.
+func (r *PostgresRepository) DeleteDisabledDatabase(ctx context.Context, databaseID string) error {
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var database models.ManagedDatabase
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", databaseID).First(&database).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) { return apperror.ErrNotFound }
+		if err != nil { return err }
+		if database.IsEnabled { return fmt.Errorf("%w: disable the connection before deleting it", apperror.ErrConflict) }
+
+		result := tx.Where("id = ? AND is_enabled = FALSE", databaseID).Delete(&models.ManagedDatabase{})
+		if result.Error != nil {
+			var sqlState interface{ SQLState() string }
+			if errors.As(result.Error, &sqlState) && sqlState.SQLState() == "23503" {
+				return fmt.Errorf("%w: this connection has migration history and cannot be deleted", apperror.ErrConflict)
+			}
+			return result.Error
+		}
+		if result.RowsAffected != 1 { return apperror.ErrConflict }
+		return nil
+	})
 }
 
 // SetGroupDatabaseAccess upserts one group grant.

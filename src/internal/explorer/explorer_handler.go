@@ -198,3 +198,15 @@ func (h *Handler) RunQuery(w http.ResponseWriter, r *http.Request) {
 
 	api.WriteDataResponse(w, http.StatusOK, result)
 }
+
+// ExplainQuery handles POST /api/v1/databases/{dbId}/queries/explain.
+func (h *Handler) ExplainQuery(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok { api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing or invalid token"); return }
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
+	var req api.ExplainQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil { api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body"); return }
+	result, err := h.Service.ExplainQuery(r.Context(), principal, r.PathValue("dbId"), req)
+	if err != nil { writeError(w, err); return }
+	api.WriteDataResponse(w, http.StatusOK, result)
+}

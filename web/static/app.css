@@ -156,6 +156,14 @@ input[type="checkbox"] { width: 1rem; height: 1rem; min-height: 0; padding: 0; a
 .sql-editor:focus { outline-offset: -2px; }
 .sql-editor[readonly] { background: #f8fafb; }
 .query-results-surface { margin-top: 1.2rem; }
+.plan-list { display: grid; gap: .8rem; }
+.plan-statement { padding: 1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.plan-statement h3 { margin: 0 0 .7rem; font-size: .9rem; }
+.plan-node { margin: .45rem 0 .45rem calc(var(--plan-depth, 0) * 1rem); padding: .65rem .8rem; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 5px; background: var(--surface-raised, #fff); }
+.plan-metrics { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
+.plan-metric { padding: .15rem .45rem; border-radius: 999px; background: var(--subtle, #f1f5f9); color: var(--muted); font-size: .78rem; }
+.plan-filter { display: block; margin-top: .4rem; overflow-wrap: anywhere; }
+.plan-total { margin: .6rem 0 0; color: var(--muted); font-size: .82rem; }
 .execution-target { font-size: .88rem; color: var(--muted); }
 .execution-target code { color: var(--text); font-weight: 500; }
 .shortcut { font-size: .8rem; color: var(--muted); }

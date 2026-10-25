@@ -232,6 +232,17 @@ function resetDialog(id, title) {
   return { dialog, form };
 }
 
+function resetPasswordToggles(dialog) {
+  dialog.querySelectorAll("[data-password-target]").forEach(button => {
+    const input = $(button.dataset.passwordTarget);
+    if (!input) return;
+    input.type = "password";
+    button.textContent = "Show";
+    button.setAttribute("aria-label", "Show password");
+    button.setAttribute("aria-pressed", "false");
+  });
+}
+
 function openUser(user) {
   const { dialog, form } = resetDialog("user-dialog", user ? "Edit user" : "New user");
   $("user-admin-field").hidden = Boolean(user);
@@ -274,6 +285,7 @@ async function openConnection(id) {
   const connection = id ? await api("/api/v1/admin/databases/" + encode(id)) : null;
   if (version !== connectionVersion) return;
   const { dialog, form } = resetDialog("connection-dialog", id ? "Edit connection" : "Add connection");
+  resetPasswordToggles(dialog);
   $("connection-enabled-field").hidden = !id;
   $("connection-impact").hidden = !id;
   if (connection) {
@@ -300,6 +312,7 @@ function bindDialogs() {
     else if (button.dataset.open === "group-dialog") openGroup();
     else openConnection().catch(error => fail(error));
   }));
+<<<<<<< Updated upstream
   async function dismiss(dialog) {
     const form = dialog.querySelector("form");
     if (form?.getAttribute("aria-busy") === "true" || dialog.dataset.dismissing) return;
@@ -317,6 +330,27 @@ function bindDialogs() {
       delete dialog.querySelector("form").dataset.saved;
     });
   });
+=======
+  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => {
+    const dialog = button.closest("dialog");
+    dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
+    resetPasswordToggles(dialog);
+    dialog.close();
+  }));
+  document.querySelectorAll("[data-password-target]").forEach(button => button.addEventListener("click", () => {
+    const input = $(button.dataset.passwordTarget);
+    if (!input) return;
+    const visible = input.type === "password";
+    input.type = visible ? "text" : "password";
+    button.textContent = visible ? "Hide" : "Show";
+    button.setAttribute("aria-label", (visible ? "Hide" : "Show") + " password");
+    button.setAttribute("aria-pressed", String(visible));
+  }));
+  document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("close", () => {
+    dialog.querySelectorAll('input[type="password"], input[name="password"], input[name$="_password"]').forEach(field => { field.value = ""; field.type = "password"; });
+    resetPasswordToggles(dialog);
+  }));
+>>>>>>> Stashed changes
 }
 
 async function loadDatabaseContext() {
@@ -565,6 +599,11 @@ function queryPage() {
       const result = await api(databaseAPI + "/queries", { method: "POST", data: { sql: data.get("sql"), max_rows: Number(data.get("max_rows")) } });
       dataTable("query-results", result.columns, result.rows);
       $("query-summary").textContent = result.row_count + (result.row_count === 1 ? " row" : " rows") + " · " + ((performance.now() - started) / 1000).toFixed(2) + "s" + (result.truncated ? " · Row limit reached" : "");
+      try {
+        const plan = await api(databaseAPI + "/queries/explain", { method: "POST", data: { sql: data.get("sql"), analyze: true } });
+        renderPlans("query-plan", plan);
+        $("query-plan-summary").textContent = "EXPLAIN ANALYZE · rolled back · actual timings and rows";
+      } catch (error) { $("query-plan").replaceChildren(node("p", error.message, "inline-state")); $("query-plan-summary").textContent = "Plan unavailable"; }
       $("query-results").focus();
     } catch (error) {
       $("query-summary").textContent = "Query failed · " + ((performance.now() - started) / 1000).toFixed(2) + "s";
@@ -574,6 +613,41 @@ function queryPage() {
   $("sql").addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); $("query-form").requestSubmit(); }
   });
+}
+
+function renderPlans(targetId, result) {
+  const target = $(targetId);
+  target.replaceChildren();
+  const metric = (label, value) => node("span", label + ": " + value, "plan-metric");
+  const draw = (plan, depth, container) => {
+    const card = node("div", undefined, "plan-node");
+    card.style.setProperty("--plan-depth", Math.min(depth, 8));
+    const title = (plan.node_type || "Plan") + (plan.relation_name ? " · " + (plan.schema ? plan.schema + "." : "") + plan.relation_name : "") + (plan.index_name ? " · " + plan.index_name : "");
+    card.append(node("strong", title));
+    const metrics = node("div", undefined, "plan-metrics");
+    if (plan.join_type) metrics.append(metric("Join", plan.join_type));
+    if (plan.total_cost != null) metrics.append(metric("Cost", Number(plan.startup_cost || 0).toFixed(2) + "–" + Number(plan.total_cost).toFixed(2)));
+    metrics.append(metric("Est. rows", plan.plan_rows ?? 0));
+    if (plan.actual_rows != null) metrics.append(metric("Actual rows × loops", plan.actual_rows + " × " + (plan.actual_loops || 1)));
+    if (plan.actual_total_time != null) metrics.append(metric("Time", Number(plan.actual_total_time).toFixed(3) + " ms"));
+    if (plan.shared_hit_blocks != null || plan.shared_read_blocks != null) metrics.append(metric("Buffers hit/read", (plan.shared_hit_blocks || 0) + "/" + (plan.shared_read_blocks || 0)));
+    card.append(metrics);
+    if (plan.filter) card.append(node("code", "Filter: " + plan.filter, "plan-filter"));
+    container.append(card);
+    for (const child of plan.plans || []) draw(child, depth + 1, container);
+  };
+  for (const [i, plan] of (result.plans || []).entries()) {
+    const section = node("article", undefined, "plan-statement");
+    if ((result.plans || []).length > 1 || plan.statement_index) section.append(node("h3", "Statement " + (plan.statement_index || i + 1)));
+    if (plan.error) { section.append(node("p", "No execution plan: " + plan.error, "inline-state")); target.append(section); continue; }
+    draw(plan.plan, 0, section);
+    const summary = [];
+    if (plan.planning_time != null) summary.push("Planning " + Number(plan.planning_time).toFixed(3) + " ms");
+    if (plan.execution_time != null) summary.push("Execution " + Number(plan.execution_time).toFixed(3) + " ms");
+    if (summary.length) section.append(node("p", summary.join(" · "), "plan-total"));
+    target.append(section);
+  }
+  if (!target.children.length) target.append(node("p", result.raw_text || "The database did not produce an execution plan for these statements.", "inline-state"));
 }
 
 async function migrationsPage() {
@@ -609,6 +683,7 @@ function migrationPage() {
   $("sql").addEventListener("input", () => {
     dirty = $("sql").value !== savedSQL;
     if (!creating) $("execute-migration").disabled = dirty || !draft || !canEdit || executing;
+    if ($("explain-migration")) $("explain-migration").disabled = dirty || !draft || !canEdit || executing;
     $("migration-save-note").textContent = dirty ? "Unsaved changes. Save the draft before executing." : "Changes execute together in a transaction.";
   });
   $("migration-name")?.addEventListener("input", () => { dirty = true; });
@@ -622,6 +697,7 @@ function migrationPage() {
     if (creating) location.assign(databasePath + "/migrations/" + encode(result.id));
     else {
       $("execute-migration").disabled = false;
+      if ($("explain-migration")) $("explain-migration").disabled = !draft || !canEdit || executing;
       $("migration-save-note").textContent = "Draft saved. Review the SQL before executing.";
       notice("Migration draft saved.", "success");
     }
@@ -630,6 +706,7 @@ function migrationPage() {
     if (creating || !draft || !canEdit || dirty || executing) return;
     if (!await confirmAction("Execute migration?", "Run the saved SQL against " + activeDatabase.database_name + " (" + activeDatabase.label + ")? All statements must succeed for the transaction to commit.", "Execute migration")) return;
     executing = true;
+    if ($("explain-migration")) $("explain-migration").disabled = true;
     $("sql").readOnly = true;
     $("save-migration").disabled = true;
     $("migration-save-note").textContent = "Executing on " + activeDatabase.database_name + "…";
@@ -651,11 +728,24 @@ function migrationPage() {
       executing = false;
       $("sql").readOnly = !canEdit || !draft;
       $("save-migration").disabled = false;
+      if ($("explain-migration")) $("explain-migration").disabled = !draft || dirty || !canEdit || executing;
       $("migration-save-note").textContent = draft ? "Changes execute together in a transaction." : "Executed SQL is read only.";
     }
   }).catch(error => { if (error) fail(error); }).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
+  $("explain-migration")?.addEventListener("click", () => busy($("explain-migration"), async () => {
+    if (creating || !draft || dirty || !canEdit) throw new Error("Save the draft before analyzing its plan.");
+    const started = performance.now();
+    const result = await api(endpoint + "/explain", { method: "POST", data: { analyze: true } });
+    renderPlans("migration-plan", result);
+    $("migration-plan-surface").hidden = false;
+    $("migration-plan-summary").textContent = "Rolled back preview · " + ((performance.now() - started) / 1000).toFixed(2) + "s · actual timings are estimates for this run";
+  }).catch(error => fail(error)));
   reload = async () => {
-    if (creating) { $("sql").readOnly = !canEdit; return; }
+    if (creating) {
+      $("sql").readOnly = !canEdit;
+      if ($("explain-migration")) { $("explain-migration").hidden = true; $("explain-migration").disabled = true; }
+      return;
+    }
     const migration = await api(endpoint);
     draft = migration.status === "DRAFT";
     $("migration-status").replaceChildren(badge(migration.status));
@@ -668,6 +758,10 @@ function migrationPage() {
     $("save-migration").hidden = !canEdit || !draft;
     $("execute-migration").hidden = !canEdit || !draft;
     $("execute-migration").disabled = !draft || !canEdit || dirty || executing;
+    if ($("explain-migration")) {
+      $("explain-migration").hidden = !draft || !canEdit;
+      $("explain-migration").disabled = !draft || !canEdit || dirty || executing;
+    }
     $("migration-help").textContent = draft ? "Saving a draft does not execute SQL." : "Executed migrations are read only. Create a new draft for further changes.";
     
     const errBox = $("migration-error");
@@ -904,7 +998,16 @@ async function connectionsPage() {
         if (!await confirmAction("Re-enable connection?", "Users with group access will be able to connect to " + connection.label + " again.", "Re-enable")) return;
         await api("/api/v1/admin/databases/" + encode(connection.id), { method: "PATCH", data: { is_enabled: true } });
         await reload(); notice("Connection re-enabled.", "success");
+<<<<<<< Updated upstream
       }, "primary"));
+=======
+      }, "success"));
+      controls.append(action("Delete", async () => {
+        if (!await confirmAction("Delete disabled connection?", "Permanently remove " + connection.label + ". Existing migration history is preserved and prevents deletion.", "Delete connection")) return;
+        await api("/api/v1/admin/databases/" + encode(connection.id) + "/delete", { method: "DELETE" });
+        await reload(); notice("Connection deleted.", "success");
+      }, "danger"));
+>>>>>>> Stashed changes
     }
     const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
     return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
@@ -961,10 +1064,29 @@ function bindConnectionForm() {
     });
   };
   submit("connection-form", async (data, form) => {
+<<<<<<< Updated upstream
     const id = data.get("id"), payload = connectionPayload(data);
     const label = payload.label;
     await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:payload});
     $("connection-dialog").close(); await reload(); notice("Connection saved. " + label + " is ready.", "success");
+=======
+    const id = data.get("id");
+    const same = $("same-credentials")?.checked;
+    const payload = {};
+    for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
+      if (id && key.endsWith("_password") && !data.get(key)) continue;
+      payload[key] = data.get(key);
+    }
+    if (same) {
+      payload.migrator_username = payload.reader_username;
+      payload.migrator_password = payload.reader_password;
+    }
+    payload.port = Number(data.get("port")) || 5432;
+    if (id) payload.is_enabled = data.has("is_enabled");
+    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: payload });
+    form.querySelectorAll('input[name$="_password"]').forEach(input => { input.value = ""; input.type = "password"; });
+    $("connection-dialog").close(); await reload(); notice("Connection saved.", "success");
+>>>>>>> Stashed changes
   });
 }
 

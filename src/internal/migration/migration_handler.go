@@ -111,6 +111,17 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
+// ExplainMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/explain.
+func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
+	dbID, migrationID := r.PathValue("dbId"), r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	var req struct { Analyze bool `json:"analyze"` }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024)).Decode(&req); err != nil { api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body"); return }
+	result, err := h.Service.ExplainMigration(r.Context(), principal, dbID, migrationID, req.Analyze)
+	if err != nil { writeError(w, err); return }
+	api.WriteDataResponse(w, http.StatusOK, result)
+}
+
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {

@@ -18,6 +18,26 @@ type Repository interface {
 	RunQuery(ctx context.Context, databaseID string, input api.RunQueryRequest) (api.QueryResult, error)
 }
 
+type QueryExplainer interface {
+	ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error)
+}
+
+// ExplainQuery returns a plan for one read-only query.
+func (s *Service) ExplainQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.ExplainResult{}, err
+	}
+	if strings.TrimSpace(input.SQL) == "" {
+		return api.ExplainResult{}, fmt.Errorf("%w: sql text cannot be empty", apperror.ErrInvalidInput)
+	}
+	if err := ValidateReadOnlySQL(input.SQL); err != nil {
+		return api.ExplainResult{}, err
+	}
+	explainer, ok := s.Repository.(QueryExplainer)
+	if !ok { return api.ExplainResult{}, fmt.Errorf("%w: query plan analysis is unavailable", apperror.ErrInternal) }
+	return explainer.ExplainQuery(ctx, databaseID, input)
+}
+
 type AccessChecker interface {
 	RequireDatabase(context.Context, auth.Principal, string, api.AccessLevel) error
 	ListDatabases(context.Context, auth.Principal) ([]api.UserDatabase, error)

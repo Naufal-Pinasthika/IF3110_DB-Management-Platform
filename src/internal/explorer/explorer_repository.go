@@ -3,7 +3,9 @@ package explorer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -303,4 +305,269 @@ func (r *PostgresRepository) RunQuery(ctx context.Context, databaseID string, in
 	}
 
 	return result, rows.Err()
+}
+
+
+// ExplainQuery runs EXPLAIN (FORMAT JSON [, ANALYZE]) on the given SQL within a ReadOnly transaction.
+// For EXPLAIN ANALYZE the transaction is always rolled back so no data is modified.
+func (r *PostgresRepository) ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
+	db, err := r.Targets.Reader(ctx, databaseID)
+	if err != nil {
+		return api.ExplainResult{}, err
+	}
+
+	txCtx, cancel := context.WithTimeout(ctx, r.QueryTimeout)
+	defer cancel()
+
+	// Always use ReadOnly transaction – EXPLAIN ANALYZE still needs to execute the plan
+	// but a ReadOnly tx prevents any data-changing side effects.
+	tx, err := db.BeginTx(txCtx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
+	}
+	defer tx.Rollback() // always rollback – we never commit an EXPLAIN
+
+	var explainSQL string
+	if input.Analyze {
+		explainSQL = "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + input.SQL
+	} else {
+		explainSQL = "EXPLAIN (FORMAT JSON) " + input.SQL
+	}
+
+	rows, err := tx.QueryContext(txCtx, explainSQL)
+	if err != nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInvalidInput, err)
+	}
+	defer rows.Close()
+
+	// PostgreSQL returns the JSON plan as a single text column with one row
+	var rawJSON string
+	if rows.Next() {
+		if err := rows.Scan(&rawJSON); err != nil {
+			return api.ExplainResult{}, fmt.Errorf("%w: failed to scan explain output: %v", apperror.ErrInternal, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
+	}
+
+	// rawJSON is an array of plan objects: [{"Plan": {...}, "Planning Time": 1.2, ...}]
+	var rawPlans []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(rawJSON), &rawPlans); err != nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: failed to parse explain JSON: %v", apperror.ErrInternal, err)
+	}
+
+	plans := make([]api.ExplainPlan, 0, len(rawPlans))
+	for _, raw := range rawPlans {
+		plan := api.ExplainPlan{Analyzed: input.Analyze}
+
+		if planRaw, ok := raw["Plan"]; ok {
+			if err := json.Unmarshal(planRaw, &plan.Plan); err != nil {
+				return api.ExplainResult{}, fmt.Errorf("%w: invalid plan node: %v", apperror.ErrInternal, err)
+			}
+		} else {
+			return api.ExplainResult{}, fmt.Errorf("%w: database returned no plan node", apperror.ErrInternal)
+		}
+		if pt, ok := raw["Planning Time"]; ok {
+			var v float64
+			if json.Unmarshal(pt, &v) == nil {
+				plan.PlanningTime = &v
+			}
+		}
+		if et, ok := raw["Execution Time"]; ok {
+			var v float64
+			if json.Unmarshal(et, &v) == nil {
+				plan.ExecutionTime = &v
+			}
+		}
+		plan.TotalCost = plan.Plan.TotalCost
+		plans = append(plans, plan)
+	}
+
+	// Also produce a human-readable plain text EXPLAIN for reference
+	rawText := buildPlanText(plans)
+
+	return api.ExplainResult{
+		Plans:    plans,
+		RawText:  rawText,
+		Analyzed: input.Analyze,
+	}, nil
+}
+
+// ExplainSQL runs EXPLAIN on migration DML after syntax-aware validation.
+// The outer transaction is always rolled back after the preview.
+func (r *PostgresRepository) ExplainSQL(ctx context.Context, databaseID string, sqlText string, analyze bool) (api.ExplainResult, error) {
+	db, err := r.Targets.Migrator(ctx, databaseID)
+	if err != nil {
+		return api.ExplainResult{}, err
+	}
+
+	txCtx, cancel := context.WithTimeout(ctx, r.QueryTimeout)
+	defer cancel()
+
+	// EXPLAIN ANALYZE executes DML, so isolate it in a transaction and always roll back.
+	tx, err := db.BeginTx(txCtx, nil)
+	if err != nil {
+		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
+	}
+	defer tx.Rollback()
+
+	// Build each statement's EXPLAIN individually (migration may have multiple statements)
+	statements := splitStatements(sqlText)
+	if len(statements) == 0 {
+		return api.ExplainResult{}, fmt.Errorf("%w: no SQL statements found", apperror.ErrInvalidInput)
+	}
+
+	var allPlans []api.ExplainPlan
+
+	for i, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		savepoint := fmt.Sprintf("plan_stmt_%d", i+1)
+		if _, err := tx.ExecContext(txCtx, "SAVEPOINT " + savepoint); err != nil {
+			return api.ExplainResult{}, fmt.Errorf("%w: could not isolate statement plan: %v", apperror.ErrInternal, err)
+		}
+
+		var explainSQL string
+		if analyze {
+			explainSQL = "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + stmt
+		} else {
+			explainSQL = "EXPLAIN (FORMAT JSON) " + stmt
+		}
+
+		rows, err := tx.QueryContext(txCtx, explainSQL)
+		if err != nil {
+			// Some PostgreSQL commands do not have a plan (for example CREATE TABLE).
+			allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: err.Error()})
+			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT " + savepoint)
+			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT " + savepoint)
+			continue
+		}
+
+		var rawJSON string
+		if rows.Next() {
+			_ = rows.Scan(&rawJSON)
+		}
+		rows.Close()
+		if _, err := tx.ExecContext(txCtx, "RELEASE SAVEPOINT " + savepoint); err != nil {
+			return api.ExplainResult{}, fmt.Errorf("%w: could not finish statement plan: %v", apperror.ErrInternal, err)
+		}
+
+		var rawPlans []map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(rawJSON), &rawPlans); err != nil {
+			allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: "could not parse database plan output"})
+			continue
+		}
+
+		for _, raw := range rawPlans {
+			plan := api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1}
+			if planRaw, ok := raw["Plan"]; ok {
+				if err := json.Unmarshal(planRaw, &plan.Plan); err != nil {
+					plan.Error = "could not decode database plan output"
+					allPlans = append(allPlans, plan)
+					continue
+				}
+			} else {
+				plan.Error = "database returned no plan node"
+				allPlans = append(allPlans, plan)
+				continue
+			}
+			if pt, ok := raw["Planning Time"]; ok {
+				var v float64
+				if json.Unmarshal(pt, &v) == nil {
+					plan.PlanningTime = &v
+				}
+			}
+			if et, ok := raw["Execution Time"]; ok {
+				var v float64
+				if json.Unmarshal(et, &v) == nil {
+					plan.ExecutionTime = &v
+				}
+			}
+			plan.TotalCost = plan.Plan.TotalCost
+			allPlans = append(allPlans, plan)
+		}
+	}
+
+	rawText := buildPlanText(allPlans)
+	return api.ExplainResult{
+		Plans:    allPlans,
+		RawText:  rawText,
+		Analyzed: analyze,
+	}, nil
+}
+
+// splitStatements naively splits a SQL script on semicolons (good enough for migration EXPLAIN).
+func splitStatements(sql string) []string {
+	parts := strings.Split(sql, ";")
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// buildPlanText produces a simple text summary from parsed plan objects.
+func buildPlanText(plans []api.ExplainPlan) string {
+	if len(plans) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for i, p := range plans {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		if p.StatementIndex > 0 || len(plans) > 1 {
+			statementIndex := p.StatementIndex
+			if statementIndex == 0 { statementIndex = i + 1 }
+			fmt.Fprintf(&sb, "-- Statement %d\n", statementIndex)
+		}
+		if p.Error != "" { fmt.Fprintf(&sb, "Plan unavailable: %s", p.Error); continue }
+		renderNode(&sb, p.Plan, 0)
+		if p.PlanningTime != nil {
+			fmt.Fprintf(&sb, "\nPlanning Time: %.3f ms", *p.PlanningTime)
+		}
+		if p.ExecutionTime != nil {
+			fmt.Fprintf(&sb, "\nExecution Time: %.3f ms", *p.ExecutionTime)
+		}
+	}
+	return sb.String()
+}
+
+func renderNode(sb *strings.Builder, node api.ExplainNode, depth int) {
+	indent := strings.Repeat("  ", depth)
+	arrow := "->"
+	if depth == 0 {
+		arrow = " "
+	}
+
+	label := node.NodeType
+	if node.RelationName != "" {
+		label += " on " + node.RelationName
+		if node.Alias != "" && node.Alias != node.RelationName {
+			label += " " + node.Alias
+		}
+	}
+	if node.IndexName != "" {
+		label += " using " + node.IndexName
+	}
+
+	cost := fmt.Sprintf("(cost=%.2f..%.2f rows=%d width=%d)", node.StartupCost, node.TotalCost, node.PlanRows, node.PlanWidth)
+	line := fmt.Sprintf("%s%s %s  %s", indent, arrow, label, cost)
+
+	if node.ActualTotalTime != nil && node.ActualRows != nil {
+		actual := fmt.Sprintf("(actual time=%.3f..%.3f rows=%d loops=%d)",
+			*node.ActualStartupTime, *node.ActualTotalTime, *node.ActualRows, *node.ActualLoops)
+		line += "  " + actual
+	}
+
+	sb.WriteString(line + "\n")
+	for _, child := range node.Plans {
+		renderNode(sb, child, depth+1)
+	}
 }

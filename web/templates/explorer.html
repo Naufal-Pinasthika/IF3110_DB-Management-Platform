@@ -47,6 +47,7 @@
 <textarea id="sql" name="sql" class="sql-editor" spellcheck="false" placeholder="SELECT * FROM public.your_table LIMIT 50;" required></textarea>
 <div class="editor-footer"><span class="execution-target">Target: <code class="target-database">checking…</code></span><div class="toolbar-actions"><span class="shortcut">Ctrl / ⌘ + Enter</span><label for="max-rows">Limit</label><select id="max-rows" name="max_rows"><option>25</option><option selected>50</option><option>100</option></select><button type="submit" class="button primary">Run query</button></div></div>
 </form>
+<section class="query-results-surface" aria-label="Execution plan"><div class="section-toolbar"><h2>Execution plan</h2><span class="muted" id="query-plan-summary" role="status">Plan appears after a query runs.</span></div><div id="query-plan" class="plan-list"></div></section>
 <section class="query-results-surface" aria-label="Query results">
 <div class="section-toolbar"><h2>Results</h2><span class="muted" id="query-summary" role="status">No query run</span></div>
 <div class="table-scroll" id="query-results" tabindex="0"><p class="inline-state">Run a SELECT query to view results.</p></div>

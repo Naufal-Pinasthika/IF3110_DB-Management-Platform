@@ -151,8 +151,75 @@
 <p class="helper-text" id="connection-impact" hidden>Changing the host, credentials, or enabled status affects future database operations. Test these settings before saving.</p>
 </section>
 </div>
+<<<<<<< Updated upstream
 <div class="connection-footer"><div class="form-message" role="alert" hidden></div><p id="connection-test-result" class="test-result" role="status" aria-live="polite" hidden></p><div class="form-actions"><button class="button" type="button" id="test-connection">Test connection</button><div class="toolbar-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save connection</button></div></div></div>
 </form></dialog>
+=======
+<div>
+<label for="connection-port">Port</label>
+<input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required>
+</div>
+</div>
+<div class="form-columns">
+<div>
+<label for="connection-database">Database name</label>
+<input id="connection-database" name="database_name" required placeholder="target_db" value="target_db">
+</div>
+<div>
+<label for="connection-ssl">SSL mode</label>
+<select id="connection-ssl" name="ssl_mode">
+<option value="disable" selected>Disable</option>
+<option value="require">Require</option>
+<option value="verify-full">Verify full</option>
+<option value="verify-ca">Verify CA</option>
+</select>
+</div>
+</div>
+<fieldset>
+<legend>Reader credentials</legend>
+<p class="helper-text">Used for schema browsing and read-only queries.</p>
+<div class="form-columns">
+<div>
+<label for="reader-username">Username</label>
+<input id="reader-username" name="reader_username" autocomplete="off" required placeholder="admin" value="admin">
+</div>
+<div>
+<label for="reader-password">Password</label>
+<div class="password-control"><input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required placeholder="root" value="root"><button type="button" class="password-toggle" data-password-target="reader-password" aria-label="Show reader password" aria-pressed="false">Show</button></div>
+</div>
+</div>
+</fieldset>
+<fieldset id="migrator-fieldset">
+<div class="fieldset-header">
+<legend>Migrator credentials</legend>
+<label class="checkbox-label" style="margin: 0; font-weight: normal; font-size: 0.875rem;">
+<input type="checkbox" id="same-credentials" checked> Same as Reader
+</label>
+</div>
+<p class="helper-text">Used to execute authorized migrations.</p>
+<div class="form-columns" id="migrator-fields" hidden>
+<div>
+<label for="migrator-username">Username</label>
+<input id="migrator-username" name="migrator_username" autocomplete="off" placeholder="admin" value="admin">
+</div>
+<div>
+<label for="migrator-password">Password</label>
+<div class="password-control"><input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" placeholder="root" value="root"><button type="button" class="password-toggle" data-password-target="migrator-password" aria-label="Show migrator password" aria-pressed="false">Show</button></div>
+</div>
+</div>
+</fieldset>
+<p class="helper-text" id="connection-password-help">Passwords are never displayed after saving.</p>
+<label class="checkbox-label" id="connection-enabled-field" hidden>
+<input type="checkbox" name="is_enabled">Connection enabled</label>
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save connection</button>
+</div>
+</form>
+</dialog>
+>>>>>>> Stashed changes
 </body>
 </html>{{end}}
 

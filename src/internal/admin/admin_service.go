@@ -33,6 +33,10 @@ type Repository interface {
 	DeleteGroupDatabaseAccess(ctx context.Context, groupID, databaseID string, now time.Time) error
 }
 
+type DisabledDatabaseDeleter interface {
+	DeleteDisabledDatabase(ctx context.Context, databaseID string) error
+}
+
 type AdminChecker interface {
 	RequirePlatformAdmin(context.Context, auth.Principal) error
 }
@@ -463,6 +467,17 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 	if inv, ok := s.Connections.(poolInvalidator); ok {
 		inv.InvalidateTargetPools(databaseID)
 	}
+	return nil
+}
+
+// DeleteManagedDatabase permanently removes a disabled connection registration.
+func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil { return err }
+	if databaseID == "" { return apperror.New("database id required") }
+	deleter, ok := s.Repository.(DisabledDatabaseDeleter)
+	if !ok { return apperror.ErrInternal }
+	if err := deleter.DeleteDisabledDatabase(ctx, databaseID); err != nil { return err }
+	if inv, ok := s.Connections.(poolInvalidator); ok { inv.InvalidateTargetPools(databaseID) }
 	return nil
 }
 

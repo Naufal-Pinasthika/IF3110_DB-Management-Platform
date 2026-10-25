@@ -3,7 +3,6 @@ package migration
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
@@ -22,14 +21,6 @@ var _ SQLRunner = (*Runner)(nil)
 
 // Execute runs every migration statement in one target transaction.
 func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error {
-	upperSQL := strings.ToUpper(sqlText)
-	if strings.Contains(upperSQL, "BEGIN") || strings.Contains(upperSQL, "COMMIT") || strings.Contains(upperSQL, "ROLLBACK") {
-		return fmt.Errorf("%w: manual transaction control is forbidden", apperror.ErrInvalidInput)
-	}
-	if strings.Contains(upperSQL, "CREATE INDEX CONCURRENTLY") || strings.Contains(upperSQL, "CREATE DATABASE") {
-		return fmt.Errorf("%w: unsupported statement in transaction", apperror.ErrInvalidInput)
-	}
-
 	// Target migrator connection
 	migratorDB, err := r.Targets.Migrator(ctx, databaseID)
 	if err != nil {

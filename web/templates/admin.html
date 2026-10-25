@@ -25,7 +25,10 @@
 <form method="post" id="user-form">
 <div class="dialog-heading">
 <h2 id="user-dialog-title">New user</h2>
+<<<<<<< Updated upstream
 <button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+=======
+>>>>>>> Stashed changes
 </div>
 <input type="hidden" name="id">
 <label for="user-username">Username</label>
@@ -74,6 +77,7 @@
 <p class="helper-text">Effective access for this group's members across enabled databases. The strongest group permission applies. Platform administrators retain read and migration access. Inactive accounts cannot sign in.</p>
 <div class="table-scroll"><table><thead><tr><th>User</th><th>Database</th><th>Effective access</th><th>Provided by</th></tr></thead><tbody id="effective-access"></tbody></table></div>
 </div>
+<<<<<<< Updated upstream
 </section></div>
 <dialog id="membership-dialog" aria-labelledby="membership-dialog-title"><form method="post" id="membership-form">
 <div class="dialog-heading"><h2 id="membership-dialog-title">Add member</h2><button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
@@ -98,6 +102,105 @@
 <input type="hidden" name="id"><label for="group-name">Group name</label><input id="group-name" name="name" required maxlength="100" placeholder="e.g. Developers">
 <div class="form-message" role="alert" hidden></div><div class="form-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save group</button></div>
 </form></dialog>{{end}}
+=======
+</div>
+<form method="post" id="membership-form" class="panel-form">
+<label for="member-group">Target group</label>
+<select id="member-group" name="group_id" required>
+<option value="" disabled selected>Select a group…</option>
+</select>
+<label for="member-user">Platform user</label>
+<select id="member-user" name="user_id" required>
+<option value="" disabled selected>Select a user…</option>
+</select>
+<label>Membership action</label>
+<div class="action-segmented" id="membership-action-group">
+<label class="segmented-item">
+<input type="radio" name="action" value="add" checked>
+<svg class="icon" style="width:1rem;height:1rem"><use href="#i-plus"/></svg>
+<span>Add to group</span>
+</label>
+<label class="segmented-item danger-option">
+<input type="radio" name="action" value="remove">
+<span>✕ Remove from group</span>
+</label>
+</div>
+<div class="form-message" role="alert" hidden>
+</div>
+<button class="button success full-width" type="submit" id="membership-submit">Add to group</button>
+</form>
+</section>
+<section class="panel admin-card">
+<div class="panel-toolbar">
+<div class="card-header-flex">
+<div class="card-icon-wrap icon-access">
+<svg class="icon"><use href="#i-connect"/></svg>
+</div>
+<div>
+<h2>Database access</h2>
+<p>Configure database permissions for each group.</p>
+</div>
+</div>
+</div>
+<form method="post" id="grant-form" class="panel-form">
+<label for="grant-group">Target group</label>
+<select id="grant-group" name="group_id" required>
+<option value="" disabled selected>Select a group…</option>
+</select>
+<label for="grant-database">Managed database</label>
+<select id="grant-database" name="database_id" required>
+<option value="" disabled selected>Select a database…</option>
+</select>
+<label>Access level</label>
+<div class="access-level-cards">
+<label class="access-level-card is-selected">
+<input type="radio" name="access_level" value="VIEW_ONLY" checked>
+<div class="access-card-radio"></div>
+<div class="access-card-content">
+<strong>View Only (Read)</strong>
+<span>Inspect schema, view table rows, and run read-only queries</span>
+</div>
+</label>
+<label class="access-level-card">
+<input type="radio" name="access_level" value="VIEW_EDIT">
+<div class="access-card-radio"></div>
+<div class="access-card-content">
+<strong>View + Edit (Migrations)</strong>
+<span>All read access plus create, edit, and execute migrations</span>
+</div>
+</label>
+<label class="access-level-card danger-card">
+<input type="radio" name="access_level" value="REVOKE">
+<div class="access-card-radio"></div>
+<div class="access-card-content">
+<strong>Revoke Access</strong>
+<span>Remove this group's permissions on the target database</span>
+</div>
+</label>
+</div>
+<div class="form-message" role="alert" hidden>
+</div>
+<button class="button primary full-width" type="submit" id="grant-submit">Grant read-only access</button>
+</form>
+</section>
+</div>
+<dialog id="group-dialog" aria-labelledby="group-dialog-title">
+<form method="post" id="group-form">
+<div class="dialog-heading">
+<h2 id="group-dialog-title">New group</h2>
+</div>
+<input type="hidden" name="id">
+<label for="group-name">Group name</label>
+<input id="group-name" name="name" required maxlength="100" placeholder="e.g. engineering, analysts">
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save group</button>
+</div>
+</form>
+</dialog>{{end}}
+>>>>>>> Stashed changes
 
 {{define "connections"}}<section class="panel connections-panel">
 <div class="panel-toolbar">

@@ -113,6 +113,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 			Repository: migrationRepo,
 			Access:     accessService,
 			Runner:     migrationRunner,
+			Explainer:  explorerRepo,
 		}
 		migrationHandler := &migration.Handler{Service: migrationService}
 
@@ -135,6 +136,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.GetManagedDatabase = http.HandlerFunc(adminHandler.GetManagedDatabase)
 		routeHandlers.UpdateManagedDatabase = http.HandlerFunc(adminHandler.UpdateManagedDatabase)
 		routeHandlers.DisableManagedDatabase = http.HandlerFunc(adminHandler.DisableManagedDatabase)
+		routeHandlers.DeleteManagedDatabase = http.HandlerFunc(adminHandler.DeleteManagedDatabase)
 		routeHandlers.TestDatabaseConnection = http.HandlerFunc(adminHandler.TestDatabaseConnection)
 
 		// Admin database grants
@@ -149,6 +151,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.GetTableDetail = http.HandlerFunc(explorerHandler.GetTableDetail)
 		routeHandlers.GetTableRows = http.HandlerFunc(explorerHandler.GetTableRows)
 		routeHandlers.RunQuery = http.HandlerFunc(explorerHandler.RunQuery)
+		routeHandlers.ExplainQuery = http.HandlerFunc(explorerHandler.ExplainQuery)
 
 		// Migrations
 		routeHandlers.ListMigrations = http.HandlerFunc(migrationHandler.ListMigrations)
@@ -156,6 +159,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.CreateMigration = http.HandlerFunc(migrationHandler.CreateMigration)
 		routeHandlers.UpdateMigration = http.HandlerFunc(migrationHandler.UpdateMigration)
 		routeHandlers.ExecuteMigration = http.HandlerFunc(migrationHandler.ExecuteMigration)
+		routeHandlers.ExplainMigration = http.HandlerFunc(migrationHandler.ExplainMigration)
 
 		// Middlewares
 		routeMiddleware.PlatformAdmin = accessService.PlatformAdminMiddleware

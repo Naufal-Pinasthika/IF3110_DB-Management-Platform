@@ -91,9 +91,11 @@
 <div class="editor-footer">
 <span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>
 <div class="toolbar-actions">
+<button type="button" class="button small" id="explain-migration" data-edit-only hidden disabled>Analyze plan</button>
 <button class="button primary" type="submit" id="save-migration" data-edit-only hidden>Save draft</button>
 <button class="button danger" type="button" id="execute-migration" data-edit-only hidden {{if eq .Kind "migration-new"}}disabled{{end}}>Execute migration</button>
 </div>
 </div>
 </form>
+<section class="query-results-surface" id="migration-plan-surface" hidden aria-label="Migration execution plan"><div class="section-toolbar"><h2>Execution plan</h2><span class="muted" id="migration-plan-summary" role="status"></span></div><div id="migration-plan" class="plan-list"></div></section>
 <p class="helper-text" id="migration-permission">Checking database permissions…</p>{{end}}

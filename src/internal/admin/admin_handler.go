@@ -416,6 +416,25 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 
+	// DeleteManagedDatabase permanently removes a disabled connection.
+	func (h *Handler) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if !ok {
+			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+			return
+		}
+		dbID := r.PathValue("dbId")
+		if dbID == "" {
+			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+			return
+		}
+		if err := h.Service.DeleteManagedDatabase(r.Context(), principal, dbID); err != nil {
+			h.mapError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+
 	// TestDatabaseConnection handles POST /api/v1/admin/databases/{dbId}/test-connection.
 	func (h *Handler) TestDatabaseConnection(w http.ResponseWriter, r *http.Request) {
 		principal, ok := auth.PrincipalFromContext(r.Context())

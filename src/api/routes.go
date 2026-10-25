@@ -21,6 +21,7 @@ type RouteHandlers struct {
 	GetManagedDatabase http.Handler
 	UpdateManagedDatabase http.Handler
 	DisableManagedDatabase http.Handler
+	DeleteManagedDatabase http.Handler
 	TestDatabaseConnection http.Handler
 	SetGroupDatabaseAccess http.Handler
 	DeleteGroupDatabaseAccess http.Handler
@@ -31,11 +32,13 @@ type RouteHandlers struct {
 	GetTableDetail http.Handler
 	GetTableRows http.Handler
 	RunQuery http.Handler
+	ExplainQuery http.Handler
 	ListMigrations http.Handler
 	GetMigration http.Handler
 	CreateMigration http.Handler
 	UpdateMigration http.Handler
 	ExecuteMigration http.Handler
+	ExplainMigration http.Handler
 }
 
 type RouteMiddleware struct {
@@ -106,6 +109,7 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "GET", "/api/v1/admin/databases/{dbId}", handlers.GetManagedDatabase, session, admin)
 	registerRoute(mux, "PATCH", "/api/v1/admin/databases/{dbId}", handlers.UpdateManagedDatabase, session, admin, csrf)
 	registerRoute(mux, "DELETE", "/api/v1/admin/databases/{dbId}", handlers.DisableManagedDatabase, session, admin, csrf)
+	registerRoute(mux, "DELETE", "/api/v1/admin/databases/{dbId}/delete", handlers.DeleteManagedDatabase, session, admin, csrf)
 	registerRoute(mux, "POST", "/api/v1/admin/databases/{dbId}/test-connection", handlers.TestDatabaseConnection, session, admin, csrf)
 
 	// Admin database grants
@@ -122,6 +126,7 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 
 	// Read only query endpoint
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/queries", handlers.RunQuery, session, databaseView, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/queries/explain", handlers.ExplainQuery, session, databaseView, csrf)
 
 	// Migrations
 	registerRoute(mux, "GET", "/api/v1/databases/{dbId}/migrations", handlers.ListMigrations, session, databaseView)
@@ -129,4 +134,5 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations", handlers.CreateMigration, session, databaseEdit, csrf)
 	registerRoute(mux, "PATCH", "/api/v1/databases/{dbId}/migrations/{migrationId}", handlers.UpdateMigration, session, databaseEdit, csrf)
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/execute", handlers.ExecuteMigration, session, databaseEdit, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/explain", handlers.ExplainMigration, session, databaseEdit, csrf)
 }
