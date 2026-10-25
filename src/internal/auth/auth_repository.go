@@ -42,7 +42,7 @@ func (r *PostgresRepository) FindUserByID(ctx context.Context, userID string) (m
 		return models.User{}, errNotFound
 	}
 	if err != nil {
-		return  models.User{}, errNotFound
+		return models.User{}, err
 	}
 
 	return user, nil
@@ -106,7 +106,7 @@ func (r *PostgresRepository) TouchSession(ctx context.Context, sessionID string,
 func (r *PostgresRepository) RotateSession(ctx context.Context, sessionID string, expectedHash string, nextHash string, now, graceUntil time.Time) error {
 	// Query WHERE SessionID present, token_hash = expectedHash, revoked_at NULL, absolute_expires > now (session still up)
 	result := r.DB.WithContext(ctx).Model(&models.Session{}).
-				Where("id = ? AND token_hash = ? AND revoked_at IS NULL AND absolute_expires > ?", sessionID, expectedHash, now).
+				Where("id = ? AND token_hash = ? AND revoked_at IS NULL AND absolute_expires_at > ?", sessionID, expectedHash, now).
 		// update token_hash, previous_token_hash, previous_valid_untul, rotated_at
 		Updates(map[string]any{
 					"token_hash" : nextHash, 
@@ -119,9 +119,10 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, sessionID string
 	if result.Error != nil {
 		return result.Error
 	}
-	// return error if no rows affected (because session have been revoked/expired)
+	// Another request may already have rotated this token. Let validation retry
+	// against the stored token and grace period before rejecting the session.
 	if result.RowsAffected != 1 {
-		return ErrUnauthenticated
+		return errRotationConflict
 	}
 
 	// RotateSession process succeed
@@ -147,7 +148,7 @@ func (r *PostgresRepository) RevokeSession(ctx context.Context, sessionID string
 func (r *PostgresRepository) RevokeUserSessions(ctx context.Context, userID string, now time.Time) error {
 	// Query WHERE username into DB via gorm & pass it to &user
 	err := r.DB.WithContext(ctx).Model(&models.Session{}).
-			Where("id = ? AND revoked_at IS NULL", userID).
+			Where("user_id = ? AND revoked_at IS NULL", userID).
 		Update("revoked_at", now).Error
 
 	if err != nil {

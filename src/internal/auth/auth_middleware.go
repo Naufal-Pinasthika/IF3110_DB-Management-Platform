@@ -34,7 +34,7 @@ func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 
 		validated, err := h.Service.ValidateSession(r.Context(), cookie.Value, time.Now().UTC())
 		if err != nil {
-			WriteAuthError(w, ErrUnauthenticated)
+			WriteAuthError(w, err)
 			return 
 		}
 

@@ -1,0 +1,19 @@
+name: if3110-tests
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: platform_test
+      POSTGRES_PASSWORD: platform_test
+      POSTGRES_DB: platform_ci_test
+    ports:
+      - "127.0.0.1:15433:5432"
+    # No production volume or development seed; data is disposable.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform_test -d platform_ci_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
