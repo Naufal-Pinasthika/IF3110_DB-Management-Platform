@@ -2,9 +2,10 @@ package auth
 
 import (
 	"context"
-	"time"
-	"gorm.io/gorm"
+	"errors"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+	"gorm.io/gorm"
+	"time"
 )
 
 // PostgresRepository uses GORM models and leaves HTTP mapping to the service.
@@ -20,8 +21,11 @@ func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username st
 	err := r.DB.WithContext(ctx).Where("username = ?", username).First(&user).Error
 
 	// return empty model and err if failed
-	if err != nil {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return models.User{}, errNotFound
+	}
+	if err != nil {
+		return models.User{}, err
 	}
 
 	return user, nil
@@ -34,8 +38,11 @@ func (r *PostgresRepository) FindUserByID(ctx context.Context, userID string) (m
 	err := r.DB.WithContext(ctx).Where("id = ?", userID).First(&user).Error
 
 	// return empty model and err if failed
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.User{}, errNotFound
+	}
 	if err != nil {
-		return  models.User{}, errNotFound
+		return models.User{}, err
 	}
 
 	return user, nil
@@ -45,7 +52,7 @@ func (r *PostgresRepository) FindUserByID(ctx context.Context, userID string) (m
 func (r *PostgresRepository) CreateSession(ctx context.Context, session *models.Session) error {
 	// create atomic Session without creating duplicate User table (FK) using .Omit()
 	// https://stackoverflow.com/questions/65363974/
-	
+
 	// psql will generate Session uuid automatically
 	err := r.DB.WithContext(ctx).Omit("User").Create(session).Error
 	if err != nil {
@@ -60,12 +67,15 @@ func (r *PostgresRepository) CreateSession(ctx context.Context, session *models.
 func (r *PostgresRepository) FindSessionByTokenHash(ctx context.Context, tokenHash string) (models.Session, error) {
 	var session models.Session
 
-	// Query WHERE token_hash or previous_token_hash 
+	// Query WHERE token_hash or previous_token_hash
 	err := r.DB.WithContext(ctx).Where("token_hash = ? OR previous_token_hash = ?", tokenHash, tokenHash).First(&session).Error
 
 	// return empty model and err if failed
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.Session{}, errNotFound
+	}
 	if err != nil {
-		return  models.Session{}, errNotFound
+		return models.Session{}, err
 	}
 
 	return session, nil
@@ -75,10 +85,10 @@ func (r *PostgresRepository) FindSessionByTokenHash(ctx context.Context, tokenHa
 func (r *PostgresRepository) TouchSession(ctx context.Context, sessionID string, now time.Time) error {
 	// Update last_seen_at for an active session (SessionID present & absolute_expires_at > now)
 	result := r.DB.WithContext(ctx).Model(&models.Session{}).
-				Where("id = ? and absolute_expires_at > ?", sessionID, now).
-				// prevent race condition using GREATEST() expr (ensure the most recent is updated)
-				Update("last_seen_at", gorm.Expr("GREATEST(last_seen_at, ?)", now))
-	
+		Where("id = ? AND revoked_at IS NULL AND absolute_expires_at > ?", sessionID, now).
+		// prevent race condition using GREATEST() expr (ensure the most recent is updated)
+		Update("last_seen_at", gorm.Expr("GREATEST(last_seen_at, ?)", now))
+
 	// return error if failed
 	if result.Error != nil {
 		return result.Error
@@ -88,31 +98,32 @@ func (r *PostgresRepository) TouchSession(ctx context.Context, sessionID string,
 		return ErrUnauthenticated
 	}
 
-    // TouchSession process succeed
-	return nil	
+	// TouchSession process succeed
+	return nil
 }
 
 // atomically replaces the active token hash
 func (r *PostgresRepository) RotateSession(ctx context.Context, sessionID string, expectedHash string, nextHash string, now, graceUntil time.Time) error {
 	// Query WHERE SessionID present, token_hash = expectedHash, revoked_at NULL, absolute_expires > now (session still up)
 	result := r.DB.WithContext(ctx).Model(&models.Session{}).
-				Where("id = ? AND token_hash = ? AND revoked_at IS NULL AND absolute_expires > ?", sessionID, expectedHash, now).
-				// update token_hash, previous_token_hash, previous_valid_untul, rotated_at
-				Updates(map[string]any{
+				Where("id = ? AND token_hash = ? AND revoked_at IS NULL AND absolute_expires_at > ?", sessionID, expectedHash, now).
+		// update token_hash, previous_token_hash, previous_valid_untul, rotated_at
+		Updates(map[string]any{
 					"token_hash" : nextHash, 
 					"previous_token_hash" : expectedHash,
 					"previous_valid_until" : graceUntil,
 					"rotated_at" : now,
-				})
-				
+		})
+
 	// return error if failed
 	if result.Error != nil {
 		return result.Error
 	}
-	// return error if no rows affected (because session have been revoked/expired)
+	// Another request may already have rotated this token. Let validation retry
+	// against the stored token and grace period before rejecting the session.
 	if result.RowsAffected != 1 {
-		return ErrUnauthenticated
-	}	
+		return errRotationConflict
+	}
 
 	// RotateSession process succeed
 	return nil
@@ -122,8 +133,8 @@ func (r *PostgresRepository) RotateSession(ctx context.Context, sessionID string
 func (r *PostgresRepository) RevokeSession(ctx context.Context, sessionID string, now time.Time) error {
 	// Query WHERE username into DB via gorm & pass it to &user
 	err := r.DB.WithContext(ctx).Model(&models.Session{}).
-			Where("id = ? AND revoked_at IS NULL", sessionID).
-			Update("revoked_at", now).Error
+		Where("id = ? AND revoked_at IS NULL", sessionID).
+		Update("revoked_at", now).Error
 
 	if err != nil {
 		return err
@@ -137,8 +148,8 @@ func (r *PostgresRepository) RevokeSession(ctx context.Context, sessionID string
 func (r *PostgresRepository) RevokeUserSessions(ctx context.Context, userID string, now time.Time) error {
 	// Query WHERE username into DB via gorm & pass it to &user
 	err := r.DB.WithContext(ctx).Model(&models.Session{}).
-			Where("id = ? AND revoked_at IS NULL", userID).
-			Update("revoked_at", now).Error
+			Where("user_id = ? AND revoked_at IS NULL", userID).
+		Update("revoked_at", now).Error
 
 	if err != nil {
 		return err

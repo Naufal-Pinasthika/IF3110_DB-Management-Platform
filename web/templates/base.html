@@ -1,0 +1,148 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{{.Title}} · Database Platform</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" type="module">
+</script>
+</head>
+<body data-page="{{.Kind}}" data-database-id="{{.DatabaseID}}" data-schema="{{.Schema}}" data-table="{{.Table}}" data-migration-id="{{.MigrationID}}">
+<svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<defs>
+<symbol id="i-database" viewBox="0 0 24 24">
+<ellipse cx="12" cy="5" rx="8" ry="3"/>
+<path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7"/>
+</symbol>
+<symbol id="i-table" viewBox="0 0 24 24">
+<rect x="3" y="4" width="18" height="16" rx="2"/>
+<path d="M3 9h18M3 14h18M9 9v11"/>
+</symbol>
+<symbol id="i-query" viewBox="0 0 24 24">
+<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-2-15-4 18"/>
+</symbol>
+<symbol id="i-history" viewBox="0 0 24 24">
+<path d="M3 11a9 9 0 1 1 3 8M3 4v7h7m2-4v5l3 2"/>
+</symbol>
+<symbol id="i-users" viewBox="0 0 24 24">
+<circle cx="9" cy="7" r="3"/>
+<path d="M3 21v-3a6 6 0 0 1 12 0v3m2-17a3 3 0 0 1 0 6m2 4a5 5 0 0 1 2 4v3"/>
+</symbol>
+<symbol id="i-connect" viewBox="0 0 24 24">
+<path d="m8 3 13 13M4 7l4-4 7 7-4 4zm7 7-3 3H4v4m12-9 4-4m-4-4 4 4"/>
+</symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24">
+<path d="M5 12h14m-6-6 6 6-6 6"/>
+</symbol>
+<symbol id="i-plus" viewBox="0 0 24 24">
+<path d="M12 5v14M5 12h14"/>
+</symbol>
+</defs>
+</svg>
+<a class="skip-link" href="#main">Skip to content</a>
+{{if eq .Kind "login"}}{{template "login" .}}{{else}}
+<div class="app-shell">
+<aside class="sidebar" id="sidebar" aria-label="Workspace navigation">
+<a class="brand" href="/databases"><svg class="icon"><use href="#i-database"/></svg><span>Database Platform</span></a>
+<nav class="main-nav" aria-label="Main">
+<a href="/databases" {{if eq .Kind "databases"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-database"/></svg>Databases</a>
+{{if .DatabaseID}}
+<a href="{{.DatabaseURL}}" {{if or (eq .Kind "database") (eq .Kind "table")}}aria-current="page"{{end}}><svg class="icon"><use href="#i-table"/></svg>Explorer</a>
+<a href="{{.DatabaseURL}}/query" {{if eq .Kind "query"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-query"/></svg>SQL query</a>
+<a href="{{.DatabaseURL}}/migrations" {{if or (eq .Kind "migrations") (eq .Kind "migration") (eq .Kind "migration-new")}}aria-current="page"{{end}}><svg class="icon"><use href="#i-history"/></svg>Migrations</a>
+{{end}}
+</nav>
+{{if .DatabaseID}}
+<details class="object-explorer" id="object-explorer" open>
+<summary>Objects</summary>
+<label class="object-search"><span class="sr-only">Find schema or table</span><input type="search" id="object-filter" placeholder="Find schema or table…" autocomplete="off"></label>
+<div id="schema-list" class="object-tree"><p class="inline-state">Loading schemas…</p></div>
+</details>
+{{end}}
+<details id="admin-nav" class="admin-navigation" hidden {{if or (eq .Kind "users") (eq .Kind "groups") (eq .Kind "connections")}}open{{end}}>
+<summary>Administration</summary>
+<nav class="main-nav" aria-label="Administration">
+<a href="/admin/users" {{if eq .Kind "users"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-users"/></svg>Users</a>
+<a href="/admin/groups" {{if eq .Kind "groups"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-users"/></svg>Groups &amp; access</a>
+<a href="/admin/databases" {{if eq .Kind "connections"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-connect"/></svg>Connections</a>
+</nav>
+</details>
+</aside>
+<div class="workspace">
+<header class="topbar">
+<button type="button" class="button quiet mobile-menu-button" id="navigation-toggle" aria-expanded="false" aria-controls="sidebar">Menu</button>
+{{if .DatabaseID}}
+<div class="connection-context">
+<a href="/databases" class="switch-database" aria-label="Switch database">Databases /</a>
+<div class="database-identity"><strong id="database-name" class="mono">Database</strong><span class="database-label"></span></div>
+<details class="access-details"><summary id="access-badge">Checking access…</summary><div><p id="access-capabilities">Checking permissions.</p><p class="muted">Connection has not been tested.</p></div></details>
+<span class="connection-status" title="No connection test has been performed.">Not tested</span>
+</div>
+{{else}}<span class="engine-label">PostgreSQL</span>{{end}}
+<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet" id="logout">Sign out</button></div>
+</header>
+<main id="main" class="content" tabindex="-1">
+<div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="button small" id="retry" hidden>Try again</button></div>
+<div class="page-heading">
+<h1>{{.Title}}</h1>
+<div class="heading-actions" inert>
+{{if or (eq .Kind "database") (eq .Kind "table")}}<button type="button" class="button small" id="refresh">Refresh</button>{{end}}
+{{if eq .Kind "table"}}<button type="button" class="button small" id="copy-object">Copy name</button><a class="button small" href="{{.DatabaseURL}}/query?schema={{.Schema}}&amp;table={{.Table}}">Open in SQL</a>{{end}}
+{{if eq .Kind "users"}}<button type="button" class="button primary" data-open="user-dialog">New user</button>{{end}}
+{{if eq .Kind "groups"}}<button type="button" class="button primary" data-open="group-dialog">New group</button>{{end}}
+{{if eq .Kind "connections"}}<button type="button" class="button primary" data-open="connection-dialog">Add connection</button>{{end}}
+{{if eq .Kind "migrations"}}<a class="button primary" href="{{.DatabaseURL}}/migrations/new" data-edit-only hidden>New migration</a>{{end}}
+</div>
+</div>
+<div id="page-content" inert>
+{{if eq .Kind "databases"}}{{template "databases" .}}{{end}}
+{{if eq .Kind "database"}}{{template "database" .}}{{end}}
+{{if eq .Kind "table"}}{{template "table" .}}{{end}}
+{{if eq .Kind "query"}}{{template "query" .}}{{end}}
+{{if eq .Kind "migrations"}}{{template "migrations" .}}{{end}}
+{{if or (eq .Kind "migration") (eq .Kind "migration-new")}}{{template "migration" .}}{{end}}
+{{if eq .Kind "users"}}{{template "users" .}}{{end}}
+{{if eq .Kind "groups"}}{{template "groups" .}}{{end}}
+{{if eq .Kind "connections"}}{{template "connections" .}}{{end}}
+</div>
+<noscript><p class="notice error">Enable JavaScript to load database records and submit forms.</p></noscript>
+</main>
+</div>
+</div>{{end}}
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+<form method="dialog">
+<div class="dialog-heading">
+<h2 id="confirm-title">Confirm action</h2>
+</div>
+<p id="confirm-description">
+</p>
+<div class="form-actions">
+<button class="button" value="cancel">Cancel</button>
+<button class="button danger" value="confirm" id="confirm-button">Confirm</button>
+</div>
+</form>
+</dialog>
+</body>
+</html>{{end}}
+
+
+{{define "login"}}
+<main class="login-layout" id="main">
+<section class="login-form-wrap" aria-labelledby="login-heading">
+<div class="login-brand"><svg class="icon"><use href="#i-database"/></svg><span>Database Platform</span></div>
+<h1 id="login-heading">Sign in</h1>
+<form method="post" id="login-form">
+<label for="username">Username</label>
+<input id="username" name="username" autocomplete="username" maxlength="64" required autofocus>
+<label for="password">Password</label>
+<div class="password-control"><input id="password" name="password" type="password" autocomplete="current-password" required><button type="button" class="password-toggle" id="password-toggle" aria-label="Show password" aria-pressed="false">Show</button></div>
+<p class="helper-text" id="caps-lock" hidden>Caps Lock is on.</p>
+<div class="form-message" role="alert" id="login-error" hidden></div>
+<button class="button primary full-width" type="submit">Sign in</button>
+</form>
+<p class="login-help">Need an account? Contact your platform administrator.</p>
+<noscript><p class="notice error">Enable JavaScript to sign in.</p></noscript>
+</section>
+</main>{{end}}

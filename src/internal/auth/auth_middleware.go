@@ -3,43 +3,103 @@ package auth
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"time"
 
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 )
 
-// PrincipalFromContext reads identity written by session middleware.
+type sessionContextKey struct{}
+
+// reads identity written by session middleware.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
-	// TODO Use a private typed context key shared with SessionMiddleware.
-	// TODO Return false when no validated principal exists and callers must deny access.
-	return Principal{}, false
+	// use private typed context key shared with SessionMiddleware
+	session, ok := ctx.Value(sessionContextKey{}).(ValidatedSession)
+	if !ok {
+		return Principal{}, false
+	}
+	return session.Principal, true
 }
 
-// SessionMiddleware validates a cookie before calling the protected handler.
+// validates a cookie before calling the protected handler.
 func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO Read the configured cookie and call ValidateSession with the current time.
-		// TODO Return 401 for invalid sessions and update the cookie after rotation.
-		// TODO Put the validated principal and session in context then call next.
-		api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "SessionMiddleware is not implemented")
+		w.Header().Set("Cache-Control", "no-store")
+
+		// rad configured cookie and call ValidateSession with the current time
+		cookie, err := r.Cookie(h.Service.Policy.CookieName)
+		if err != nil {
+			WriteAuthError(w, ErrUnauthenticated)
+			return 
+		}
+
+		validated, err := h.Service.ValidateSession(r.Context(), cookie.Value, time.Now().UTC())
+		if err != nil {
+			WriteAuthError(w, err)
+			return 
+		}
+
+		if validated.RotatedToken != "" {
+			h.setCookie(w, h.Service.Policy.CookieName, validated.RotatedToken, true, validated.Session.AbsoluteExpiresAt)
+		}
+
+		// put validated principal and session in context then call next.
+		ctx := context.WithValue(r.Context(), sessionContextKey{}, validated)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// CSRFMiddleware protects authenticated requests that change state.
-func (h *Handler) CSRFMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO Read the validated session and X-CSRF-Token then call ValidateCSRF.
-		// TODO Return 403 for a mismatch and call next only after successful validation.
-		// TODO Protect POST queries as required by the existing route definition.
-		api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "CSRFMiddleware is not implemented")
-	})
+func (h *Handler) sameOrigin(r *http.Request) bool {
+	if h.PublicOrigin == "" {
+		return false
+	}
+
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return origin == h.PublicOrigin
+	}
+
+	referer, err := url.Parse(r.Header.Get("Referer"))
+	if err != nil || referer.Scheme == "" || referer.Host == "" {
+		return false
+	}
+
+	return referer.Scheme+"://"+referer.Host == h.PublicOrigin
 }
 
-// LoginCSRFMiddleware protects login before an authenticated session exists.
+
 func (h *Handler) LoginCSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO Choose anonymous form tokens or strict Origin validation with a documented fallback.
-		// TODO Reject invalid requests before login without requiring an authenticated session.
-		// TODO Set RouteMiddleware.LoginCSRF since nil currently skips this protection.
-		api.WriteAPIError(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "LoginCSRFMiddleware is not implemented")
+		if !h.sameOrigin(r) {
+			WriteAuthError(w, ErrCSRF)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (h *Handler) CSRFMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read the validated session and X-CSRF-Token then call ValidateCSRF
+		validated, ok := r.Context().Value(sessionContextKey{}).(ValidatedSession)
+		if !ok {
+			WriteAuthError(w, ErrUnauthenticated)
+			return
+		}
+
+		if !h.sameOrigin(r) {
+			WriteAuthError(w, ErrCSRF)
+			return
+		}
+
+		token := r.Header.Get("X-CSRF-Token")
+
+		err := h.Service.ValidateCSRF(r.Context(), validated.Session, token)
+		if err != nil {
+			WriteAuthError(w, err)
+			return
+		}
+
+		next.ServeHTTP(w, r)
 	})
 }
