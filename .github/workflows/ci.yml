@@ -17,6 +17,8 @@ jobs:
     name: Unit, frontend, and build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      DB_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.DB_CREDENTIAL_ENCRYPTION_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
