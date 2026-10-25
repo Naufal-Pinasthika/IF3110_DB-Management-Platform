@@ -20,6 +20,11 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return session.Principal, true
 }
 
+// stores a principal in the request context.
+func SetPrincipalContext(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, ValidatedSession{Principal: principal})
+}
+
 // validates a cookie before calling the protected handler.
 func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
