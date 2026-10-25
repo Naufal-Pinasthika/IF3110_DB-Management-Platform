@@ -26,6 +26,11 @@ var (
 	ErrNotFound        = errors.New("not found")
 )
 
+// NewService creates a new access service.
+func NewService(repo Repository) *Service {
+	return &Service{Repository: repo}
+}
+
 // checks the current platform role. rejects missing identity
 func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal) error {
 	if actor.User.ID == "" {

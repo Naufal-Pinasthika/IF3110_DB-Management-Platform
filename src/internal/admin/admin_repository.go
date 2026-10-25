@@ -13,7 +13,8 @@ import (
 
 // PostgresRepository uses GORM models and leaves HTTP mapping to the service.
 type PostgresRepository struct {
-	DB *gorm.DB
+	DB         *gorm.DB
+	GracePeriod time.Duration
 }
 
 var _ Repository = (*PostgresRepository)(nil)
@@ -59,16 +60,16 @@ func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, r
 		}
 
 		if revokeSessions {
-			if err := tx.Model(&models.Session{}).
-				Where("user_id = ? AND revoked_at IS NULL", user.ID).
-				Updates(map[string]interface{}{
-					"revoked_at":        now,
-					"previous_token_hash": gorm.Expr("token_hash"),
-					"previous_valid_until": now.Add(30 * time.Second), // grace period
-				}).Error; err != nil {
-				return err
-			}
-		}
+					if err := tx.Model(&models.Session{}).
+						Where("user_id = ? AND revoked_at IS NULL", user.ID).
+						Updates(map[string]interface{}{
+							"revoked_at":             now,
+							"previous_token_hash":    gorm.Expr("token_hash"),
+							"previous_valid_until":   now.Add(r.GracePeriod),
+						}).Error; err != nil {
+						return err
+					}
+				}
 
 		return nil
 	})
@@ -115,14 +116,14 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID, name stri
 func (r *PostgresRepository) DeleteGroup(ctx context.Context, groupID string, now time.Time) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Session{}).
-			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
-			Updates(map[string]interface{}{
-				"revoked_at":            now,
-				"previous_token_hash":   gorm.Expr("token_hash"),
-				"previous_valid_until":  now.Add(30 * time.Second),
-			}).Error; err != nil {
-			return err
-		}
+					Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
+					Updates(map[string]interface{}{
+						"revoked_at":             now,
+						"previous_token_hash":    gorm.Expr("token_hash"),
+						"previous_valid_until":   now.Add(r.GracePeriod),
+					}).Error; err != nil {
+					return err
+				}
 
 		// Delete group - FK cascades will handle user_groups and group_access
 		if err := tx.Delete(&models.Group{}, "id = ?", groupID).Error; err != nil {
@@ -153,14 +154,14 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 		}
 
 		if err := tx.Model(&models.Session{}).
-			Where("user_id = ? AND revoked_at IS NULL", userID).
-			Updates(map[string]interface{}{
-				"revoked_at":            now,
-				"previous_token_hash":   gorm.Expr("token_hash"),
-				"previous_valid_until":  now.Add(30 * time.Second),
-			}).Error; err != nil {
-			return err
-		}
+					Where("user_id = ? AND revoked_at IS NULL", userID).
+					Updates(map[string]interface{}{
+						"revoked_at":             now,
+						"previous_token_hash":    gorm.Expr("token_hash"),
+						"previous_valid_until":   now.Add(r.GracePeriod),
+					}).Error; err != nil {
+					return err
+				}
 
 		return nil
 	})
@@ -178,14 +179,14 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 
 		// Revoke affected user sessions
 		if err := tx.Model(&models.Session{}).
-			Where("user_id = ? AND revoked_at IS NULL", userID).
-			Updates(map[string]interface{}{
-				"revoked_at":            now,
-				"previous_token_hash":   gorm.Expr("token_hash"),
-				"previous_valid_until":  now.Add(30 * time.Second),
-			}).Error; err != nil {
-			return err
-		}
+					Where("user_id = ? AND revoked_at IS NULL", userID).
+					Updates(map[string]interface{}{
+						"revoked_at":             now,
+						"previous_token_hash":    gorm.Expr("token_hash"),
+						"previous_valid_until":   now.Add(r.GracePeriod),
+					}).Error; err != nil {
+					return err
+				}
 
 		return nil
 	})
@@ -298,14 +299,14 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 
 		// Revoke affected group member sessions
 		if err := tx.Model(&models.Session{}).
-			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
-			Updates(map[string]interface{}{
-				"revoked_at":            now,
-				"previous_token_hash":   gorm.Expr("token_hash"),
-				"previous_valid_until":  now.Add(30 * time.Second),
-			}).Error; err != nil {
-			return err
-		}
+					Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
+					Updates(map[string]interface{}{
+						"revoked_at":             now,
+						"previous_token_hash":    gorm.Expr("token_hash"),
+						"previous_valid_until":   now.Add(r.GracePeriod),
+					}).Error; err != nil {
+					return err
+				}
 
 		return nil
 	})
