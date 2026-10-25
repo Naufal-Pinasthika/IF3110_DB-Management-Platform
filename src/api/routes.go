@@ -3,46 +3,48 @@ package api
 import "net/http"
 
 type RouteHandlers struct {
-	Health http.Handler
-	Login http.Handler
-	Me http.Handler
-	Logout http.Handler
-	ListUsers http.Handler
-	CreateUser http.Handler
-	UpdateUser http.Handler
-	ListGroups http.Handler
-	CreateGroup http.Handler
-	UpdateGroup http.Handler
-	DeleteGroup http.Handler
-	AddGroupMember http.Handler
-	RemoveGroupMember http.Handler
-	ListManagedDatabases http.Handler
-	CreateManagedDatabase http.Handler
-	GetManagedDatabase http.Handler
-	UpdateManagedDatabase http.Handler
-	DisableManagedDatabase http.Handler
-	TestDatabaseConnection http.Handler
-	SetGroupDatabaseAccess http.Handler
+	ListAccessSnapshot        http.Handler
+	TestConnectionDraft       http.Handler
+	Health                    http.Handler
+	Login                     http.Handler
+	Me                        http.Handler
+	Logout                    http.Handler
+	ListUsers                 http.Handler
+	CreateUser                http.Handler
+	UpdateUser                http.Handler
+	ListGroups                http.Handler
+	CreateGroup               http.Handler
+	UpdateGroup               http.Handler
+	DeleteGroup               http.Handler
+	AddGroupMember            http.Handler
+	RemoveGroupMember         http.Handler
+	ListManagedDatabases      http.Handler
+	CreateManagedDatabase     http.Handler
+	GetManagedDatabase        http.Handler
+	UpdateManagedDatabase     http.Handler
+	DisableManagedDatabase    http.Handler
+	TestDatabaseConnection    http.Handler
+	SetGroupDatabaseAccess    http.Handler
 	DeleteGroupDatabaseAccess http.Handler
-	ListDatabases http.Handler
-	GetDatabase http.Handler
-	ListSchemas http.Handler
-	ListTables http.Handler
-	GetTableDetail http.Handler
-	GetTableRows http.Handler
-	RunQuery http.Handler
-	ListMigrations http.Handler
-	GetMigration http.Handler
-	CreateMigration http.Handler
-	UpdateMigration http.Handler
-	ExecuteMigration http.Handler
+	ListDatabases             http.Handler
+	GetDatabase               http.Handler
+	ListSchemas               http.Handler
+	ListTables                http.Handler
+	GetTableDetail            http.Handler
+	GetTableRows              http.Handler
+	RunQuery                  http.Handler
+	ListMigrations            http.Handler
+	GetMigration              http.Handler
+	CreateMigration           http.Handler
+	UpdateMigration           http.Handler
+	ExecuteMigration          http.Handler
 }
 
 type RouteMiddleware struct {
-	Session Middleware
-	PlatformAdmin Middleware
-	CSRF Middleware
-	LoginCSRF Middleware
+	Session        Middleware
+	PlatformAdmin  Middleware
+	CSRF           Middleware
+	LoginCSRF      Middleware
 	DatabaseAccess func(AccessLevel) Middleware
 }
 
@@ -91,6 +93,9 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "GET", "/api/v1/admin/users", handlers.ListUsers, session, admin)
 	registerRoute(mux, "POST", "/api/v1/admin/users", handlers.CreateUser, session, admin, csrf)
 	registerRoute(mux, "PATCH", "/api/v1/admin/users/{userId}", handlers.UpdateUser, session, admin, csrf)
+
+	registerRoute(mux, "GET", "/api/v1/admin/access", handlers.ListAccessSnapshot, session, admin)
+	registerRoute(mux, "POST", "/api/v1/admin/databases/test-connection", handlers.TestConnectionDraft, session, admin, csrf)
 
 	// Admin groups and membership
 	registerRoute(mux, "GET", "/api/v1/admin/groups", handlers.ListGroups, session, admin)

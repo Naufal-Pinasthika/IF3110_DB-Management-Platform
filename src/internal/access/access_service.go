@@ -128,7 +128,7 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 	result := make([]api.UserDatabase, 0, len(databases))
 	for _, db := range databases {
 		effective, err := s.EffectiveAccess(ctx, actor, db.ID)
-		if err != nil {	
+		if err != nil {
 			if errors.Is(err, ErrForbidden) {
 				continue
 			}
@@ -136,10 +136,11 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 		}
 
 		result = append(result, api.UserDatabase{
-			ID:               db.ID,
-			Label:            db.Label,
-			DatabaseName:     db.DatabaseName,
-			EffectiveAccess:  effective,
+			ID:              db.ID,
+			Label:           db.Label,
+			DatabaseName:    db.DatabaseName,
+			Engine:          db.TargetEngine(),
+			EffectiveAccess: effective,
 		})
 	}
 
@@ -169,6 +170,7 @@ func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databas
 		ID:              db.ID,
 		Label:           db.Label,
 		DatabaseName:    db.DatabaseName,
+		Engine:          db.TargetEngine(),
 		EffectiveAccess: effective,
 	}, nil
 }

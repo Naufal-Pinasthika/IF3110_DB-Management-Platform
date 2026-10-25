@@ -60,8 +60,8 @@
 <line x1="12" y1="16" x2="12.01" y2="16"/>
 </svg>
 <div>
-<strong>Execution Failed &amp; Safely Rolled Back</strong>
-<p class="migration-error-subtitle">The transaction failed and changes were reverted. The database schema and data remain unmodified.</p>
+<strong>Migration execution failed</strong>
+<p class="migration-error-subtitle">Review the execution details below before creating a new migration or retrying.</p>
 </div>
 </div>
 <span class="badge red">Aborted</span>
@@ -85,11 +85,10 @@
 <label for="migration-name">Migration name</label>
 <input id="migration-name" name="name" placeholder="e.g. Add customer email index" required maxlength="200">
 </div>{{end}}<label class="sr-only" for="sql">Migration SQL</label>
-<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL statements here (e.g. CREATE TABLE items (...);)
--- All statements execute atomically within a transaction" required {{if eq .Kind "migration"}}readonly{{end}}>
+<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL here (e.g. CREATE TABLE items (...);)" required {{if eq .Kind "migration"}}readonly{{end}}>
 </textarea>
 <div class="editor-footer">
-<span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>
+<span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Review the SQL before executing.</span>
 <div class="toolbar-actions">
 <button class="button primary" type="submit" id="save-migration" data-edit-only hidden>Save draft</button>
 <button class="button danger" type="button" id="execute-migration" data-edit-only hidden {{if eq .Kind "migration-new"}}disabled{{end}}>Execute migration</button>

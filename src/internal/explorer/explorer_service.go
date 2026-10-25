@@ -3,6 +3,8 @@ package explorer
 import (
 	"context"
 	"fmt"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/sqlguard"
 	"strings"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -30,19 +32,15 @@ type Service struct {
 	QueryMaxRows int
 }
 
-
-
 // ListDatabases lists databases visible through group grants.
 func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]api.UserDatabase, error) {
 	return s.Access.ListDatabases(ctx, actor)
 }
 
-
 // GetDatabase returns a visible database summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
 	return s.Access.GetDatabase(ctx, actor, databaseID)
 }
-
 
 // ListSchemas lists schemas after checking target access.
 func (s *Service) ListSchemas(ctx context.Context, actor auth.Principal, databaseID string) ([]api.SchemaSummary, error) {
@@ -51,7 +49,6 @@ func (s *Service) ListSchemas(ctx context.Context, actor auth.Principal, databas
 	}
 	return s.Repository.ListSchemas(ctx, databaseID)
 }
-
 
 // ListTables lists tables within a visible schema.
 func (s *Service) ListTables(ctx context.Context, actor auth.Principal, databaseID, schema string) ([]api.TableSummary, error) {
@@ -64,7 +61,6 @@ func (s *Service) ListTables(ctx context.Context, actor auth.Principal, database
 	return s.Repository.ListTables(ctx, databaseID, schema)
 }
 
-
 // GetTableDetail returns live table structure.
 func (s *Service) GetTableDetail(ctx context.Context, actor auth.Principal, databaseID, schema, table string) (api.TableDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
@@ -75,7 +71,6 @@ func (s *Service) GetTableDetail(ctx context.Context, actor auth.Principal, data
 	}
 	return s.Repository.GetTableDetail(ctx, databaseID, schema, table)
 }
-
 
 // GetTableRows returns a bounded page of visible data.
 func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databaseID, schema, table string, limit, offset int) (api.TableRows, error) {
@@ -99,7 +94,6 @@ func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databa
 	return s.Repository.GetTableRows(ctx, databaseID, schema, table, limit, offset)
 }
 
-
 // RunQuery runs a supported read only query.
 func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.RunQueryRequest) (api.QueryResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
@@ -117,7 +111,16 @@ func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID
 	}
 
 	// 1. Static validation against AST rules
-	if err := ValidateReadOnlySQL(input.SQL); err != nil {
+	database, err := s.Access.GetDatabase(ctx, actor, databaseID)
+	if err != nil {
+		return api.QueryResult{}, err
+	}
+	if database.Engine == models.EngineMySQL {
+		err = sqlguard.ValidateMySQLQuery(input.SQL, database.DatabaseName)
+	} else {
+		err = ValidateReadOnlySQL(input.SQL)
+	}
+	if err != nil {
 		return api.QueryResult{}, err
 	}
 

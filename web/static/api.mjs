@@ -57,8 +57,9 @@ export function returnPath(candidate, origin) {
   } catch { return "/databases"; }
 }
 
-export function qualifiedName(schema, table) {
-  return [schema, table].map(name => '"' + String(name).replaceAll('"', '""') + '"').join(".");
+export function qualifiedName(schema, table, engine = "postgres") {
+  const quote = engine === "mysql" ? "`" : '"';
+  return [schema, table].map(name => quote + String(name).replaceAll(quote, quote + quote) + quote).join(".");
 }
 
 export function accessCapabilities(level) {

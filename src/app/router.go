@@ -93,7 +93,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 			queryMaxRows = 100
 		}
 
-		explorerRepo := &explorer.PostgresRepository{
+		explorerRepo := &explorer.TargetRepository{
 			Targets:      targetStore,
 			QueryTimeout: queryTimeout,
 		}
@@ -120,6 +120,9 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.ListUsers = http.HandlerFunc(adminHandler.ListUsers)
 		routeHandlers.CreateUser = http.HandlerFunc(adminHandler.CreateUser)
 		routeHandlers.UpdateUser = http.HandlerFunc(adminHandler.UpdateUser)
+
+		routeHandlers.ListAccessSnapshot = http.HandlerFunc(adminHandler.ListAccessSnapshot)
+		routeHandlers.TestConnectionDraft = http.HandlerFunc(adminHandler.TestConnectionDraft)
 
 		// Admin groups and membership
 		routeHandlers.ListGroups = http.HandlerFunc(adminHandler.ListGroups)

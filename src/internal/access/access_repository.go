@@ -42,7 +42,7 @@ func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID st
 
 	err := r.DB.WithContext(ctx).
 		Model(&models.ManagedDatabase{}).
-		Select("DISTINCT managed_databases.id, managed_databases.label, managed_databases.host, managed_databases.port, managed_databases.database_name, managed_databases.ssl_mode, managed_databases.reader_username, managed_databases.reader_password_enc, managed_databases.migrator_username, managed_databases.migrator_password_enc, managed_databases.is_enabled").
+		Select("DISTINCT managed_databases.id, managed_databases.engine, managed_databases.label, managed_databases.host, managed_databases.port, managed_databases.database_name, managed_databases.ssl_mode, managed_databases.reader_username, managed_databases.reader_password_enc, managed_databases.migrator_username, managed_databases.migrator_password_enc, managed_databases.is_enabled").
 		Joins("JOIN group_access ON group_access.database_id = managed_databases.id").
 		Joins("JOIN user_groups ON user_groups.group_id = group_access.group_id").
 		Joins("JOIN users ON users.id = user_groups.user_id").

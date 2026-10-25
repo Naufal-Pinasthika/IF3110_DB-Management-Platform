@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"strings"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 // PostgresRepository uses GORM models and leaves HTTP mapping to the service.
 type PostgresRepository struct {
-	DB         *gorm.DB
+	DB          *gorm.DB
 	GracePeriod time.Duration
 }
 
@@ -69,16 +70,16 @@ func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, r
 		}
 
 		if revokeSessions {
-					if err := tx.Model(&models.Session{}).
-						Where("user_id = ? AND revoked_at IS NULL", user.ID).
-						Updates(map[string]interface{}{
-							"revoked_at":             now,
-							"previous_token_hash":    gorm.Expr("token_hash"),
-							"previous_valid_until":   now.Add(r.GracePeriod),
-						}).Error; err != nil {
-						return err
-					}
-				}
+			if err := tx.Model(&models.Session{}).
+				Where("user_id = ? AND revoked_at IS NULL", user.ID).
+				Updates(map[string]interface{}{
+					"revoked_at":           now,
+					"previous_token_hash":  gorm.Expr("token_hash"),
+					"previous_valid_until": now.Add(r.GracePeriod),
+				}).Error; err != nil {
+				return err
+			}
+		}
 
 		return nil
 	})
@@ -131,14 +132,14 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID, name stri
 func (r *PostgresRepository) DeleteGroup(ctx context.Context, groupID string, now time.Time) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.Session{}).
-					Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
-					Updates(map[string]interface{}{
-						"revoked_at":             now,
-						"previous_token_hash":    gorm.Expr("token_hash"),
-						"previous_valid_until":   now.Add(r.GracePeriod),
-					}).Error; err != nil {
-					return err
-				}
+			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
+			Updates(map[string]interface{}{
+				"revoked_at":           now,
+				"previous_token_hash":  gorm.Expr("token_hash"),
+				"previous_valid_until": now.Add(r.GracePeriod),
+			}).Error; err != nil {
+			return err
+		}
 
 		// Delete group - FK cascades will handle user_groups and group_access
 		if err := tx.Delete(&models.Group{}, "id = ?", groupID).Error; err != nil {
@@ -169,14 +170,14 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 		}
 
 		if err := tx.Model(&models.Session{}).
-					Where("user_id = ? AND revoked_at IS NULL", userID).
-					Updates(map[string]interface{}{
-						"revoked_at":             now,
-						"previous_token_hash":    gorm.Expr("token_hash"),
-						"previous_valid_until":   now.Add(r.GracePeriod),
-					}).Error; err != nil {
-					return err
-				}
+			Where("user_id = ? AND revoked_at IS NULL", userID).
+			Updates(map[string]interface{}{
+				"revoked_at":           now,
+				"previous_token_hash":  gorm.Expr("token_hash"),
+				"previous_valid_until": now.Add(r.GracePeriod),
+			}).Error; err != nil {
+			return err
+		}
 
 		return nil
 	})
@@ -194,14 +195,14 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 
 		// Revoke affected user sessions
 		if err := tx.Model(&models.Session{}).
-					Where("user_id = ? AND revoked_at IS NULL", userID).
-					Updates(map[string]interface{}{
-						"revoked_at":             now,
-						"previous_token_hash":    gorm.Expr("token_hash"),
-						"previous_valid_until":   now.Add(r.GracePeriod),
-					}).Error; err != nil {
-					return err
-				}
+			Where("user_id = ? AND revoked_at IS NULL", userID).
+			Updates(map[string]interface{}{
+				"revoked_at":           now,
+				"previous_token_hash":  gorm.Expr("token_hash"),
+				"previous_valid_until": now.Add(r.GracePeriod),
+			}).Error; err != nil {
+			return err
+		}
 
 		return nil
 	})
@@ -211,7 +212,7 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 func (r *PostgresRepository) ListDatabases(ctx context.Context) ([]models.ManagedDatabase, error) {
 	var dbs []models.ManagedDatabase
 	err := r.DB.WithContext(ctx).
-		Select("id", "label", "host", "port", "database_name", "ssl_mode", "reader_username", "reader_password_enc", "migrator_username", "migrator_password_enc", "is_enabled").
+		Select("id", "engine", "label", "host", "port", "database_name", "ssl_mode", "reader_username", "reader_password_enc", "migrator_username", "migrator_password_enc", "is_enabled").
 		Order("label").
 		Find(&dbs).Error
 	return dbs, err
@@ -241,16 +242,17 @@ func (r *PostgresRepository) CreateDatabase(ctx context.Context, database models
 // UpdateDatabase updates registered target settings.
 func (r *PostgresRepository) UpdateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error) {
 	updates := map[string]interface{}{
-		"label":                   database.Label,
-		"host":                    database.Host,
-		"port":                    database.Port,
-		"database_name":           database.DatabaseName,
-		"ssl_mode":                database.SSLMode,
-		"reader_username":         database.ReaderUsername,
-		"reader_password_enc":     database.ReaderPasswordEnc,
-		"migrator_username":       database.MigratorUsername,
-		"migrator_password_enc":   database.MigratorPasswordEnc,
-		"is_enabled":              database.IsEnabled,
+		"label":                 database.Label,
+		"engine":                database.TargetEngine(),
+		"host":                  database.Host,
+		"port":                  database.Port,
+		"database_name":         database.DatabaseName,
+		"ssl_mode":              database.SSLMode,
+		"reader_username":       database.ReaderUsername,
+		"reader_password_enc":   database.ReaderPasswordEnc,
+		"migrator_username":     database.MigratorUsername,
+		"migrator_password_enc": database.MigratorPasswordEnc,
+		"is_enabled":            database.IsEnabled,
 	}
 
 	err := r.DB.WithContext(ctx).
@@ -296,9 +298,9 @@ func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant m
 		if err := tx.Model(&models.Session{}).
 			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", grant.GroupID).
 			Updates(map[string]interface{}{
-				"revoked_at":            now,
-				"previous_token_hash":   gorm.Expr("token_hash"),
-				"previous_valid_until":  now.Add(30 * time.Second),
+				"revoked_at":           now,
+				"previous_token_hash":  gorm.Expr("token_hash"),
+				"previous_valid_until": now.Add(30 * time.Second),
 			}).Error; err != nil {
 			return err
 		}
@@ -320,15 +322,30 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 
 		// Revoke affected group member sessions
 		if err := tx.Model(&models.Session{}).
-					Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
-					Updates(map[string]interface{}{
-						"revoked_at":             now,
-						"previous_token_hash":    gorm.Expr("token_hash"),
-						"previous_valid_until":   now.Add(r.GracePeriod),
-					}).Error; err != nil {
-					return err
-				}
+			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
+			Updates(map[string]interface{}{
+				"revoked_at":           now,
+				"previous_token_hash":  gorm.Expr("token_hash"),
+				"previous_valid_until": now.Add(r.GracePeriod),
+			}).Error; err != nil {
+			return err
+		}
 
 		return nil
 	})
+}
+
+// ListAccessSnapshot reads memberships and grants from the same database snapshot.
+func (r *PostgresRepository) ListAccessSnapshot(ctx context.Context) (api.AccessSnapshot, error) {
+	result := api.AccessSnapshot{Members: []api.GroupMember{}, Grants: []api.GroupDatabaseAccess{}}
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY").Error; err != nil {
+			return err
+		}
+		if err := tx.Table("user_groups").Select("group_id, user_id").Order("group_id, user_id").Scan(&result.Members).Error; err != nil {
+			return err
+		}
+		return tx.Table("group_access").Select("group_id, database_id, access_level").Order("group_id, database_id").Scan(&result.Grants).Error
+	})
+	return result, err
 }

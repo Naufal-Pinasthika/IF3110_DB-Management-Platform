@@ -12,12 +12,9 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
 
-
 type Handler struct {
 	Service *Service
 }
-
-
 
 // ListMigrations handles GET /api/v1/databases/{dbId}/migrations.
 func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +31,6 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, summaries)
 }
 
-
 // GetMigration handles GET /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
@@ -49,7 +45,6 @@ func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
-
 
 // CreateMigration handles POST /api/v1/databases/{dbId}/migrations.
 func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
@@ -68,10 +63,9 @@ func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	
+
 	api.WriteDataResponse(w, http.StatusCreated, created)
 }
-
 
 // UpdateMigration handles PATCH /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +89,6 @@ func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, updated)
 }
 
-
 // ExecuteMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute.
 func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
@@ -111,9 +104,10 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
-
 func writeError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, apperror.ErrTransactionOutcomeUnknown):
+		api.WriteAPIError(w, http.StatusConflict, "MIGRATION_OUTCOME_UNKNOWN", "Execution outcome is unknown. Inspect the target before retrying; this migration remains RUNNING.")
 	case errors.Is(err, apperror.ErrNotFound), errors.Is(err, access.ErrNotFound):
 		api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 

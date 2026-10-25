@@ -289,7 +289,7 @@ async function openConnection(id) {
   for (const role of ["reader", "migrator"]) setPasswordEditing(role, !id);
   updateCredentialFields();
   $("connection-test-result").hidden = true;
-  updateSSLDescription();
+  updateConnectionEngine(false);
   showFormDialog(dialog);
   dialog.querySelector(".dialog-body").scrollTop = 0;
 }
@@ -322,6 +322,16 @@ function bindDialogs() {
 async function loadDatabaseContext() {
   const database = await api(databaseAPI);
   activeDatabase = database;
+  document.querySelectorAll(".engine-label").forEach(element => { element.textContent = database.engine === "mysql" ? "MySQL" : "PostgreSQL"; });
+  if (state.page === "query") {
+    const params = new URLSearchParams(location.search);
+    if (params.has("schema") && params.has("table") && !$("sql").dataset.initialized) {
+      $("sql").value = "SELECT * FROM " + qualifiedName(params.get("schema"), params.get("table"), database.engine) + " LIMIT 50;";
+      $("sql").dataset.initialized = "true";
+    }
+    $("sql").placeholder = database.engine === "mysql" ? "SELECT * FROM `" + database.database_name.replaceAll("`", "``") + "`.`your_table` LIMIT 50;" : "SELECT * FROM public.your_table LIMIT 50;";
+  }
+  if ($("migration-save-note") && !dirty) $("migration-save-note").textContent = migrationPolicy();
   document.querySelectorAll(".database-label").forEach(element => { element.textContent = database.label; });
   $("database-name").textContent = database.database_name;
   document.querySelectorAll(".target-database").forEach(element => { element.textContent = database.database_name; });
@@ -358,7 +368,7 @@ async function databasesPage() {
     const emptyMessage = query
       ? "No databases match your filter."
       : currentUser?.is_platform_admin
-      ? "No databases registered yet. Click 'Add database' to connect your first PostgreSQL database."
+      ? "No databases registered yet. Click 'Add database' to connect your first database."
       : "No databases are assigned to your groups. Ask an administrator for access.";
     rows("database-list", visible, item => [
       link(item.label, "/databases/" + encode(item.id)),
@@ -556,7 +566,7 @@ function tablePage() {
 
 function queryPage() {
   const params = new URLSearchParams(location.search);
-  if (params.has("schema") && params.has("table")) $("sql").value = "SELECT * FROM " + qualifiedName(params.get("schema"), params.get("table")) + " LIMIT 50;";
+  if (params.has("schema") && params.has("table")) $("sql").value = "SELECT * FROM " + qualifiedName(params.get("schema"), params.get("table"), activeDatabase?.engine) + " LIMIT 50;";
   submit("query-form", async data => {
     const started = performance.now();
     $("query-summary").textContent = "Running…";
@@ -586,6 +596,12 @@ async function migrationsPage() {
   ], 5, "No migrations found. Users with edit access can create a draft.");
 }
 
+function migrationPolicy() {
+  return activeDatabase?.engine === "mysql"
+    ? "MySQL: one schema statement per migration (DDL auto-commits), or transactional INSERT/UPDATE/DELETE on InnoDB tables."
+    : "All statements execute together in a transaction.";
+}
+
 function migrationPage() {
   const creating = state.page === "migration-new";
   const endpoint = databaseAPI + "/migrations" + (creating ? "" : "/" + encode(state.migrationId));
@@ -609,7 +625,7 @@ function migrationPage() {
   $("sql").addEventListener("input", () => {
     dirty = $("sql").value !== savedSQL;
     if (!creating) $("execute-migration").disabled = dirty || !draft || !canEdit || executing;
-    $("migration-save-note").textContent = dirty ? "Unsaved changes. Save the draft before executing." : "Changes execute together in a transaction.";
+    $("migration-save-note").textContent = dirty ? "Unsaved changes. Save the draft before executing." : migrationPolicy();
   });
   $("migration-name")?.addEventListener("input", () => { dirty = true; });
   submit("migration-form", async data => {
@@ -628,7 +644,7 @@ function migrationPage() {
   });
   $("execute-migration").addEventListener("click", () => busy($("execute-migration"), async () => {
     if (creating || !draft || !canEdit || dirty || executing) return;
-    if (!await confirmAction("Execute migration?", "Run the saved SQL against " + activeDatabase.database_name + " (" + activeDatabase.label + ")? All statements must succeed for the transaction to commit.", "Execute migration")) return;
+    if (!await confirmAction("Execute migration?", "Run the saved SQL against " + activeDatabase.database_name + " (" + activeDatabase.label + ")? " + migrationPolicy(), "Execute migration")) return;
     executing = true;
     $("sql").readOnly = true;
     $("save-migration").disabled = true;
@@ -651,7 +667,7 @@ function migrationPage() {
       executing = false;
       $("sql").readOnly = !canEdit || !draft;
       $("save-migration").disabled = false;
-      $("migration-save-note").textContent = draft ? "Changes execute together in a transaction." : "Executed SQL is read only.";
+      $("migration-save-note").textContent = draft ? migrationPolicy() : "Executed SQL is read only.";
     }
   }).catch(error => { if (error) fail(error); }).finally(() => { $("execute-migration").disabled = !draft || dirty || !canEdit || executing; }));
   reload = async () => {
@@ -675,6 +691,10 @@ function migrationPage() {
       errBox.hidden = !migration.error_summary;
       const errText = $("migration-error-text");
       if (errText) errText.textContent = migration.error_summary || "";
+      const explanation = errBox.querySelector(".migration-error-subtitle");
+      explanation.textContent = activeDatabase?.engine === "mysql"
+        ? "MySQL schema changes auto-commit. Check the target schema and error details before retrying. DML migrations use a transaction."
+        : "Review the error details to confirm the execution and rollback outcome before retrying.";
     }
 
     const cloneAction = () => {
@@ -908,7 +928,18 @@ async function connectionsPage() {
     }
     const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
     return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
-  }, 4, "No connections yet. Add a PostgreSQL connection to get started.");
+  }, 4, "No connections yet. Add a database connection to get started.");
+}
+
+function updateConnectionEngine(changePort = true) {
+  const mysql = $("connection-engine").value === "mysql";
+  const port = $("connection-port");
+  if (changePort && ["5432", "3306"].includes(port.value)) port.value = mysql ? "3306" : "5432";
+  const verifyCA = $("connection-ssl").querySelector('[value="verify-ca"]');
+  verifyCA.hidden = mysql;
+  verifyCA.disabled = mysql;
+  if (mysql && $("connection-ssl").value === "verify-ca") $("connection-ssl").value = "verify-full";
+  updateSSLDescription();
 }
 
 function updateSSLDescription() {
@@ -921,7 +952,7 @@ function updateSSLDescription() {
 }
 function connectionPayload(data) {
   const payload = {};
-  for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
+  for (const key of ["engine", "label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
     if (!data.has(key)) continue;
     payload[key] = key.endsWith("_password") ? data.get(key) : data.get(key).trim();
   }
@@ -936,6 +967,7 @@ function bindConnectionForm() {
   form._boundConnection = true;
   $("same-credentials").onchange = updateCredentialFields;
   $("connection-ssl").onchange = updateSSLDescription;
+  $("connection-engine").onchange = () => updateConnectionEngine();
   for (const role of ["reader", "migrator"]) {
     $("change-" + role + "-password").onclick = () => { setPasswordEditing(role, true); $(role + "-password").focus(); };
     $("keep-" + role + "-password").onclick = () => { setPasswordEditing(role, false); $("change-" + role + "-password").focus(); };

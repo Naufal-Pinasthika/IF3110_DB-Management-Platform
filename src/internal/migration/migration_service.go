@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -22,23 +23,19 @@ type Repository interface {
 	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error)
 }
 
-
 type AccessChecker interface {
 	RequireDatabase(ctx context.Context, actor auth.Principal, databaseID string, level api.AccessLevel) error
 }
 
-
 type SQLRunner interface {
 	Execute(ctx context.Context, databaseID, sqlText string) error
 }
-
 
 type Service struct {
 	Repository Repository
 	Access     AccessChecker
 	Runner     SQLRunner
 }
-
 
 // ListMigrations returns linear history and draft summaries.
 func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error) {
@@ -66,7 +63,6 @@ func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, data
 	return summaries, nil
 }
 
-
 // GetMigration returns SQL and audit details for a visible migration.
 func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
@@ -93,7 +89,6 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 		ErrorSummary: m.ErrorSummary,
 	}, nil
 }
-
 
 // CreateMigration creates a SQL draft for an editor.
 func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, databaseID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error) {
@@ -128,7 +123,6 @@ func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
-
 // UpdateMigration changes SQL before execution.
 func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.UpdateMigrationRequest, now time.Time) (api.MigrationUpdated, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
@@ -151,7 +145,6 @@ func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
-
 // ExecuteMigration coordinates a target transaction and persistent history.
 func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
@@ -173,6 +166,9 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	completionTime := time.Now()
 
 	if execErr != nil {
+		if errors.Is(execErr, apperror.ErrTransactionOutcomeUnknown) {
+			return api.MigrationExecuted{}, execErr
+		}
 		errSummary := execErr.Error()
 		if idx := strings.Index(errSummary, "pq: "); idx != -1 {
 			errSummary = errSummary[idx:]
