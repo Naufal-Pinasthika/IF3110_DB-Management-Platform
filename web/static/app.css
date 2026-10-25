@@ -163,6 +163,7 @@ dialog::backdrop { background: #17202f66; }
 .form-actions { display: flex; gap: .65rem; justify-content: flex-end; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 fieldset { border: 0; border-top: 1px solid var(--line); padding: 1rem 0 0; margin: 1.5rem 0 0; min-width: 0; }
+.fieldset-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
 legend { padding: 0 .5rem 0 0; font-weight: 600; font-size: .95rem; }
 fieldset .helper-text { margin: .25rem 0 0; }
 .form-message { font-size: .94rem; color: #98281f; padding: .75rem .9rem; background: #fff2ef; border-radius: 4px; margin: 1rem 0; }

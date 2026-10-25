@@ -71,7 +71,8 @@ function action(label, work, className = "") {
 
 function submit(id, work) {
   const form = $(id);
-  if (!form) return;
+  if (!form || form._boundSubmit) return;
+  form._boundSubmit = true;
   form.addEventListener("submit", async event => {
     event.preventDefault();
     const message = form.querySelector(".form-message");
@@ -98,9 +99,9 @@ function badge(value) {
 }
 
 function date(value) {
-  if (!value) return "—";
+  if (!value) return "--";
   const result = new Date(value);
-  return Number.isNaN(result.getTime()) ? "—" : result.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(result.getTime()) ? "--" : result.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }
 
 function tableRow(values) {
@@ -108,7 +109,7 @@ function tableRow(values) {
   for (const value of values) {
     const td = node("td");
     if (value instanceof Node) td.append(value);
-    else td.textContent = value ?? "—";
+    else td.textContent = value ?? "--";
     tr.append(td);
   }
   return tr;
@@ -214,13 +215,31 @@ async function openConnection(id) {
   $("connection-enabled-field").hidden = !id;
   for (const name of ["reader_password", "migrator_password"]) form.elements[name].required = !id;
   $("connection-password-help").textContent = id ? "Leave passwords blank to keep the stored credentials." : "Passwords are never displayed after saving.";
-  if (id) {
+  const sameCreds = $("same-credentials");
+  const migratorFields = $("migrator-fields");
+  if (!id) {
+    if (!form.elements.host.value) form.elements.host.value = "postgres";
+    if (!form.elements.port.value) form.elements.port.value = "5432";
+    if (!form.elements.database_name.value) form.elements.database_name.value = "inventory_db";
+    if (!form.elements.ssl_mode.value) form.elements.ssl_mode.value = "disable";
+    if (!form.elements.reader_username.value) form.elements.reader_username.value = "admin";
+    if (!form.elements.reader_password.value) form.elements.reader_password.value = "root";
+    if (sameCreds) {
+      sameCreds.checked = true;
+      if (migratorFields) migratorFields.hidden = true;
+    }
+  } else {
     const connection = await api("/api/v1/admin/databases/" + encode(id));
     for (const [key, value] of Object.entries(connection)) {
       const field = form.elements.namedItem(key);
       if (!field) continue;
       if (field.type === "checkbox") field.checked = value;
       else field.value = value;
+    }
+    if (sameCreds && migratorFields) {
+      const isSame = connection.reader_username === connection.migrator_username;
+      sameCreds.checked = isSame;
+      migratorFields.hidden = isSame;
     }
   }
   dialog.showModal();
@@ -504,8 +523,8 @@ async function migrationsPage() {
   const migrations = await api(databaseAPI + "/migrations" + (filter ? "?status=" + encode(filter) : ""));
   rows("migration-list", migrations, migration => [
     link(migration.name, databasePath + "/migrations/" + encode(migration.id)),
-    migration.version === null ? "—" : migration.version, badge(migration.status),
-    migration.executed_by || "—", date(migration.executed_at),
+    migration.version === null ? "--" : migration.version, badge(migration.status),
+    migration.executed_by || "--", date(migration.executed_at),
   ], 5, "No migrations found. Users with edit access can create a draft.");
 }
 
@@ -562,8 +581,8 @@ function migrationPage() {
     const migration = await api(endpoint);
     draft = migration.status === "DRAFT";
     $("migration-status").replaceChildren(badge(migration.status));
-    $("migration-version").textContent = migration.version ?? "—";
-    $("migration-executor").textContent = migration.executed_by || "—";
+    $("migration-version").textContent = migration.version ?? "--";
+    $("migration-executor").textContent = migration.executed_by || "--";
     $("migration-time").textContent = date(migration.executed_at);
     document.querySelector("h1").textContent = migration.name;
     if (!dirty) { $("sql").value = migration.sql_text; markSaved(); }
@@ -652,7 +671,7 @@ async function connectionsPage() {
     const controls = node("div", undefined, "toolbar-actions");
     controls.append(action("Edit", () => openConnection(connection.id)), action("Test connection", async () => {
       const result = await api("/api/v1/admin/databases/" + encode(connection.id) + "/test-connection", { method: "POST" });
-      notice(result.connected ? "Reader and migrator connections succeeded." : "Connection could not be established. Check the connection settings.", result.connected ? "success" : "error");
+      notice(result.connected ? "Reader and migrator connections succeeded." : ("Connection test failed: " + (result.message || "Could not reach target database.")), result.connected ? "success" : "error");
     }));
     if (connection.is_enabled) controls.append(action("Disable", async () => {
       if (!await confirmAction("Disable connection?", "Users will no longer be able to access " + connection.label + ". Migration history is preserved.", "Disable connection")) return;
@@ -664,14 +683,39 @@ async function connectionsPage() {
 }
 
 function bindConnectionForm() {
+  const sameCreds = $("same-credentials");
+  const migratorFields = $("migrator-fields");
+  if (sameCreds && migratorFields && !sameCreds._boundChange) {
+    sameCreds._boundChange = true;
+    const updateVisibility = () => {
+      migratorFields.hidden = sameCreds.checked;
+      if (sameCreds.checked) {
+        $("migrator-username").value = $("reader-username").value;
+        $("migrator-password").value = $("reader-password").value;
+      }
+    };
+    sameCreds.onchange = updateVisibility;
+    $("reader-username").addEventListener("input", () => {
+      if (sameCreds.checked) $("migrator-username").value = $("reader-username").value;
+    });
+    $("reader-password").addEventListener("input", () => {
+      if (sameCreds.checked) $("migrator-password").value = $("reader-password").value;
+    });
+  }
+
   submit("connection-form", async (data, form) => {
     const id = data.get("id");
+    const same = $("same-credentials")?.checked;
     const payload = {};
     for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
       if (id && key.endsWith("_password") && !data.get(key)) continue;
       payload[key] = data.get(key);
     }
-    payload.port = Number(data.get("port"));
+    if (same) {
+      payload.migrator_username = payload.reader_username;
+      payload.migrator_password = payload.reader_password;
+    }
+    payload.port = Number(data.get("port")) || 5432;
     if (id) payload.is_enabled = data.has("is_enabled");
     await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: payload });
     form.querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });

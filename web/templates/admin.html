@@ -29,10 +29,10 @@
 </div>
 <input type="hidden" name="id">
 <label for="user-username">Username</label>
-<input id="user-username" name="username" maxlength="64" required autocomplete="off">
+<input id="user-username" name="username" maxlength="64" required autocomplete="off" placeholder="e.g. john_doe">
 <label for="user-password">Password</label>
-<input id="user-password" name="password" type="password" autocomplete="new-password" required>
-<p class="helper-text" id="user-password-help">Use a password of up to 72 bytes.</p>
+<input id="user-password" name="password" type="password" autocomplete="new-password" required placeholder="••••••••">
+<p class="helper-text" id="user-password-help">Must be at least 8 characters (max 72 bytes).</p>
 <label class="checkbox-label" id="user-admin-field">
 <input type="checkbox" name="is_platform_admin">Platform administrator</label>
 <label class="checkbox-label" id="user-active-field" hidden>
@@ -133,7 +133,7 @@
 </div>
 <input type="hidden" name="id">
 <label for="group-name">Group name</label>
-<input id="group-name" name="name" required maxlength="100">
+<input id="group-name" name="name" required maxlength="100" placeholder="e.g. engineering, analysts">
 <div class="form-message" role="alert" hidden>
 </div>
 <div class="form-actions">
@@ -150,7 +150,6 @@
 <p>Reader and migrator credentials are stored separately.</p>
 </div>
 <div class="toolbar-actions">
-<button type="button" class="button primary small" data-open="connection-dialog">Add connection</button>
 <button type="button" class="button small" id="refresh">Refresh</button>
 </div>
 </div>

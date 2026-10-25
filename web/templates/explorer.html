@@ -1,9 +1,8 @@
 {{define "databases"}}
 <section class="database-index" aria-label="Database connections">
 <div class="list-toolbar">
-<label class="search-field"><span class="sr-only">Filter databases</span><input type="search" id="database-filter" placeholder="Find a database…" autocomplete="off"></label>
+<label class="search-field"><span class="sr-only">Filter databases</span><input type="search" id="database-filter" placeholder="Search databases by label or name…" autocomplete="off"></label>
 <span id="database-count" class="record-count">Loading…</span>
-<button type="button" class="button primary small" data-admin-only hidden data-open="connection-dialog">Add database</button>
 <button type="button" class="button small" id="refresh">Refresh</button>
 </div>
 <div class="table-scroll database-grid">
@@ -31,7 +30,7 @@
 <section id="data-tab" role="tabpanel" aria-labelledby="data-trigger">
 <div class="grid-guidance"><span>Read-only data</span><span>Scroll horizontally for more columns</span></div>
 <div id="rows-table" class="table-scroll" tabindex="0" aria-label="Table data"><p class="inline-state">Loading table data…</p></div>
-<div class="pagination"><span id="rows-range">—</span><div class="toolbar-actions"><label for="page-size">Rows</label><select id="page-size"><option>25</option><option selected>50</option><option>100</option></select><button class="button small" id="previous-page" disabled>Previous</button><button class="button small" id="next-page" disabled>Next</button></div></div>
+<div class="pagination"><span id="rows-range">--</span><div class="toolbar-actions"><label for="page-size">Rows</label><select id="page-size"><option>25</option><option selected>50</option><option>100</option></select><button class="button small" id="previous-page" disabled>Previous</button><button class="button small" id="next-page" disabled>Next</button></div></div>
 </section>
 <section id="structure-tab" role="tabpanel" aria-labelledby="structure-trigger" hidden>
 <section class="metadata-section"><h2>Columns</h2><div class="table-scroll" tabindex="0" aria-label="Columns"><table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Key</th></tr></thead><tbody id="column-list"></tbody></table></div></section>

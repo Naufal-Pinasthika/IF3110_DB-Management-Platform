@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -276,23 +278,44 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseSummary{}, err
 	}
-	if input.Label == "" || input.Host == "" || input.DatabaseName == "" || input.SSLMode == "" {
-		return api.ManagedDatabaseSummary{}, apperror.New("label, host, database_name, ssl_mode required")
+	input.Label = strings.TrimSpace(input.Label)
+	if input.Label == "" {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: connection label is required", apperror.ErrInvalidInput)
+	}
+
+	// Supply robust defaults for PostgreSQL deployment environment
+	if strings.TrimSpace(input.Host) == "" {
+		input.Host = "postgres"
 	}
 	if input.Port <= 0 {
-		return api.ManagedDatabaseSummary{}, apperror.New("port must be positive")
+		input.Port = 5432
 	}
-	if input.ReaderUsername == "" || input.ReaderPassword == "" || input.MigratorUsername == "" || input.MigratorPassword == "" {
-		return api.ManagedDatabaseSummary{}, apperror.New("both reader and migrator credentials required")
+	if strings.TrimSpace(input.DatabaseName) == "" {
+		input.DatabaseName = "inventory_db"
+	}
+	if strings.TrimSpace(input.SSLMode) == "" {
+		input.SSLMode = "disable"
+	}
+	if strings.TrimSpace(input.ReaderUsername) == "" {
+		input.ReaderUsername = "admin"
+	}
+	if input.ReaderPassword == "" {
+		input.ReaderPassword = "root"
+	}
+	if strings.TrimSpace(input.MigratorUsername) == "" {
+		input.MigratorUsername = input.ReaderUsername
+	}
+	if input.MigratorPassword == "" {
+		input.MigratorPassword = input.ReaderPassword
 	}
 
 	readerEnc, err := s.Cipher.Encrypt(input.ReaderPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, err
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
 	}
 	migratorEnc, err := s.Cipher.Encrypt(input.MigratorPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, err
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
 	}
 
 	db := models.ManagedDatabase{
@@ -442,11 +465,13 @@ func (s *Service) TestDatabaseConnection(ctx context.Context, actor auth.Princip
 		return api.TestConnectionResult{}, err
 	}
 	if databaseID == "" {
-		return api.TestConnectionResult{}, apperror.New("database id required")
+		return api.TestConnectionResult{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
 	}
 	err := s.Connections.TestConnection(ctx, databaseID)
-	connected := err == nil
-	return api.TestConnectionResult{Connected: connected}, nil
+	if err != nil {
+		return api.TestConnectionResult{Connected: false, Message: err.Error()}, nil
+	}
+	return api.TestConnectionResult{Connected: true, Message: "Reader and migrator connections succeeded."}, nil
 }
 
 // SetGroupDatabaseAccess sets a group permission for one database.

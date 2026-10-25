@@ -113,10 +113,10 @@ func (s *TargetStore) TestConnection(ctx context.Context, databaseID string) err
 	}
 
 	if err := testRole(db.ReaderUsername, db.ReaderPasswordEnc); err != nil {
-		return fmt.Errorf("reader role: %v", err)
+		return fmt.Errorf("reader (%s): %v", db.ReaderUsername, err)
 	}
 	if err := testRole(db.MigratorUsername, db.MigratorPasswordEnc); err != nil {
-		return fmt.Errorf("migrator role: %v", err)
+		return fmt.Errorf("migrator (%s): %v", db.MigratorUsername, err)
 	}
 
 	return nil
@@ -181,12 +181,28 @@ func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDataba
 
 
 func buildDSN(db models.ManagedDatabase, username, password string) string {
+	host := db.Host
+	if host == "" {
+		host = "postgres"
+	}
+	port := db.Port
+	if port <= 0 {
+		port = 5432
+	}
+	dbName := db.DatabaseName
+	if dbName == "" {
+		dbName = "inventory_db"
+	}
+	ssl := db.SSLMode
+	if ssl == "" {
+		ssl = "disable"
+	}
 	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		url.QueryEscape(username),
 		url.QueryEscape(password),
-		db.Host,
-		db.Port,
-		url.QueryEscape(db.DatabaseName),
-		db.SSLMode,
+		host,
+		port,
+		url.QueryEscape(dbName),
+		ssl,
 	)
 }

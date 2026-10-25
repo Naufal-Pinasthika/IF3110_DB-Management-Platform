@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -225,7 +226,12 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, apperror.ErrInvalidInput):
 			api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		default:
-			api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal error occurred")
+			errStr := err.Error()
+			if strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "unique") {
+				api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "A record with this name or label already exists")
+				return
+			}
+			api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		}
 	}
 

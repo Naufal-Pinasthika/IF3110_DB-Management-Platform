@@ -36,19 +36,19 @@
 {{define "migration"}}<div id="migration-metadata" class="metadata-strip" {{if eq .Kind "migration-new"}}hidden{{end}}>
 <div>
 <span>Status</span>
-<strong id="migration-status">—</strong>
+<strong id="migration-status">--</strong>
 </div>
 <div>
 <span>Version</span>
-<strong id="migration-version">—</strong>
+<strong id="migration-version">--</strong>
 </div>
 <div>
 <span>Executed by</span>
-<strong id="migration-executor">—</strong>
+<strong id="migration-executor">--</strong>
 </div>
 <div>
 <span>Executed at</span>
-<strong id="migration-time">—</strong>
+<strong id="migration-time">--</strong>
 </div>
 </div>
 <div id="migration-error" class="notice error" role="alert" hidden>
@@ -64,7 +64,8 @@
 <label for="migration-name">Migration name</label>
 <input id="migration-name" name="name" placeholder="e.g. Add customer email index" required maxlength="200">
 </div>{{end}}<label class="sr-only" for="sql">Migration SQL</label>
-<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL here" required {{if eq .Kind "migration"}}readonly{{end}}>
+<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL statements here (e.g. CREATE TABLE items (...);)
+-- All statements execute atomically within a transaction" required {{if eq .Kind "migration"}}readonly{{end}}>
 </textarea>
 <div class="editor-footer">
 <span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>

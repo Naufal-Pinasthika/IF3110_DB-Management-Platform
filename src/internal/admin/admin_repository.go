@@ -2,11 +2,14 @@ package admin
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
 )
@@ -41,6 +44,12 @@ func (r *PostgresRepository) GetUser(ctx context.Context, userID string) (models
 // CreateUser persists a user with an already hashed password.
 func (r *PostgresRepository) CreateUser(ctx context.Context, user models.User) (models.User, error) {
 	err := r.DB.WithContext(ctx).Create(&user).Error
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
+			return models.User{}, fmt.Errorf("%w: username '%s' is already taken", apperror.ErrConflict, user.Username)
+		}
+		return models.User{}, err
+	}
 	return user, err
 }
 
@@ -94,6 +103,12 @@ func (r *PostgresRepository) ListGroups(ctx context.Context) ([]models.Group, er
 func (r *PostgresRepository) CreateGroup(ctx context.Context, name string) (models.Group, error) {
 	group := models.Group{Name: name}
 	err := r.DB.WithContext(ctx).Create(&group).Error
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
+			return models.Group{}, fmt.Errorf("%w: a group with name '%s' already exists", apperror.ErrConflict, name)
+		}
+		return models.Group{}, err
+	}
 	return group, err
 }
 
@@ -213,7 +228,13 @@ func (r *PostgresRepository) GetDatabase(ctx context.Context, databaseID string)
 // CreateDatabase stores a target with encrypted credentials.
 func (r *PostgresRepository) CreateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error) {
 	err := r.DB.WithContext(ctx).Create(&database).Error
-	return database, err
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
+			return models.ManagedDatabase{}, fmt.Errorf("%w: a connection with label '%s' already exists", apperror.ErrConflict, database.Label)
+		}
+		return models.ManagedDatabase{}, err
+	}
+	return database, nil
 }
 
 // UpdateDatabase updates registered target settings.

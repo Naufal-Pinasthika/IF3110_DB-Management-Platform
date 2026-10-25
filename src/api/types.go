@@ -177,7 +177,8 @@ type ManagedDatabaseDetail struct {
 
 // POST /api/v1/admin/databases/{dbId}/test-connection
 type TestConnectionResult struct {
-    Connected bool `json:"connected"`
+    Connected bool   `json:"connected"`
+    Message   string `json:"message,omitempty"`
 }
 
 // ------------------------------------------------------------

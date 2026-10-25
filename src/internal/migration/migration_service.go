@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
