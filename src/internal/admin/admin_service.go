@@ -82,10 +82,10 @@ func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input ap
 		return api.AdminUser{}, err
 	}
 	if input.Username == "" || input.Password == "" {
-		return api.AdminUser{}, apperror.New("username and password required")
+		return api.AdminUser{}, fmt.Errorf("%w: username and password required", apperror.ErrInvalidInput)
 	}
 	if len(input.Password) < 8 {
-		return api.AdminUser{}, apperror.New("password must be at least 8 characters")
+		return api.AdminUser{}, fmt.Errorf("%w: password must be at least 8 characters", apperror.ErrInvalidInput)
 	}
 
 	hash, err := s.HashPassword(input.Password)
@@ -119,10 +119,10 @@ func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID s
 		return api.AdminUser{}, err
 	}
 	if userID == "" {
-		return api.AdminUser{}, apperror.New("user id required")
+		return api.AdminUser{}, fmt.Errorf("%w: user id required", apperror.ErrInvalidInput)
 	}
-	if input.Username == nil && input.Password == nil && input.IsActive == nil {
-		return api.AdminUser{}, apperror.New("no fields to update")
+	if input.Username == nil && input.Password == nil && input.IsActive == nil && input.IsPlatformAdmin == nil {
+		return api.AdminUser{}, fmt.Errorf("%w: no fields to update", apperror.ErrInvalidInput)
 	}
 
 	current, err := s.Repository.GetUser(ctx, userID)
@@ -136,7 +136,7 @@ func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID s
 	}
 	if input.Password != nil {
 		if len(*input.Password) < 8 {
-			return api.AdminUser{}, apperror.New("password must be at least 8 characters")
+			return api.AdminUser{}, fmt.Errorf("%w: password must be at least 8 characters", apperror.ErrInvalidInput)
 		}
 		hash, err := s.HashPassword(*input.Password)
 		if err != nil {
@@ -150,6 +150,12 @@ func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID s
 			revokeSessions = true
 		}
 		current.IsActive = *input.IsActive
+	}
+	if input.IsPlatformAdmin != nil {
+		if current.IsPlatformAdmin != *input.IsPlatformAdmin {
+			revokeSessions = true
+		}
+		current.IsPlatformAdmin = *input.IsPlatformAdmin
 	}
 
 	updated, err := s.Repository.UpdateUser(ctx, current, revokeSessions, now)
@@ -187,7 +193,7 @@ func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input a
 		return api.Group{}, err
 	}
 	if input.Name == "" || len(input.Name) > 100 {
-		return api.Group{}, apperror.New("group name required, max 100 characters")
+		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
 	}
 
 	group, err := s.Repository.CreateGroup(ctx, input.Name)
@@ -203,10 +209,10 @@ func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID
 		return api.Group{}, err
 	}
 	if groupID == "" {
-		return api.Group{}, apperror.New("group id required")
+		return api.Group{}, fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
 	}
 	if input.Name == nil || *input.Name == "" || len(*input.Name) > 100 {
-		return api.Group{}, apperror.New("group name required, max 100 characters")
+		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
 	}
 
 	group, err := s.Repository.UpdateGroup(ctx, groupID, *input.Name)
@@ -222,7 +228,7 @@ func (s *Service) DeleteGroup(ctx context.Context, actor auth.Principal, groupID
 		return err
 	}
 	if groupID == "" {
-		return apperror.New("group id required")
+		return fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.DeleteGroup(ctx, groupID, now)
 }
@@ -374,7 +380,7 @@ func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, 
 		return api.ManagedDatabaseDetail{}, err
 	}
 	if databaseID == "" {
-		return api.ManagedDatabaseDetail{}, apperror.New("database id required")
+		return api.ManagedDatabaseDetail{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
 	}
 	db, err := s.Repository.GetDatabase(ctx, databaseID)
 	if err != nil {
@@ -400,7 +406,7 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 	if databaseID == "" {
-		return api.ManagedDatabaseSummary{}, apperror.New("database id required")
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
 	}
 
 	current, err := s.Repository.GetDatabase(ctx, databaseID)
@@ -437,7 +443,7 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 		return err
 	}
 	if databaseID == "" {
-		return apperror.New("database id required")
+		return fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
 	}
 	if err := s.Repository.DisableDatabase(ctx, databaseID); err != nil {
 		return err
@@ -520,7 +526,7 @@ func (s *Service) applyConnectionChanges(current models.ManagedDatabase, input a
 	}
 	if input.Port != nil {
 		if *input.Port <= 0 {
-			return current, apperror.New("port must be positive")
+			return current, fmt.Errorf("%w: port must be positive", apperror.ErrInvalidInput)
 		}
 		current.Port = *input.Port
 	}

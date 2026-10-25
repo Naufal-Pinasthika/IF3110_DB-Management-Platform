@@ -66,9 +66,10 @@ type CreateUserRequest struct {
 
 // PATCH /api/v1/admin/users/{userId} request body
 type UpdateUserRequest struct {
-	Username *string `json:"username,omitempty"`
-	Password *string `json:"password,omitempty"`
-	IsActive *bool   `json:"is_active,omitempty"`
+	Username        *string `json:"username,omitempty"`
+	Password        *string `json:"password,omitempty"`
+	IsActive        *bool   `json:"is_active,omitempty"`
+	IsPlatformAdmin *bool   `json:"is_platform_admin,omitempty"`
 }
 
 // POST /api/v1/admin/users response body
