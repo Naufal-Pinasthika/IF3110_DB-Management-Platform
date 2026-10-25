@@ -1,5 +1,5 @@
 // Package models defines the seven platform metadata tables in one place.
-// Keep these mappings aligned with db/migrations/000001_create_platform_schema.sql.
+// Keep these mappings aligned with db/platform/000001_create_platform_schema.sql.
 // SQL migrations own enum creation and check constraints and schema changes.
 // Do not use AutoMigrate to replace those migrations.
 package models

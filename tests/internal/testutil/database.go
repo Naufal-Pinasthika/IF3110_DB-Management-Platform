@@ -80,7 +80,7 @@ func Database(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	migration, err := os.ReadFile(filepath.Join(Root(), "db/migrations/000001_create_platform_schema.sql"))
+	migration, err := os.ReadFile(filepath.Join(Root(), "db/platform/000001_create_platform_schema.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}

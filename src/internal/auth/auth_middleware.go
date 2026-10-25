@@ -8,7 +8,15 @@ import (
 
 )
 
+type contextKey string
+
+const (
+	// key used to store/retrieve Principal from request context
+	principalContextKey contextKey = "principal"
+)
+
 type sessionContextKey struct{}
+
 
 // reads identity written by session middleware.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
@@ -20,10 +28,12 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return session.Principal, true
 }
 
-// stores a principal in the request context.
+
+// stores the Principal in request context.
 func SetPrincipalContext(ctx context.Context, principal Principal) context.Context {
-	return context.WithValue(ctx, sessionContextKey{}, ValidatedSession{Principal: principal})
+	return context.WithValue(ctx, principalContextKey, principal)
 }
+
 
 // validates a cookie before calling the protected handler.
 func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
