@@ -1,0 +1,77 @@
+{{define "migrations"}}<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>Migration history</h2>
+<p>Drafts and executed changes for this database.</p>
+</div>
+<label class="toolbar-actions" for="migration-filter">Status<select id="migration-filter">
+<option value="">All statuses</option>
+<option value="DRAFT">Draft</option>
+<option value="RUNNING">Running</option>
+<option value="APPLIED">Applied</option>
+<option value="FAILED">Failed</option>
+</select>
+</label>
+</div>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th>Migration</th>
+<th>Version</th>
+<th>Status</th>
+<th>Executed by</th>
+<th>Executed at</th>
+</tr>
+</thead>
+<tbody id="migration-list">
+<tr>
+<td colspan="5" class="empty-cell">Loading migration history…</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>{{end}}
+
+{{define "migration"}}<div id="migration-metadata" class="metadata-strip" {{if eq .Kind "migration-new"}}hidden{{end}}>
+<div>
+<span>Status</span>
+<strong id="migration-status">—</strong>
+</div>
+<div>
+<span>Version</span>
+<strong id="migration-version">—</strong>
+</div>
+<div>
+<span>Executed by</span>
+<strong id="migration-executor">—</strong>
+</div>
+<div>
+<span>Executed at</span>
+<strong id="migration-time">—</strong>
+</div>
+</div>
+<div id="migration-error" class="notice error" role="alert" hidden>
+</div>
+<form method="post" id="migration-form" class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>{{if eq .Kind "migration-new"}}Migration draft{{else}}SQL changes{{end}}</h2>
+<p id="migration-help">Saving a draft does not execute SQL.</p>
+</div>
+<a class="button small" href="{{.DatabaseURL}}/migrations">Back to migrations</a>
+</div>{{if eq .Kind "migration-new"}}<div class="editor-name">
+<label for="migration-name">Migration name</label>
+<input id="migration-name" name="name" placeholder="e.g. Add customer email index" required maxlength="200">
+</div>{{end}}<label class="sr-only" for="sql">Migration SQL</label>
+<textarea id="sql" name="sql_text" class="sql-editor" spellcheck="false" placeholder="-- Write your migration SQL here" required {{if eq .Kind "migration"}}readonly{{end}}>
+</textarea>
+<div class="editor-footer">
+<span class="execution-target">Target: <code class="target-database">checking…</code></span><span class="muted" id="migration-save-note">Changes execute together in a transaction.</span>
+<div class="toolbar-actions">
+<button class="button primary" type="submit" id="save-migration" data-edit-only hidden>Save draft</button>
+<button class="button danger" type="button" id="execute-migration" data-edit-only hidden {{if eq .Kind "migration-new"}}disabled{{end}}>Execute migration</button>
+</div>
+</div>
+</form>
+<p class="helper-text" id="migration-permission">Checking database permissions…</p>{{end}}

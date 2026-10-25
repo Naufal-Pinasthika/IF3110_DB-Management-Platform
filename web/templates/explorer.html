@@ -1,0 +1,54 @@
+{{define "databases"}}
+<section class="database-index" aria-label="Database connections">
+<div class="list-toolbar">
+<label class="search-field"><span class="sr-only">Filter databases</span><input type="search" id="database-filter" placeholder="Find a database…" autocomplete="off"></label>
+<span id="database-count" class="record-count">Loading…</span>
+<button type="button" class="button small" id="refresh">Refresh</button>
+</div>
+<div class="table-scroll database-grid">
+<table>
+<thead><tr><th>Connection</th><th>PostgreSQL database</th><th>Access</th><th><span class="sr-only">Open</span></th></tr></thead>
+<tbody id="database-list"><tr><td colspan="4" class="empty-cell">Loading databases…</td></tr></tbody>
+</table>
+</div>
+</section>
+{{end}}
+
+{{define "database"}}
+<section class="work-surface">
+<div class="section-toolbar"><h2 id="schema-name">Tables</h2><span id="table-count" class="muted">Select a schema in the explorer.</span></div>
+<div class="table-scroll"><table><thead><tr><th>Table</th><th>Schema</th><th></th></tr></thead><tbody id="table-list"><tr><td colspan="3" class="empty-cell">Choose a schema to browse its tables.</td></tr></tbody></table></div>
+</section>
+{{end}}
+
+{{define "table"}}
+<div class="inspector-surface">
+<div class="tab-bar" role="tablist" aria-label="Table details">
+<button class="tab" role="tab" aria-selected="true" aria-controls="data-tab" id="data-trigger" data-tab="data-tab">Data</button>
+<button class="tab" role="tab" aria-selected="false" aria-controls="structure-tab" id="structure-trigger" data-tab="structure-tab" tabindex="-1">Structure</button>
+</div>
+<section id="data-tab" role="tabpanel" aria-labelledby="data-trigger">
+<div class="grid-guidance"><span>Read-only data</span><span>Scroll horizontally for more columns</span></div>
+<div id="rows-table" class="table-scroll" tabindex="0" aria-label="Table data"><p class="inline-state">Loading table data…</p></div>
+<div class="pagination"><span id="rows-range">—</span><div class="toolbar-actions"><label for="page-size">Rows</label><select id="page-size"><option>25</option><option selected>50</option><option>100</option></select><button class="button small" id="previous-page" disabled>Previous</button><button class="button small" id="next-page" disabled>Next</button></div></div>
+</section>
+<section id="structure-tab" role="tabpanel" aria-labelledby="structure-trigger" hidden>
+<section class="metadata-section"><h2>Columns</h2><div class="table-scroll" tabindex="0" aria-label="Columns"><table><thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Key</th></tr></thead><tbody id="column-list"></tbody></table></div></section>
+<section class="metadata-section"><h2>Constraints</h2><div class="table-scroll" tabindex="0" aria-label="Constraints"><table><thead><tr><th>Name</th><th>Type</th><th>Columns</th></tr></thead><tbody id="constraint-list"></tbody></table></div></section>
+<section class="metadata-section"><h2>Indexes</h2><div class="table-scroll" tabindex="0" aria-label="Indexes"><table><thead><tr><th>Name</th><th>Columns</th><th>Unique</th></tr></thead><tbody id="index-list"></tbody></table></div></section>
+</section>
+</div>
+{{end}}
+
+{{define "query"}}
+<form method="post" id="query-form" class="work-surface query-surface">
+<div class="section-toolbar"><h2>Query</h2><span class="muted">SELECT only</span></div>
+<label class="sr-only" for="sql">SQL query</label>
+<textarea id="sql" name="sql" class="sql-editor" spellcheck="false" placeholder="SELECT * FROM public.your_table LIMIT 50;" required></textarea>
+<div class="editor-footer"><span class="execution-target">Target: <code class="target-database">checking…</code></span><div class="toolbar-actions"><span class="shortcut">Ctrl / ⌘ + Enter</span><label for="max-rows">Limit</label><select id="max-rows" name="max_rows"><option>25</option><option selected>50</option><option>100</option></select><button type="submit" class="button primary">Run query</button></div></div>
+</form>
+<section class="query-results-surface" aria-label="Query results">
+<div class="section-toolbar"><h2>Results</h2><span class="muted" id="query-summary" role="status">No query run</span></div>
+<div class="table-scroll" id="query-results" tabindex="0"><p class="inline-state">Run a SELECT query to view results.</p></div>
+</section>
+{{end}}

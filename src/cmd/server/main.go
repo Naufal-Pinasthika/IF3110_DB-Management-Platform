@@ -12,6 +12,7 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/health"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/web"
 )
 
 func main() {
@@ -58,7 +59,7 @@ func newRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		return nil, err
 	}
 	handler := &auth.Handler{Service: service, PublicOrigin: cfg.PublicOrigin}
-	return api.NewRouter(api.RouteHandlers{
+	apiRouter := api.NewRouter(api.RouteHandlers{
 		Health: http.HandlerFunc(health.Health),
 		Login:  http.HandlerFunc(handler.Login),
 		Me:     http.HandlerFunc(handler.Me),
@@ -67,5 +68,14 @@ func newRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		Session:   handler.SessionMiddleware,
 		CSRF:      handler.CSRFMiddleware,
 		LoginCSRF: handler.LoginCSRFMiddleware,
-	}), nil
+	})
+	pages, err := web.New()
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/api/", apiRouter)
+	mux.Handle("/health", apiRouter)
+	mux.Handle("/", pages)
+	return mux, nil
 }

@@ -11,7 +11,6 @@ services:
       - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
       - ./db/migrations/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/02-platform-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d platform_db"]

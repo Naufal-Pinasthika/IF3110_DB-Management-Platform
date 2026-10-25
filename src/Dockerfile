@@ -6,6 +6,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY src ./src
+COPY web ./web
 
 RUN CGO_ENABLED=0 go build -o /server ./src/cmd/server
 
