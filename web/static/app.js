@@ -10,6 +10,7 @@ let canEdit = false;
 let dirty = false;
 let savedSQL = "";
 let activeDatabase = null;
+let currentUser = null;
 let selectedSchema = state.schema || "";
 let explorerEntries = new Map();
 let explorerVersion = 0;
@@ -253,6 +254,12 @@ async function loadDatabaseContext() {
   canEdit = database.effective_access === "VIEW_EDIT";
   document.querySelectorAll("[data-edit-only]").forEach(element => { element.hidden = !canEdit; });
   if ($("migration-permission")) $("migration-permission").textContent = canEdit ? "Only drafts can be edited or executed. SELECT queries remain read only." : "Read only. Creating or executing migrations requires migration access.";
+  const statusEl = document.querySelector(".connection-status");
+  if (statusEl) {
+    statusEl.textContent = "Connected";
+    statusEl.title = "Target database reachable";
+    statusEl.style.color = "var(--green)";
+  }
   return database;
 }
 
@@ -271,12 +278,17 @@ async function databasesPage() {
     const query = $("database-filter").value.toLowerCase();
     const visible = (databases || []).filter(item => (item.label + " " + item.database_name).toLowerCase().includes(query));
     $("database-count").textContent = visible.length + (query ? " of " + (databases?.length || 0) : "") + (visible.length === 1 ? " connection" : " connections");
+    const emptyMessage = query
+      ? "No databases match your filter."
+      : currentUser?.is_platform_admin
+      ? "No databases registered yet. Click 'Add database' to connect your first PostgreSQL database."
+      : "No databases are assigned to your groups. Ask an administrator for access.";
     rows("database-list", visible, item => [
       link(item.label, "/databases/" + encode(item.id)),
       node("span", item.database_name, "mono"),
       permissionCell(item.effective_access),
       link("Open", "/databases/" + encode(item.id), "button small open-database"),
-    ], 4, query ? "No databases match your filter." : "No databases are assigned to your groups. Ask an administrator for access.");
+    ], 4, emptyMessage);
   };
   $("database-filter").oninput = filter;
   filter();
@@ -535,6 +547,7 @@ function migrationPage() {
       await reload();
       notice("Migration execution completed. Review its status below.", "success");
     } catch (error) {
+      try { await reload(); } catch {}
       if (!error.status || error.status >= 500) throw new Error("Execution could not be confirmed. Check migration history before attempting it again.");
       throw error;
     } finally {
@@ -692,9 +705,14 @@ async function start() {
     dirty = false; location.assign("/login");
   }).catch(error => fail(error));
   const user = await api("/api/v1/auth/me");
+  currentUser = user;
   $("account-name").textContent = user.username;
   document.querySelector(".avatar").textContent = user.username.slice(0, 1).toUpperCase();
   $("admin-nav").hidden = !user.is_platform_admin;
+  if (user.is_platform_admin) {
+    document.querySelectorAll("[data-admin-only]").forEach(element => { element.hidden = false; });
+    bindConnectionForm();
+  }
   if (["users", "groups", "connections"].includes(state.page) && !user.is_platform_admin) {
     $("page-content").replaceChildren(node("p", "Administrator access is required to manage this section.", "notice error"));
     $("page-content").inert = false;

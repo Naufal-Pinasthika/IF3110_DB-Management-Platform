@@ -149,7 +149,10 @@
 <h2>Registered connections</h2>
 <p>Reader and migrator credentials are stored separately.</p>
 </div>
+<div class="toolbar-actions">
+<button type="button" class="button primary small" data-open="connection-dialog">Add connection</button>
 <button type="button" class="button small" id="refresh">Refresh</button>
+</div>
 </div>
 <div class="table-scroll">
 <table>
@@ -168,77 +171,4 @@
 </tbody>
 </table>
 </div>
-</section>
-<dialog id="connection-dialog" class="wide-dialog" aria-labelledby="connection-dialog-title">
-<form method="post" id="connection-form">
-<div class="dialog-heading">
-<h2 id="connection-dialog-title">Add connection</h2>
-<button class="button quiet" type="button" data-close>Close</button>
-</div>
-<input type="hidden" name="id">
-<label for="connection-label">Connection label</label>
-<input id="connection-label" name="label" placeholder="e.g. Production inventory" required>
-<div class="form-columns">
-<div>
-<label for="connection-host">Host</label>
-<input id="connection-host" name="host" required placeholder="postgres.example.com">
-</div>
-<div>
-<label for="connection-port">Port</label>
-<input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required>
-</div>
-</div>
-<div class="form-columns">
-<div>
-<label for="connection-database">Database name</label>
-<input id="connection-database" name="database_name" required>
-</div>
-<div>
-<label for="connection-ssl">SSL mode</label>
-<select id="connection-ssl" name="ssl_mode">
-<option value="require">Require</option>
-<option value="verify-full">Verify full</option>
-<option value="verify-ca">Verify CA</option>
-<option value="disable">Disable (local only)</option>
-</select>
-</div>
-</div>
-<fieldset>
-<legend>Reader credentials</legend>
-<p class="helper-text">Used for schema browsing and read-only queries.</p>
-<div class="form-columns">
-<div>
-<label for="reader-username">Username</label>
-<input id="reader-username" name="reader_username" autocomplete="off" required>
-</div>
-<div>
-<label for="reader-password">Password</label>
-<input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required>
-</div>
-</div>
-</fieldset>
-<fieldset>
-<legend>Migrator credentials</legend>
-<p class="helper-text">Used to execute authorized migrations.</p>
-<div class="form-columns">
-<div>
-<label for="migrator-username">Username</label>
-<input id="migrator-username" name="migrator_username" autocomplete="off" required>
-</div>
-<div>
-<label for="migrator-password">Password</label>
-<input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" required>
-</div>
-</div>
-</fieldset>
-<p class="helper-text" id="connection-password-help">Passwords are never displayed after saving.</p>
-<label class="checkbox-label" id="connection-enabled-field" hidden>
-<input type="checkbox" name="is_enabled">Connection enabled</label>
-<div class="form-message" role="alert" hidden>
-</div>
-<div class="form-actions">
-<button class="button" type="button" data-close>Cancel</button>
-<button class="button primary" type="submit">Save connection</button>
-</div>
-</form>
-</dialog>{{end}}
+</section>{{end}}

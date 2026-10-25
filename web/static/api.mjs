@@ -74,7 +74,8 @@ export function accessCapabilities(level) {
 }
 
 export function columnKeys(column, constraints = []) {
-  const keys = new Set(constraints.filter(item => item.columns?.includes(column)).map(item => item.type.toUpperCase()));
+  const list = constraints || [];
+  const keys = new Set(list.filter(item => item.columns?.includes(column)).map(item => item.type.toUpperCase()));
   return [["PRIMARY KEY", "PK"], ["FOREIGN KEY", "FK"], ["UNIQUE", "Unique"]]
     .filter(([type]) => keys.has(type)).map(([, label]) => label).join(", ") || "—";
 }
