@@ -66,6 +66,7 @@ services:
       - ./db/platform/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/01-platform-schema.sql:ro
       - ./db/platform/000002_dev_admin.sql:/docker-entrypoint-initdb.d/02-dev-admin.sql:ro
       - ./db/platform/000003_dev_user.sql:/docker-entrypoint-initdb.d/03-dev-user.sql:ro
+      - ./db/platform/000005_add_database_engine.sql:/docker-entrypoint-initdb.d/04-database-engine.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d platform_db"]
       interval: 2s

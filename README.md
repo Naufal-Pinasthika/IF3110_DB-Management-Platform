@@ -65,6 +65,14 @@ docker compose up -d --build
 
 Perintah ini menjalankan: platform database (PostgreSQL), tiga database target, dan backend.
 
+Jika platform database sudah menggunakan volume lama, jalankan upgrade schema satu kali setelah menarik versi terbaru:
+
+```bash
+make migrate-platform
+```
+
+Migration ini menambahkan kolom `engine` yang dibutuhkan metadata koneksi. Init script Compose menerapkannya otomatis pada volume baru; Compose tidak menjalankan ulang init script pada volume yang sudah ada.
+
 ### 3. Akses aplikasi
 
 - **WEB**: <http://localhost:28080>

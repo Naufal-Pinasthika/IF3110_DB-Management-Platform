@@ -1,6 +1,6 @@
 MODULE := github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform
 
-.PHONY: check test test-unit test-web test-db-up test-integration test-browser test-all browser-install build
+.PHONY: check test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build
 
 check:
 	go vet ./...
@@ -22,6 +22,10 @@ test-web:
 
 test-db-up:
 	docker compose -f tests/compose.yml up -d --wait postgres
+
+# Apply idempotent platform schema upgrades to an already initialized local database.
+migrate-platform:
+	docker compose exec -T postgres psql -U admin -d platform_db < db/platform/000005_add_database_engine.sql
 
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
