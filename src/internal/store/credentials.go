@@ -5,7 +5,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 )
@@ -13,9 +12,6 @@ import (
 type Cipher struct {
 	Key []byte
 }
-
-// returned when ciphertext is malformed or authentication fails.
-var ErrInvalidCiphertext = errors.New("invalid ciphertext")
 
 
 func (c *Cipher) Encrypt(plaintext string) (string, error) {
@@ -50,6 +46,7 @@ func (c *Cipher) Encrypt(plaintext string) (string, error) {
 	return base64.StdEncoding.EncodeToString(result), nil
 }
 
+
 func (c *Cipher) Decrypt(ciphertext string) (string, error) {
 	if len(c.Key) != 32 {
 		return "", apperror.New("encryption key must be 32 bytes")
@@ -75,7 +72,7 @@ func (c *Cipher) Decrypt(ciphertext string) (string, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
-		return "", ErrInvalidCiphertext
+		return "", apperror.ErrInvalidCiphertext
 	}
 
 	nonce := data[:nonceSize]
@@ -83,7 +80,7 @@ func (c *Cipher) Decrypt(ciphertext string) (string, error) {
 
 	plaintext, err := gcm.Open(nil, nonce, ciphertextBytes, nil)
 	if err != nil {
-		return "", ErrInvalidCiphertext
+		return "", apperror.ErrInvalidCiphertext
 	}
 
 	return string(plaintext), nil
