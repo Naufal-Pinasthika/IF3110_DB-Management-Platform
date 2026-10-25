@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/access"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
@@ -215,9 +216,9 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	// mapError maps service errors to API error responses.
 	func (h *Handler) mapError(w http.ResponseWriter, err error) {
 		switch {
-		case errors.Is(err, auth.ErrUnauthenticated):
+		case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, access.ErrUnauthenticated):
 			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-		case errors.Is(err, apperror.ErrForbidden):
+		case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
 			api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Platform admin access required")
 		case errors.Is(err, apperror.ErrNotFound):
 			api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())

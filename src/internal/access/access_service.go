@@ -54,9 +54,6 @@ func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, dat
 	}
 
 	if len(grants) == 0 {
-		if actor.User.IsPlatformAdmin {
-			return api.AccessViewEdit, nil
-		}
 		return "", ErrForbidden
 	}
 
@@ -65,10 +62,6 @@ func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, dat
 		if grant.AccessLevel == models.AccessViewEdit {
 			return api.AccessViewEdit, nil
 		}
-	}
-
-	if actor.User.IsPlatformAdmin {
-		return api.AccessViewEdit, nil
 	}
 
 	return api.AccessViewOnly, nil
@@ -106,23 +99,6 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 	databases, err := s.Repository.ListGrantedDatabases(ctx, actor.User.ID)
 	if err != nil {
 		return nil, err
-	}
-
-	if actor.User.IsPlatformAdmin {
-		if pgRepo, ok := s.Repository.(*PostgresRepository); ok {
-			var allDbs []models.ManagedDatabase
-			if err := pgRepo.DB.WithContext(ctx).Where("is_enabled = ?", true).Order("label").Find(&allDbs).Error; err == nil {
-				seen := make(map[string]bool)
-				for _, db := range databases {
-					seen[db.ID] = true
-				}
-				for _, db := range allDbs {
-					if !seen[db.ID] {
-						databases = append(databases, db)
-					}
-				}
-			}
-		}
 	}
 
 	result := make([]api.UserDatabase, 0, len(databases))
