@@ -519,3 +519,17 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusNoContent)
 	}
+
+func (h *Handler) ListAccessSnapshot(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+	result, err := h.Service.ListAccessSnapshot(r.Context(), principal)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+	api.WriteJSON(w, api.DataResponse[api.AccessSnapshot]{Data: result})
+}

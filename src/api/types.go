@@ -430,3 +430,9 @@ type MigrationDetail struct {
 	ExecutedAt   *time.Time      `json:"executed_at"`
 	ErrorSummary *string         `json:"error_summary"`
 }
+
+// AccessSnapshot contains only membership identifiers and group grants, never credentials.
+type AccessSnapshot struct {
+	Members []GroupMember         `json:"members"`
+	Grants  []GroupDatabaseAccess `json:"grants"`
+}

@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
@@ -325,4 +326,19 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 
 		return nil
 	})
+}
+
+// ListAccessSnapshot reads memberships and grants from the same database snapshot.
+func (r *PostgresRepository) ListAccessSnapshot(ctx context.Context) (api.AccessSnapshot, error) {
+	result := api.AccessSnapshot{Members: []api.GroupMember{}, Grants: []api.GroupDatabaseAccess{}}
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY").Error; err != nil {
+			return err
+		}
+		if err := tx.Table("user_groups").Select("group_id, user_id").Order("group_id, user_id").Scan(&result.Members).Error; err != nil {
+			return err
+		}
+		return tx.Table("group_access").Select("group_id, database_id, access_level").Order("group_id, database_id").Scan(&result.Grants).Error
+	})
+	return result, err
 }

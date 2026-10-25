@@ -125,6 +125,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		routeHandlers.UpdateUser = http.HandlerFunc(adminHandler.UpdateUser)
 
 		// Admin groups and membership
+		routeHandlers.ListAccessSnapshot = http.HandlerFunc(adminHandler.ListAccessSnapshot)
 		routeHandlers.ListGroups = http.HandlerFunc(adminHandler.ListGroups)
 		routeHandlers.CreateGroup = http.HandlerFunc(adminHandler.CreateGroup)
 		routeHandlers.UpdateGroup = http.HandlerFunc(adminHandler.UpdateGroup)

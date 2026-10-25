@@ -14,6 +14,7 @@ import (
 )
 
 type Repository interface {
+	ListAccessSnapshot(context.Context) (api.AccessSnapshot, error)
 	ListUsers(ctx context.Context) ([]models.User, error)
 	GetUser(ctx context.Context, userID string) (models.User, error)
 	CreateUser(ctx context.Context, user models.User) (models.User, error)
@@ -535,4 +536,11 @@ func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Prin
 		return fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
+}
+
+func (s *Service) ListAccessSnapshot(ctx context.Context, actor auth.Principal) (api.AccessSnapshot, error) {
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.AccessSnapshot{}, err
+	}
+	return s.Repository.ListAccessSnapshot(ctx)
 }

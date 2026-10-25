@@ -11,6 +11,7 @@ type RouteHandlers struct {
 	CreateUser                http.Handler
 	UpdateUser                http.Handler
 	ListGroups                http.Handler
+	ListAccessSnapshot        http.Handler
 	CreateGroup               http.Handler
 	UpdateGroup               http.Handler
 	DeleteGroup               http.Handler
@@ -97,6 +98,7 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "PATCH", "/api/v1/admin/users/{userId}", handlers.UpdateUser, session, admin, csrf)
 
 	// Admin groups and membership
+	registerRoute(mux, "GET", "/api/v1/admin/access", handlers.ListAccessSnapshot, session, admin)
 	registerRoute(mux, "GET", "/api/v1/admin/groups", handlers.ListGroups, session, admin)
 	registerRoute(mux, "POST", "/api/v1/admin/groups", handlers.CreateGroup, session, admin, csrf)
 	registerRoute(mux, "PATCH", "/api/v1/admin/groups/{groupId}", handlers.UpdateGroup, session, admin, csrf)
