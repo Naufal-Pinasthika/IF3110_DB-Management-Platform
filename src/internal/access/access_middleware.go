@@ -8,28 +8,24 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
 
-// contextKey is a private type for context keys to avoid collisions.
 type contextKey string
 
 const (
-	// principalContextKey is the key used to store/retrieve Principal from request context.
-	// This must match the key used in auth.SessionMiddleware.
+	// key used to store/retrieve Principal from request context
 	principalContextKey contextKey = "principal"
 )
 
-// PrincipalFromContext reads the Principal from request context.
-// Returns zero Principal and false if not found.
 func PrincipalFromContext(ctx context.Context) (auth.Principal, bool) {
 	principal, ok := ctx.Value(principalContextKey).(auth.Principal)
 	return principal, ok
 }
 
-// SetPrincipalContext stores the Principal in request context.
+// stores the Principal in request context.
 func SetPrincipalContext(ctx context.Context, principal auth.Principal) context.Context {
 	return context.WithValue(ctx, principalContextKey, principal)
 }
 
-// PlatformAdminMiddleware checks platform management permission after session validation.
+// checks platform management permission after session validation.
 func (s *Service) PlatformAdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := PrincipalFromContext(r.Context())
@@ -47,7 +43,7 @@ func (s *Service) PlatformAdminMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// DatabaseAccessMiddleware creates the guard expected by RouteMiddleware.DatabaseAccess.
+// creates the guard expected by RouteMiddleware.DatabaseAccess.
 func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +53,8 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 				return
 			}
 
-			// Extract dbId from path values (Go 1.22+)
-			dbID := r.PathValue("dbId")
+			// Extract dbId
+			dbID := extractDBIDFromPath(r.URL.Path)
 			if dbID == "" {
 				api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "Missing database ID")
 				return
@@ -72,4 +68,35 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// extracts the database ID from a path like /api/v1/databases/{dbId}/...
+func extractDBIDFromPath(path string) string {
+	prefix := "/api/v1/databases/"
+	idx := findSubstring(path, prefix)
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(prefix)
+	if start >= len(path) {
+		return ""
+	}
+	// Find next slash
+	end := start
+	for end < len(path) && path[end] != '/' {
+		end++
+	}
+	if end == start {
+		return ""
+	}
+	return path[start:end]
+}
+
+func findSubstring(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }

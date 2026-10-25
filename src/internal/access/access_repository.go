@@ -9,15 +9,13 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
 
-// PostgresRepository uses GORM models and leaves HTTP mapping to the service.
 type PostgresRepository struct {
 	DB *gorm.DB
 }
 
 var _ Repository = (*PostgresRepository)(nil)
 
-// ListUserGrants loads grants across all current groups for a specific user and database.
-// Returns grants only for an active user and enabled database.
+// loads grants across all current groups for a specific user and database.
 func (r *PostgresRepository) ListUserGrants(ctx context.Context, userID, databaseID string) ([]models.GroupAccess, error) {
 	var grants []models.GroupAccess
 
@@ -38,8 +36,7 @@ func (r *PostgresRepository) ListUserGrants(ctx context.Context, userID, databas
 	return grants, nil
 }
 
-// ListGrantedDatabases lists distinct enabled targets with at least one group grant for the user.
-// Does not apply platform admin bypass; effective permission calculation is left to the service.
+// lists distinct enabled targets with at least one group grant for the user.
 func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID string) ([]models.ManagedDatabase, error) {
 	var databases []models.ManagedDatabase
 
@@ -60,8 +57,7 @@ func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID st
 	return databases, nil
 }
 
-// GetDatabaseSummary loads safe target metadata (public fields only).
-// Returns error if database not found or disabled.
+// loads safe target metadata (public fields only).
 func (r *PostgresRepository) GetDatabaseSummary(ctx context.Context, databaseID string) (models.ManagedDatabase, error) {
 	var db models.ManagedDatabase
 
@@ -71,7 +67,7 @@ func (r *PostgresRepository) GetDatabaseSummary(ctx context.Context, databaseID 
 
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return models.ManagedDatabase{}, apperror.ErrNotImplemented // will be mapped to not found in service
+			return models.ManagedDatabase{}, apperror.ErrNotImplemented
 		}
 		return models.ManagedDatabase{}, err
 	}

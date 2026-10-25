@@ -26,9 +26,7 @@ var (
 	ErrNotFound        = errors.New("not found")
 )
 
-// RequirePlatformAdmin checks the current platform role.
-// Rejects missing identity and requires the freshly validated platform admin flag.
-// Keeps this separate from target database permissions.
+// checks the current platform role. rejects missing identity
 func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal) error {
 	if actor.User.ID == "" {
 		return ErrUnauthenticated
@@ -39,10 +37,7 @@ func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal
 	return nil
 }
 
-// EffectiveAccess calculates the strongest grant for one target.
-// Returns VIEW_EDIT if any grant allows edit, otherwise VIEW_ONLY if present.
-// Returns forbidden error when no grant exists or the database is disabled.
-// Does not grant target access just because the user is a platform admin.
+// calculates the strongest grant for one target.
 func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, databaseID string) (api.AccessLevel, error) {
 	if actor.User.ID == "" {
 		return "", ErrUnauthenticated
@@ -67,10 +62,7 @@ func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, dat
 	return api.AccessViewOnly, nil
 }
 
-// RequireDatabase enforces a minimum target permission.
-// Rejects empty identities and unknown required levels before checking grants.
-// Calls EffectiveAccess and compares levels using an explicit ordering.
-// Treats VIEW_EDIT as including VIEW_ONLY and denies any other case.
+// enforces a minimum target permission.
 func (s *Service) RequireDatabase(ctx context.Context, actor auth.Principal, databaseID string, required api.AccessLevel) error {
 	if actor.User.ID == "" {
 		return ErrUnauthenticated
@@ -86,7 +78,6 @@ func (s *Service) RequireDatabase(ctx context.Context, actor auth.Principal, dat
 		return err
 	}
 
-	// Explicit ordering: VIEW_EDIT > VIEW_ONLY
 	if required == api.AccessViewEdit && effective != api.AccessViewEdit {
 		return ErrForbidden
 	}
@@ -94,9 +85,7 @@ func (s *Service) RequireDatabase(ctx context.Context, actor auth.Principal, dat
 	return nil
 }
 
-// ListDatabases returns only targets visible to the authenticated user.
-// Loads distinct granted targets and uses EffectiveAccess for each target.
-// Maps the existing summary fields into api.UserDatabase.
+// returns only targets visible to the authenticated user.
 func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]api.UserDatabase, error) {
 	if actor.User.ID == "" {
 		return nil, ErrUnauthenticated
@@ -109,10 +98,8 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 
 	result := make([]api.UserDatabase, 0, len(databases))
 	for _, db := range databases {
-		// Calculate effective access for each database
 		effective, err := s.EffectiveAccess(ctx, actor, db.ID)
-		if err != nil {
-			// If forbidden for this specific DB, skip it (user has no grant)
+		if err != nil {	
 			if errors.Is(err, ErrForbidden) {
 				continue
 			}
@@ -130,9 +117,7 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 	return result, nil
 }
 
-// GetDatabase returns a permitted target summary.
-// Requires at least VIEW_ONLY and returns the current effective access.
-// Maps only safe model fields from GetDatabaseSummary to api.UserDatabase.
+// returns a permitted target summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
 	if actor.User.ID == "" {
 		return api.UserDatabase{}, ErrUnauthenticated
@@ -145,7 +130,6 @@ func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databas
 
 	db, err := s.Repository.GetDatabaseSummary(ctx, databaseID)
 	if err != nil {
-		// Check if it's a "not found" type error
 		if errors.Is(err, apperror.ErrNotImplemented) {
 			return api.UserDatabase{}, ErrNotFound
 		}
