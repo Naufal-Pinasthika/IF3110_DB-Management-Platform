@@ -4,8 +4,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"time"
 
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
@@ -27,13 +31,27 @@ type TargetStore struct {
 
 // OpenPlatform opens the metadata database rather than a managed target.
 func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
-	// TODO Use gorm.Open with postgres.Open and disable automatic ping until context is set.
-	// TODO Silence SQL logging so errors cannot expose hashes or credentials.
-	// TODO Get the underlying sql.DB and configure the pool and PingContext with a timeout.
-	// TODO Close a pool after a failed ping and never log its DSN.
-	// TODO Let the composition root close the pool during shutdown.
-	// TODO Apply versioned SQL migrations separately and never call AutoMigrate here.
-	return nil, apperror.ErrNotImplemented
+	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, errors.New("could not open platform database")
+	}
+	pool, err := db.DB()
+	if err != nil {
+		return nil, errors.New("could not access platform database pool")
+	}
+	pool.SetMaxOpenConns(10)
+	pool.SetMaxIdleConns(5)
+	pool.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := pool.PingContext(ctx); err != nil {
+		pool.Close()
+		return nil, errors.New("could not connect to platform database")
+	}
+	return db, nil
 }
 
 // Reader opens a connection with only the reader credentials.
