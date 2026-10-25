@@ -15,6 +15,22 @@ let selectedSchema = state.schema || "";
 let explorerEntries = new Map();
 let explorerVersion = 0;
 let schemaRequest = 0;
+let selectedGroupID = "";
+let groupData = { groups: [], users: [], databases: [], members: [], grants: [] };
+let groupTab = "members";
+let connectionVersion = 0;
+
+function formSignature(form) {
+  return JSON.stringify([...form.querySelectorAll("input, select, textarea")].map(field => [field.id || field.name, field.type === "checkbox" || field.type === "radio" ? field.checked : field.value]));
+}
+function showFormDialog(dialog) {
+  clearNotice();
+  const form = dialog.querySelector("form");
+  form.dataset.saved = formSignature(form);
+  dialog.showModal();
+}
+function formChanged(form) { return form?.dataset.saved !== undefined && form.dataset.saved !== formSignature(form); }
+
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -78,14 +94,18 @@ function submit(id, work) {
     const message = form.querySelector(".form-message");
     if (message) message.hidden = true;
     clearNotice();
+    if (form.getAttribute("aria-busy") === "true") return;
     const data = new FormData(form);
     const fields = [...form.querySelectorAll("input, select, textarea")].map(field => [field, field.disabled]);
     fields.forEach(([field]) => { field.disabled = true; });
+    const otherButtons = [...form.querySelectorAll('button:not([type="submit"])')].map(button => [button, button.disabled]);
+    otherButtons.forEach(([button]) => { button.disabled = true; });
     form.setAttribute("aria-busy", "true");
     try { await busy(form.querySelector('[type="submit"]'), () => work(data, form)); }
     catch (error) { fail(error, form); }
     finally {
       fields.forEach(([field, disabled]) => { field.disabled = disabled; });
+      otherButtons.forEach(([button, disabled]) => { button.disabled = disabled; });
       form.removeAttribute("aria-busy");
       if (form.id === "login-form" && !$("login-error").hidden) $("password").focus();
     }
@@ -223,48 +243,55 @@ function openUser(user) {
     form.elements.username.value = user.username;
     form.elements.is_active.checked = user.is_active;
   }
-  dialog.showModal();
+  showFormDialog(dialog);
 }
 
 function openGroup(group) {
   const { dialog, form } = resetDialog("group-dialog", group ? "Rename group" : "New group");
   if (group) { form.elements.id.value = group.id; form.elements.name.value = group.name; }
-  dialog.showModal();
+  showFormDialog(dialog);
 }
 
+function setPasswordEditing(role, editing) {
+  const form = $("connection-form");
+  const stored = Boolean(form.elements.id.value);
+  $(role + "-secret-state").hidden = !stored || editing;
+  $(role + "-password").hidden = stored && !editing;
+  $(role + "-password").required = !stored || editing;
+  $(role + "-password").disabled = stored && !editing;
+  $("keep-" + role + "-password").hidden = !stored || !editing;
+  if (!editing) $(role + "-password").value = "";
+}
+function updateCredentialFields() {
+  const same = $("same-credentials").checked;
+  $("migrator-fields").hidden = same;
+  $("shared-credential-note").hidden = !same;
+  $("migrator-username").disabled = same;
+  $("migrator-password").disabled = same || $("migrator-password").hidden;
+}
 async function openConnection(id) {
+  const version = ++connectionVersion;
+  const connection = id ? await api("/api/v1/admin/databases/" + encode(id)) : null;
+  if (version !== connectionVersion) return;
   const { dialog, form } = resetDialog("connection-dialog", id ? "Edit connection" : "Add connection");
   $("connection-enabled-field").hidden = !id;
-  for (const name of ["reader_password", "migrator_password"]) form.elements[name].required = !id;
-  $("connection-password-help").textContent = id ? "Leave passwords blank to keep the stored credentials." : "Passwords are never displayed after saving.";
-  const sameCreds = $("same-credentials");
-  const migratorFields = $("migrator-fields");
-  if (!id) {
-    if (!form.elements.host.value) form.elements.host.value = "postgres";
-    if (!form.elements.port.value) form.elements.port.value = "5432";
-    if (!form.elements.database_name.value) form.elements.database_name.value = "target_db";
-    if (!form.elements.ssl_mode.value) form.elements.ssl_mode.value = "disable";
-    if (!form.elements.reader_username.value) form.elements.reader_username.value = "admin";
-    if (!form.elements.reader_password.value) form.elements.reader_password.value = "root";
-    if (sameCreds) {
-      sameCreds.checked = true;
-      if (migratorFields) migratorFields.hidden = true;
-    }
-  } else {
-    const connection = await api("/api/v1/admin/databases/" + encode(id));
+  $("connection-impact").hidden = !id;
+  if (connection) {
     for (const [key, value] of Object.entries(connection)) {
       const field = form.elements.namedItem(key);
       if (!field) continue;
       if (field.type === "checkbox") field.checked = value;
       else field.value = value;
     }
-    if (sameCreds && migratorFields) {
-      const isSame = connection.reader_username === connection.migrator_username;
-      sameCreds.checked = isSame;
-      migratorFields.hidden = isSame;
-    }
   }
-  dialog.showModal();
+  // Matching usernames do not imply matching stored passwords.
+  $("same-credentials").checked = false;
+  for (const role of ["reader", "migrator"]) setPasswordEditing(role, !id);
+  updateCredentialFields();
+  $("connection-test-result").hidden = true;
+  updateSSLDescription();
+  showFormDialog(dialog);
+  dialog.querySelector(".dialog-body").scrollTop = 0;
 }
 
 function bindDialogs() {
@@ -273,14 +300,23 @@ function bindDialogs() {
     else if (button.dataset.open === "group-dialog") openGroup();
     else openConnection().catch(error => fail(error));
   }));
-  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => {
-    const dialog = button.closest("dialog");
-    dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
-    dialog.close();
-  }));
-  document.querySelectorAll("dialog").forEach(dialog => dialog.addEventListener("close", () => {
-    dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
-  }));
+  async function dismiss(dialog) {
+    const form = dialog.querySelector("form");
+    if (form?.getAttribute("aria-busy") === "true" || dialog.dataset.dismissing) return;
+    dialog.dataset.dismissing = "true";
+    try {
+      if (formChanged(form) && !await confirmAction("Discard unsaved changes?", "Your changes have not been saved. Discard them and close this dialog?", "Discard changes")) return;
+      dialog.close();
+    } finally { delete dialog.dataset.dismissing; }
+  }
+  document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => dismiss(button.closest("dialog"))));
+  document.querySelectorAll("dialog:not(#confirm-dialog)").forEach(dialog => {
+    dialog.addEventListener("cancel", event => { event.preventDefault(); dismiss(dialog); });
+    dialog.addEventListener("close", () => {
+      dialog.querySelectorAll('input[type="password"]').forEach(field => { field.value = ""; });
+      delete dialog.querySelector("form").dataset.saved;
+    });
+  });
 }
 
 async function loadDatabaseContext() {
@@ -688,92 +724,156 @@ function bindUserForm() {
   });
 }
 
-async function groupsPage() {
-  const groups = await api("/api/v1/admin/groups");
-  rows("group-list", groups, group => {
-    const controls = node("div", undefined, "toolbar-actions");
-    controls.append(action("Rename", () => openGroup(group)), action("Delete", async () => {
-      if (!await confirmAction("Delete group?", "Delete " + group.name + " and its memberships and database grants? Users may lose access.", "Delete group")) return;
-      await api("/api/v1/admin/groups/" + encode(group.id), { method: "DELETE" });
-      await reload();
-      notice("Group deleted.", "success");
-    }, "danger"));
-    return [node("strong", group.name), node("span", group.id, "mono"), controls];
-  }, 3, "No groups yet. Create a group to assign database access.");
-  options("member-group", groups, item => item.name, "Select a group…");
-  options("grant-group", groups, item => item.name, "Select a group…");
-  const results = await Promise.allSettled([api("/api/v1/admin/users"), api("/api/v1/admin/databases")]);
-  if (results[0].status === "fulfilled") options("member-user", results[0].value, item => item.username, "Select a user…");
-  else fail(results[0].reason);
-  if (results[1].status === "fulfilled") options("grant-database", results[1].value, item => item.label, "Select a database…");
-  else fail(results[1].reason);
+function selectedGroup() { return groupData.groups.find(group => group.id === selectedGroupID); }
+function groupName(id) { return groupData.groups.find(group => group.id === id)?.name || id; }
+function userAccess(user, database, excludedGroup = "") {
+  if (!user.is_active) return { level: "DISABLED", sources: ["Inactive account"] };
+  if (!database.is_enabled) return { level: "DISABLED", sources: ["Disabled connection"] };
+  if (user.is_platform_admin) return { level: "VIEW_EDIT", sources: ["Platform administrator"] };
+  const memberships = groupData.members.filter(member => member.user_id === user.id && member.group_id !== excludedGroup).map(member => member.group_id);
+  const grants = groupData.grants.filter(grant => memberships.includes(grant.group_id) && grant.database_id === database.id);
+  return { level: grants.some(grant => grant.access_level === "VIEW_EDIT") ? "VIEW_EDIT" : grants.length ? "VIEW_ONLY" : "NONE", sources: grants.map(grant => groupName(grant.group_id)) };
 }
-
+function accessLabel(level) { return {VIEW_ONLY:"Read only", VIEW_EDIT:"Read + migrations", NONE:"No access", DISABLED:"Unavailable"}[level] || level; }
+function switchGroupTab(tab, focus = false) {
+  groupTab = tab;
+  document.querySelectorAll("[data-group-tab]").forEach(button => {
+    const active = button.dataset.groupTab === tab;
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+    $(button.getAttribute("aria-controls")).hidden = !active;
+    if (active && focus) button.focus();
+  });
+}
+function openMembership() {
+  const group = selectedGroup();
+  if (!group) return;
+  const {dialog, form} = resetDialog("membership-dialog");
+  form.elements.group_id.value = group.id;
+  const memberIDs = groupData.members.filter(member => member.group_id === group.id).map(member => member.user_id);
+  options("member-user", groupData.users.filter(user => user.is_active && !memberIDs.includes(user.id)), user => user.username, "Select a user…");
+  $("membership-context").textContent = "Add a user to " + group.name + ".";
+  form.querySelector('[type="submit"]').disabled = !groupData.users.some(user => user.is_active && !memberIDs.includes(user.id));
+  showFormDialog(dialog);
+}
+function describePermission() {
+  const edit = $("grant-form").elements.access_level.value === "VIEW_EDIT";
+  $("permission-description").textContent = edit ? "Inspect schemas, browse data, run read-only queries, and create, edit, or execute migrations. Migrations can change schemas and data." : "Inspect schemas, browse table rows, and run permitted read-only queries. Cannot author or execute migrations.";
+}
+function openGrant(grant) {
+  const group = selectedGroup();
+  if (!group) return;
+  const { dialog, form } = resetDialog("grant-dialog", grant ? "Edit database access" : "Add database access");
+  form.elements.group_id.value = group.id;
+  const available = groupData.databases.filter(database => grant ? database.id === grant.database_id : database.is_enabled && !groupData.grants.some(item => item.group_id === group.id && item.database_id === database.id));
+  options("grant-database", available, database => database.label, "Select a database…");
+  $("grant-database").value = grant ? grant.database_id : "";
+  form.elements.access_level.value = grant?.access_level || "VIEW_ONLY";
+  form.querySelector('[type="submit"]').disabled = !available.length;
+  $("grant-context").textContent = "Permissions for " + group.name + ".";
+  describePermission();
+  showFormDialog(dialog);
+}
+function renderGroup() {
+  const group = selectedGroup();
+  $("group-detail").hidden = !group;
+  if (!group) return;
+  document.querySelectorAll("[data-group-id]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.groupId === group.id)));
+  const memberships = groupData.members.filter(member => member.group_id === group.id);
+  const members = groupData.users.filter(user => memberships.some(member => member.user_id === user.id));
+  const grants = groupData.grants.filter(grant => grant.group_id === group.id);
+  $("selected-group-name").textContent = group.name;
+  $("group-summary").textContent = `${members.length} member${members.length === 1 ? "" : "s"} · ${grants.length} database${grants.length === 1 ? "" : "s"}`;
+  $("group-actions").replaceChildren(action("Rename", () => openGroup(group)), action("Delete group", async () => {
+    if (!await confirmAction("Delete " + group.name + "?", "This removes the group, its memberships, and database grants. Access provided by other groups or administrator roles remains. Affected sessions will refresh.", "Delete group")) return;
+    await api("/api/v1/admin/groups/" + encode(group.id), {method:"DELETE"});
+    await reload(); notice(group.name + " deleted.", "success");
+  }, "danger"));
+  rows("group-members", members, user => [node("strong", user.username), user.is_active ? user.is_platform_admin ? "Administrator" : "User" : "Inactive account", action("Remove", async () => {
+    const retained = groupData.databases.filter(db => db.is_enabled).map(db => db.label + ": " + accessLabel(userAccess(user, db, group.id).level)).join("; ");
+    if (!await confirmAction("Remove " + user.username + " from " + group.name + "?", "Access from other groups or administrator roles remains. After removal: " + (retained || "No enabled databases.") + ". The user's sessions will refresh.", "Remove member")) return;
+    await api("/api/v1/admin/groups/" + encode(group.id) + "/members/" + encode(user.id), {method:"DELETE"});
+    await reload(); notice(user.username + " removed from " + group.name + ".", "success");
+  }, "danger")], 3, "No members yet. Add a user to this group.");
+  rows("group-grants", grants, grant => {
+    const database = groupData.databases.find(db => db.id === grant.database_id);
+    const controls = node("div", undefined, "toolbar-actions");
+    controls.append(action("Edit", () => openGrant(grant)), action("Revoke", async () => {
+      const retained = members.map(user => {
+        const access = userAccess(user, database || {id:grant.database_id,is_enabled:false}, group.id);
+        return user.username + ": " + accessLabel(access.level) + (access.sources.length ? " via " + access.sources.join(", ") : "");
+      }).join("; ");
+      if (!await confirmAction("Revoke " + group.name + " access to " + (database?.label || grant.database_id) + "?", "Members may retain access through other groups or administrator roles. After revoking: " + (retained || "No current members.") + ". Affected sessions will refresh.", "Revoke access")) return;
+      await api("/api/v1/admin/groups/" + encode(group.id) + "/databases/" + encode(grant.database_id) + "/access", {method:"DELETE"});
+      await reload(); notice("Access to " + (database?.label || grant.database_id) + " revoked for " + group.name + ".", "success");
+    }, "danger"));
+    return [database ? database.label + (database.is_enabled ? "" : " (disabled)") : grant.database_id, badge(grant.access_level), controls];
+  }, 3, "No database access yet.");
+  const effective = members.flatMap(user => groupData.databases.filter(db => db.is_enabled).map(database => ({user, database, ...userAccess(user, database)})));
+  rows("effective-access", effective, item => {
+    const sources = node("div");
+    for (const source of item.sources) sources.append(node("span", source, "access-source"));
+    if (!item.sources.length) sources.textContent = "No group grant";
+    return [item.user.username, item.database.label, accessLabel(item.level), sources];
+  }, 4, "Add members and connections to inspect effective access.");
+  switchGroupTab(groupTab);
+}
+async function groupsPage() {
+  try {
+    const [groups, users, databases, snapshot] = await Promise.all([api("/api/v1/admin/groups"), api("/api/v1/admin/users"), api("/api/v1/admin/databases"), api("/api/v1/admin/access")]);
+    groupData = {groups:groups || [], users:users || [], databases:databases || [], members:snapshot.members || [], grants:snapshot.grants || []};
+    if (!groupData.groups.some(group => group.id === selectedGroupID)) selectedGroupID = groupData.groups[0]?.id || "";
+    $("groups-empty").hidden = Boolean(groupData.groups.length);
+    $("groups-layout").hidden = !groupData.groups.length;
+    $("group-list").replaceChildren(...groupData.groups.map(group => {
+      const button = node("button", group.name, "group-choice");
+      button.type = "button"; button.dataset.groupId = group.id;
+      button.onclick = () => { selectedGroupID = group.id; renderGroup(); };
+      return button;
+    }));
+    renderGroup();
+  } catch(error) {
+    $("group-detail").hidden = true;
+    $("groups-empty").hidden = true;
+    $("group-list").replaceChildren(node("p", "Unable to load groups and access. Try again.", "inline-state"));
+    throw error;
+  }
+}
 function bindGroupForms() {
-  // Dynamic submit button label for membership form
-  const membershipForm = $("membership-form");
-  const membershipSubmit = $("membership-submit");
-  if (membershipForm && membershipSubmit) {
-    const updateMembershipLabel = () => {
-      const action = membershipForm.elements["action"]?.value;
-      membershipSubmit.textContent = action === "remove" ? "Remove from group" : "Add to group";
-      membershipSubmit.className = action === "remove"
-        ? "button danger full-width"
-        : "button success full-width";
+  $("add-member").onclick = openMembership;
+  $("add-access").onclick = () => openGrant();
+  const tabs = [...document.querySelectorAll("[data-group-tab]")];
+  tabs.forEach((button, index) => {
+    button.onclick = () => switchGroupTab(button.dataset.groupTab);
+    button.onkeydown = event => {
+      let next;
+      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+      if (event.key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      if (next !== undefined) { event.preventDefault(); switchGroupTab(tabs[next].dataset.groupTab, true); }
     };
-    membershipForm.querySelectorAll('input[name="action"]').forEach(radio => {
-      radio.addEventListener("change", updateMembershipLabel);
-    });
-    updateMembershipLabel();
-  }
-
-  // Dynamic submit button label for grant form
-  const grantForm = $("grant-form");
-  const grantSubmit = $("grant-submit");
-  if (grantForm && grantSubmit) {
-    const updateGrantLabel = () => {
-      const level = grantForm.elements["access_level"]?.value;
-      if (level === "REVOKE") {
-        grantSubmit.textContent = "Revoke database access";
-        grantSubmit.className = "button danger full-width";
-      } else if (level === "VIEW_EDIT") {
-        grantSubmit.textContent = "Grant read + migration access";
-        grantSubmit.className = "button primary full-width";
-      } else {
-        grantSubmit.textContent = "Grant read-only access";
-        grantSubmit.className = "button primary full-width";
-      }
-    };
-    grantForm.querySelectorAll('input[name="access_level"]').forEach(radio => {
-      radio.addEventListener("change", updateGrantLabel);
-    });
-    updateGrantLabel();
-  }
-
+  });
+  $("grant-form").addEventListener("change", describePermission);
   submit("group-form", async data => {
     const id = data.get("id");
-    await api("/api/v1/admin/groups" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: { name: data.get("name") } });
-    $("group-dialog").close(); await reload(); notice("Group saved.", "success");
+    const result = await api("/api/v1/admin/groups" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:{name:data.get("name").trim()}});
+    selectedGroupID = result.id;
+    $("group-dialog").close(); await reload(); notice(data.get("name") + " saved.", "success");
   });
   submit("membership-form", async data => {
-    const groupId = data.get("group_id");
-    const userId = data.get("user_id");
-    if (!groupId) throw new Error("Please select a group.");
-    if (!userId) throw new Error("Please select a user.");
-    const remove = data.get("action") === "remove";
-    if (remove && !await confirmAction("Remove group member?", "The user may lose database access provided by this group.", "Remove member")) return;
-    await api("/api/v1/admin/groups/" + encode(groupId) + "/members/" + encode(userId), { method: remove ? "DELETE" : "PUT" });
-    notice(remove ? "Member removed from group." : "Member added to group.", "success");
+    const groupID = data.get("group_id"), userID = data.get("user_id");
+    if (!groupID || !userID) throw new Error("Select a user to add.");
+    const user = groupData.users.find(user => user.id === userID), name = groupName(groupID);
+    await api("/api/v1/admin/groups/" + encode(groupID) + "/members/" + encode(userID), {method:"PUT"});
+    $("membership-dialog").close(); await reload(); notice(user.username + " added to " + name + ".", "success");
   });
   submit("grant-form", async data => {
-    const groupId = data.get("group_id");
-    const databaseId = data.get("database_id");
-    if (!groupId) throw new Error("Please select a group.");
-    if (!databaseId) throw new Error("Please select a database.");
-    const revoke = data.get("access_level") === "REVOKE";
-    if (revoke && !await confirmAction("Revoke database access?", "Members may lose access to this database unless another group provides it.", "Revoke access")) return;
-    await api("/api/v1/admin/groups/" + encode(groupId) + "/databases/" + encode(databaseId) + "/access", { method: revoke ? "DELETE" : "PUT", ...(revoke ? {} : { data: { access_level: data.get("access_level") } }) });
-    notice(revoke ? "Database access revoked." : "Database access updated.", "success");
+    const groupID = data.get("group_id"), databaseID = data.get("database_id");
+    if (!groupID || !databaseID) throw new Error("Select a database.");
+    const name = groupName(groupID), database = groupData.databases.find(db => db.id === databaseID);
+    await api("/api/v1/admin/groups/" + encode(groupID) + "/databases/" + encode(databaseID) + "/access", {method:"PUT",data:{access_level:data.get("access_level")}});
+    $("grant-dialog").close(); await reload(); notice("Access to " + database.label + " updated for " + name + ".", "success");
   });
 }
 
@@ -804,51 +904,67 @@ async function connectionsPage() {
         if (!await confirmAction("Re-enable connection?", "Users with group access will be able to connect to " + connection.label + " again.", "Re-enable")) return;
         await api("/api/v1/admin/databases/" + encode(connection.id), { method: "PATCH", data: { is_enabled: true } });
         await reload(); notice("Connection re-enabled.", "success");
-      }, "success"));
+      }, "primary"));
     }
     const statusBadge = node("span", connection.is_enabled ? "Enabled" : "Disabled", "badge " + (connection.is_enabled ? "green" : "red"));
     return [node("strong", connection.label), node("span", connection.database_name, "mono"), statusBadge, controls];
   }, 4, "No connections yet. Add a PostgreSQL connection to get started.");
 }
 
-function bindConnectionForm() {
-  const sameCreds = $("same-credentials");
-  const migratorFields = $("migrator-fields");
-  if (sameCreds && migratorFields && !sameCreds._boundChange) {
-    sameCreds._boundChange = true;
-    const updateVisibility = () => {
-      migratorFields.hidden = sameCreds.checked;
-      if (sameCreds.checked) {
-        $("migrator-username").value = $("reader-username").value;
-        $("migrator-password").value = $("reader-password").value;
-      }
-    };
-    sameCreds.onchange = updateVisibility;
-    $("reader-username").addEventListener("input", () => {
-      if (sameCreds.checked) $("migrator-username").value = $("reader-username").value;
-    });
-    $("reader-password").addEventListener("input", () => {
-      if (sameCreds.checked) $("migrator-password").value = $("reader-password").value;
-    });
+function updateSSLDescription() {
+  $("ssl-description").textContent = {
+    "disable":"Traffic is not encrypted. Use only on a trusted local network, such as an internal Docker network.",
+    "require":"Traffic is encrypted; the server's identity is not verified.",
+    "verify-ca":"Traffic is encrypted and the server certificate authority is verified.",
+    "verify-full":"Traffic is encrypted; the certificate authority and server hostname are verified. The server must trust the database certificate."
+  }[$("connection-ssl").value];
+}
+function connectionPayload(data) {
+  const payload = {};
+  for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
+    if (!data.has(key)) continue;
+    payload[key] = key.endsWith("_password") ? data.get(key) : data.get(key).trim();
   }
-
+  payload.port = Number(data.get("port"));
+  payload.use_reader_credentials = $("same-credentials").checked;
+  if (data.get("id")) payload.is_enabled = data.has("is_enabled");
+  return payload;
+}
+function bindConnectionForm() {
+  const form = $("connection-form");
+  if (form._boundConnection) return;
+  form._boundConnection = true;
+  $("same-credentials").onchange = updateCredentialFields;
+  $("connection-ssl").onchange = updateSSLDescription;
+  for (const role of ["reader", "migrator"]) {
+    $("change-" + role + "-password").onclick = () => { setPasswordEditing(role, true); $(role + "-password").focus(); };
+    $("keep-" + role + "-password").onclick = () => { setPasswordEditing(role, false); $("change-" + role + "-password").focus(); };
+  }
+  form.addEventListener("input", () => { $("connection-test-result").hidden = true; });
+  $("test-connection").onclick = () => {
+    if (!form.reportValidity() || form.getAttribute("aria-busy") === "true") return;
+    const data = new FormData(form), payload = connectionPayload(data);
+    if (data.get("id")) payload.database_id = data.get("id");
+    const fields = [...form.querySelectorAll("input, select, button")].map(field => [field, field.disabled]);
+    fields.forEach(([field]) => { if (field !== $("test-connection")) field.disabled = true; });
+    form.setAttribute("aria-busy", "true");
+    form.querySelector(".form-message").hidden = true;
+    $("connection-test-result").hidden = true;
+    busy($("test-connection"), async () => {
+      const result = await api("/api/v1/admin/databases/test-connection", {method:"POST",data:payload});
+      $("connection-test-result").textContent = result.message || (result.connected ? "Connection succeeded." : "Connection failed. Check the host and credentials, then try again.");
+      $("connection-test-result").className = "test-result " + (result.connected ? "success" : "error");
+      $("connection-test-result").hidden = false;
+    }).catch(error => fail(error, form)).finally(() => {
+      fields.forEach(([field, disabled]) => { field.disabled = disabled; });
+      form.removeAttribute("aria-busy");
+    });
+  };
   submit("connection-form", async (data, form) => {
-    const id = data.get("id");
-    const same = $("same-credentials")?.checked;
-    const payload = {};
-    for (const key of ["label", "host", "database_name", "ssl_mode", "reader_username", "reader_password", "migrator_username", "migrator_password"]) {
-      if (id && key.endsWith("_password") && !data.get(key)) continue;
-      payload[key] = data.get(key);
-    }
-    if (same) {
-      payload.migrator_username = payload.reader_username;
-      payload.migrator_password = payload.reader_password;
-    }
-    payload.port = Number(data.get("port")) || 5432;
-    if (id) payload.is_enabled = data.has("is_enabled");
-    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), { method: id ? "PATCH" : "POST", data: payload });
-    form.querySelectorAll('input[type="password"]').forEach(input => { input.value = ""; });
-    $("connection-dialog").close(); await reload(); notice("Connection saved.", "success");
+    const id = data.get("id"), payload = connectionPayload(data);
+    const label = payload.label;
+    await api("/api/v1/admin/databases" + (id ? "/" + encode(id) : ""), {method:id ? "PATCH" : "POST",data:payload});
+    $("connection-dialog").close(); await reload(); notice("Connection saved. " + label + " is ready.", "success");
   });
 }
 
@@ -921,11 +1037,12 @@ async function start() {
 }
 
 window.addEventListener("beforeunload", event => {
-  if (dirty) { event.preventDefault(); event.returnValue = ""; }
+  if (dirty || [...document.querySelectorAll("dialog[open] form")].some(formChanged)) { event.preventDefault(); event.returnValue = ""; }
 });
 if (state.page !== "login") {
   bindNavigation();
   bindDialogs();
+  $("dismiss-notice").onclick = clearNotice;
   $("retry").onclick = () => busy($("retry"), start).catch(error => fail(error));
 }
 start().catch(error => fail(error));

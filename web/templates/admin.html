@@ -25,7 +25,7 @@
 <form method="post" id="user-form">
 <div class="dialog-heading">
 <h2 id="user-dialog-title">New user</h2>
-<button class="button quiet" type="button" data-close>Close</button>
+<button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
 </div>
 <input type="hidden" name="id">
 <label for="user-username">Username</label>
@@ -47,138 +47,57 @@
 </form>
 </dialog>{{end}}
 
-{{define "groups"}}<section class="panel">
-<div class="panel-toolbar">
-<h2>Groups</h2>
-<span class="muted">A user can belong to more than one group.</span>
+{{define "groups"}}
+<div id="groups-empty" class="empty-state" hidden>
+<h2>Create your first group</h2><p>Organize users in a group, then assign access to its databases.</p>
+<button type="button" class="button primary" data-open="group-dialog">Create group</button>
 </div>
-<div class="table-scroll">
-<table>
-<thead>
-<tr>
-<th>Group name</th>
-<th>Group ID</th>
-<th>Actions</th>
-</tr>
-</thead>
-<tbody id="group-list">
-<tr>
-<td colspan="3" class="empty-cell">Loading groups…</td>
-</tr>
-</tbody>
-</table>
+<div class="groups-layout" id="groups-layout">
+<aside class="group-directory" aria-label="Groups"><h2>Groups</h2><div id="group-list"><p class="inline-state">Loading groups…</p></div></aside>
+<section id="group-detail" class="group-detail" hidden aria-labelledby="selected-group-name">
+<div class="panel-toolbar"><div><h2 id="selected-group-name"></h2><p id="group-summary"></p></div><div id="group-actions" class="toolbar-actions"></div></div>
+<div class="tab-bar" role="tablist" aria-label="Group configuration">
+<button class="tab" type="button" id="members-tab" role="tab" aria-controls="members-panel" aria-selected="true" data-group-tab="members">Members</button>
+<button class="tab" type="button" id="grants-tab" role="tab" aria-controls="grants-panel" aria-selected="false" tabindex="-1" data-group-tab="grants">Database access</button>
+<button class="tab" type="button" id="effective-tab" role="tab" aria-controls="effective-panel" aria-selected="false" tabindex="-1" data-group-tab="effective">Effective access</button>
 </div>
-</section>
-<div class="admin-actions-layout section-gap">
-<section class="panel admin-card">
-<div class="panel-toolbar">
-<div class="card-header-flex">
-<div class="card-icon-wrap icon-members">
-<svg class="icon"><use href="#i-users"/></svg>
+<div id="members-panel" role="tabpanel" aria-labelledby="members-tab" tabindex="0">
+<div class="section-toolbar"><p class="muted">Members can also inherit access from other groups.</p><button type="button" class="button primary small" id="add-member">Add member</button></div>
+<div class="table-scroll"><table><thead><tr><th>Username</th><th>Platform role</th><th>Actions</th></tr></thead><tbody id="group-members"></tbody></table></div>
 </div>
-<div>
-<h2>Group membership</h2>
-<p>Assign or remove user accounts from a group.</p>
+<div id="grants-panel" role="tabpanel" aria-labelledby="grants-tab" tabindex="0" hidden>
+<div class="section-toolbar"><p class="muted">Permissions assigned through this group.</p><button type="button" class="button primary small" id="add-access">Add database access</button></div>
+<div class="table-scroll"><table><thead><tr><th>Database</th><th>Access level</th><th>Actions</th></tr></thead><tbody id="group-grants"></tbody></table></div>
+<p class="helper-text">Read only: inspect schemas, browse rows, and run read-only queries. Read + migrations also permits creating, editing, and executing migrations, including schema and data changes. The SQL query editor remains read only.</p>
 </div>
+<div id="effective-panel" role="tabpanel" aria-labelledby="effective-tab" tabindex="0" hidden>
+<p class="helper-text">Effective access for this group's members across enabled databases. The strongest group permission applies. Platform administrators retain read and migration access. Inactive accounts cannot sign in.</p>
+<div class="table-scroll"><table><thead><tr><th>User</th><th>Database</th><th>Effective access</th><th>Provided by</th></tr></thead><tbody id="effective-access"></tbody></table></div>
 </div>
-</div>
-<form method="post" id="membership-form" class="panel-form">
-<label for="member-group">Target group</label>
-<select id="member-group" name="group_id" required>
-<option value="" disabled selected>Select a group…</option>
-</select>
-<label for="member-user">Platform user</label>
-<select id="member-user" name="user_id" required>
-<option value="" disabled selected>Select a user…</option>
-</select>
-<label>Membership action</label>
-<div class="action-segmented" id="membership-action-group">
-<label class="segmented-item">
-<input type="radio" name="action" value="add" checked>
-<svg class="icon" style="width:1rem;height:1rem"><use href="#i-plus"/></svg>
-<span>Add to group</span>
-</label>
-<label class="segmented-item danger-option">
-<input type="radio" name="action" value="remove">
-<span>✕ Remove from group</span>
-</label>
-</div>
-<div class="form-message" role="alert" hidden>
-</div>
-<button class="button success full-width" type="submit" id="membership-submit">Add to group</button>
-</form>
-</section>
-<section class="panel admin-card">
-<div class="panel-toolbar">
-<div class="card-header-flex">
-<div class="card-icon-wrap icon-access">
-<svg class="icon"><use href="#i-connect"/></svg>
-</div>
-<div>
-<h2>Database access</h2>
-<p>Configure database permissions for each group.</p>
-</div>
-</div>
-</div>
-<form method="post" id="grant-form" class="panel-form">
-<label for="grant-group">Target group</label>
-<select id="grant-group" name="group_id" required>
-<option value="" disabled selected>Select a group…</option>
-</select>
-<label for="grant-database">Managed database</label>
-<select id="grant-database" name="database_id" required>
-<option value="" disabled selected>Select a database…</option>
-</select>
-<label>Access level</label>
-<div class="access-level-cards">
-<label class="access-level-card is-selected">
-<input type="radio" name="access_level" value="VIEW_ONLY" checked>
-<div class="access-card-radio"></div>
-<div class="access-card-content">
-<strong>View Only (Read)</strong>
-<span>Inspect schema, view table rows, and run read-only queries</span>
-</div>
-</label>
-<label class="access-level-card">
-<input type="radio" name="access_level" value="VIEW_EDIT">
-<div class="access-card-radio"></div>
-<div class="access-card-content">
-<strong>View + Edit (Migrations)</strong>
-<span>All read access plus create, edit, and execute migrations</span>
-</div>
-</label>
-<label class="access-level-card danger-card">
-<input type="radio" name="access_level" value="REVOKE">
-<div class="access-card-radio"></div>
-<div class="access-card-content">
-<strong>Revoke Access</strong>
-<span>Remove this group's permissions on the target database</span>
-</div>
-</label>
-</div>
-<div class="form-message" role="alert" hidden>
-</div>
-<button class="button primary full-width" type="submit" id="grant-submit">Grant read-only access</button>
-</form>
-</section>
-</div>
-<dialog id="group-dialog" aria-labelledby="group-dialog-title">
-<form method="post" id="group-form">
-<div class="dialog-heading">
-<h2 id="group-dialog-title">New group</h2>
-<button class="button quiet" type="button" data-close>Close</button>
-</div>
-<input type="hidden" name="id">
-<label for="group-name">Group name</label>
-<input id="group-name" name="name" required maxlength="100" placeholder="e.g. engineering, analysts">
-<div class="form-message" role="alert" hidden>
-</div>
-<div class="form-actions">
-<button class="button" type="button" data-close>Cancel</button>
-<button class="button primary" type="submit">Save group</button>
-</div>
-</form>
-</dialog>{{end}}
+</section></div>
+<dialog id="membership-dialog" aria-labelledby="membership-dialog-title"><form method="post" id="membership-form">
+<div class="dialog-heading"><h2 id="membership-dialog-title">Add member</h2><button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+<p class="muted" id="membership-context"></p><input type="hidden" name="group_id">
+<label for="member-user">Platform user</label><select id="member-user" name="user_id" required><option value="" disabled selected>Select a user…</option></select>
+<p class="helper-text">Changing membership signs the affected user out so their permissions refresh.</p>
+<div class="form-message" role="alert" hidden></div><div class="form-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Add member</button></div>
+</form></dialog>
+<dialog id="grant-dialog" aria-labelledby="grant-dialog-title"><form method="post" id="grant-form">
+<div class="dialog-heading"><h2 id="grant-dialog-title">Database access</h2><button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+<p class="muted" id="grant-context"></p><input type="hidden" name="group_id">
+<label for="grant-database">Managed database</label><select id="grant-database" name="database_id" required><option value="" disabled selected>Select a database…</option></select>
+<fieldset class="permission-options"><legend>Access level</legend>
+<label class="permission-option"><input type="radio" name="access_level" value="VIEW_ONLY" checked><span>Read only</span></label>
+<label class="permission-option"><input type="radio" name="access_level" value="VIEW_EDIT"><span>Read + migrations</span></label>
+<p class="helper-text" id="permission-description"></p></fieldset>
+<p class="helper-text">Changes refresh affected members' sessions. Other groups may still provide broader access.</p>
+<div class="form-message" role="alert" hidden></div><div class="form-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save access</button></div>
+</form></dialog>
+<dialog id="group-dialog" aria-labelledby="group-dialog-title"><form method="post" id="group-form">
+<div class="dialog-heading"><h2 id="group-dialog-title">New group</h2><button class="button icon-button" type="button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+<input type="hidden" name="id"><label for="group-name">Group name</label><input id="group-name" name="name" required maxlength="100" placeholder="e.g. Developers">
+<div class="form-message" role="alert" hidden></div><div class="form-actions"><button class="button" type="button" data-close>Cancel</button><button class="button primary" type="submit">Save group</button></div>
+</form></dialog>{{end}}
 
 {{define "connections"}}<section class="panel connections-panel">
 <div class="panel-toolbar">
