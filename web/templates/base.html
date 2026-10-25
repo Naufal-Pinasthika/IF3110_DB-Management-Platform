@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="light">
 <title>{{.Title}} · Database Platform</title>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="icon" type="image/x-icon" href="/static/favicon.ico">
 <script src="/static/app.js" type="module">
 </script>
 </head>
@@ -61,7 +62,7 @@
 <div id="schema-list" class="object-tree"><p class="inline-state">Loading schemas…</p></div>
 </details>
 {{end}}
-<details id="admin-nav" class="admin-navigation" hidden {{if or (eq .Kind "users") (eq .Kind "groups") (eq .Kind "connections")}}open{{end}}>
+<details id="admin-nav" class="admin-navigation" hidden open>
 <summary>Administration</summary>
 <nav class="main-nav" aria-label="Administration">
 <a href="/admin/users" {{if eq .Kind "users"}}aria-current="page"{{end}}><svg class="icon"><use href="#i-users"/></svg>Users</a>
@@ -81,13 +82,14 @@
 <span class="connection-status" title="No connection test has been performed.">Not tested</span>
 </div>
 {{else}}<span class="engine-label">PostgreSQL</span>{{end}}
-<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet" id="logout">Sign out</button></div>
+<div class="account" id="account"><span class="avatar" aria-hidden="true">U</span><span id="account-name">Account</span><button type="button" class="button quiet small" id="logout">Sign out</button></div>
 </header>
 <main id="main" class="content" tabindex="-1">
 <div id="notice" class="notice" role="status" aria-live="polite" hidden><span id="notice-text"></span><button type="button" class="button small" id="retry" hidden>Try again</button></div>
 <div class="page-heading">
 <h1>{{.Title}}</h1>
 <div class="heading-actions" inert>
+{{if eq .Kind "databases"}}<button type="button" class="button primary" data-admin-only hidden data-open="connection-dialog">Add database</button>{{end}}
 {{if or (eq .Kind "database") (eq .Kind "table")}}<button type="button" class="button small" id="refresh">Refresh</button>{{end}}
 {{if eq .Kind "table"}}<button type="button" class="button small" id="copy-object">Copy name</button><a class="button small" href="{{.DatabaseURL}}/query?schema={{.Schema}}&amp;table={{.Table}}">Open in SQL</a>{{end}}
 {{if eq .Kind "users"}}<button type="button" class="button primary" data-open="user-dialog">New user</button>{{end}}
@@ -121,6 +123,85 @@
 <div class="form-actions">
 <button class="button" value="cancel">Cancel</button>
 <button class="button danger" value="confirm" id="confirm-button">Confirm</button>
+</div>
+</form>
+</dialog>
+<dialog id="connection-dialog" class="wide-dialog" aria-labelledby="connection-dialog-title">
+<form method="post" id="connection-form">
+<div class="dialog-heading">
+<h2 id="connection-dialog-title">Add connection</h2>
+<button class="button quiet" type="button" data-close>Close</button>
+</div>
+<input type="hidden" name="id">
+<label for="connection-label">Connection label</label>
+<input id="connection-label" name="label" placeholder="e.g. Inventory DB" required autofocus>
+<div class="form-columns">
+<div>
+<label for="connection-host">Host</label>
+<input id="connection-host" name="host" required placeholder="postgres" value="postgres">
+<p class="helper-text">Internal Docker host (default: postgres)</p>
+</div>
+<div>
+<label for="connection-port">Port</label>
+<input id="connection-port" name="port" type="number" min="1" max="65535" value="5432" required>
+</div>
+</div>
+<div class="form-columns">
+<div>
+<label for="connection-database">Database name</label>
+<input id="connection-database" name="database_name" required placeholder="target_db" value="target_db">
+</div>
+<div>
+<label for="connection-ssl">SSL mode</label>
+<select id="connection-ssl" name="ssl_mode">
+<option value="disable" selected>Disable</option>
+<option value="require">Require</option>
+<option value="verify-full">Verify full</option>
+<option value="verify-ca">Verify CA</option>
+</select>
+</div>
+</div>
+<fieldset>
+<legend>Reader credentials</legend>
+<p class="helper-text">Used for schema browsing and read-only queries.</p>
+<div class="form-columns">
+<div>
+<label for="reader-username">Username</label>
+<input id="reader-username" name="reader_username" autocomplete="off" required placeholder="admin" value="admin">
+</div>
+<div>
+<label for="reader-password">Password</label>
+<input id="reader-password" name="reader_password" type="password" autocomplete="new-password" required placeholder="root" value="root">
+</div>
+</div>
+</fieldset>
+<fieldset id="migrator-fieldset">
+<div class="fieldset-header">
+<legend>Migrator credentials</legend>
+<label class="checkbox-label" style="margin: 0; font-weight: normal; font-size: 0.875rem;">
+<input type="checkbox" id="same-credentials" checked> Same as Reader
+</label>
+</div>
+<p class="helper-text">Used to execute authorized migrations.</p>
+<div class="form-columns" id="migrator-fields" hidden>
+<div>
+<label for="migrator-username">Username</label>
+<input id="migrator-username" name="migrator_username" autocomplete="off" placeholder="admin" value="admin">
+</div>
+<div>
+<label for="migrator-password">Password</label>
+<input id="migrator-password" name="migrator_password" type="password" autocomplete="new-password" placeholder="root" value="root">
+</div>
+</div>
+</fieldset>
+<p class="helper-text" id="connection-password-help">Passwords are never displayed after saving.</p>
+<label class="checkbox-label" id="connection-enabled-field" hidden>
+<input type="checkbox" name="is_enabled">Connection enabled</label>
+<div class="form-message" role="alert" hidden>
+</div>
+<div class="form-actions">
+<button class="button" type="button" data-close>Cancel</button>
+<button class="button primary" type="submit">Save connection</button>
 </div>
 </form>
 </dialog>

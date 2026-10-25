@@ -34,6 +34,8 @@ jobs:
           node-version: '24'
       - name: Static checks, unit tests, HTTP/frontend checks, and server build
         run: make check test build
+        env:
+          DB_CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.DB_CREDENTIAL_ENCRYPTION_KEY }}
       - name: Upload unit coverage
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

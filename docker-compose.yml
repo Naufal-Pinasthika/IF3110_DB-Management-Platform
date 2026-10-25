@@ -1,6 +1,45 @@
 # Database metadata platform	platform_db
-# Database target inventory_db
+# Database target test_db_1, test_db_2, test_db3
 services:
+  target-db-1:
+    image: postgres:17
+    container_name: target_db_1
+    environment:
+      POSTGRES_DB: target_db
+      POSTGRES_USER: target_db_user
+      POSTGRES_PASSWORD: target_db_password_12345
+    ports:
+      - "5433:5432"
+    volumes:
+      - target_db_1_data:/var/lib/postgresql/data
+      - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+  target-db-2:
+    image: postgres:17
+    container_name: target_db_2
+    environment:
+      POSTGRES_DB: target_db
+      POSTGRES_USER: target_db_user
+      POSTGRES_PASSWORD: target_db_password_12345
+    ports:
+      - "5434:5432"
+    volumes:
+      - target_db_2_data:/var/lib/postgresql/data
+      - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+  
+  target-db-3:
+    image: postgres:17
+    container_name: target_db_3
+    environment:
+      POSTGRES_DB: target_db
+      POSTGRES_USER: target_db_user
+      POSTGRES_PASSWORD: target_db_password_12345
+    ports:
+      - "5435:5432"
+    volumes:
+      - target_db_3_data:/var/lib/postgresql/data
+      - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
   postgres:
     image: postgres:17
     environment:
@@ -8,15 +47,18 @@ services:
       POSTGRES_PASSWORD: root
       POSTGRES_DB: platform_db
     ports:
-      - "15432:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/migrations/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/02-platform-schema.sql:ro
+      - ./db/platform/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/01-platform-schema.sql:ro
+      - ./db/platform/000002_dev_admin.sql:/docker-entrypoint-initdb.d/02-dev-admin.sql:ro
+      - ./db/platform/000003_dev_user.sql:/docker-entrypoint-initdb.d/03-dev-user.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d platform_db"]
       interval: 2s
       timeout: 5s
       retries: 15
+
 
   backend:
     build:
@@ -36,10 +78,11 @@ services:
       postgres:
         condition: service_healthy
     ports:
-    # register host port here (currently :28080)
       - "28080:8080"
 
-  # frontend: 
 
 volumes:
   postgres_data:
+  target_db_1_data:
+  target_db_2_data:
+  target_db_3_data:

@@ -2,21 +2,24 @@ package app
 
 import (
 	"net/http"
+	"time"
+
+	"gorm.io/gorm"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/access"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/admin"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/explorer"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/health"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/migration"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/web"
-	"gorm.io/gorm"
 )
 
-// DBProvider provides access to the underlying database connection.
-// Implemented by auth.PostgresRepository.
-type DBProvider interface {
-	GormDB() *gorm.DB
+type dbProvider interface {
+	GetDB() *gorm.DB
 }
 
 // NewRouter composes the production API, middleware, and embedded frontend.
@@ -27,62 +30,139 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 	}
 	authHandler := &auth.Handler{Service: service, PublicOrigin: cfg.PublicOrigin}
 
+	// Session middleware wrapper that injects Principal into access context
+	sessionMiddleware := func(next http.Handler) http.Handler {
+		return authHandler.SessionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if principal, ok := auth.PrincipalFromContext(r.Context()); ok {
+				r = r.WithContext(auth.SetPrincipalContext(r.Context(), principal))
+			}
+			next.ServeHTTP(w, r)
+		}))
+	}
+
+	routeHandlers := api.RouteHandlers{
+		Health: http.HandlerFunc(health.Health),
+		Login:  http.HandlerFunc(authHandler.Login),
+		Me:     http.HandlerFunc(authHandler.Me),
+		Logout: http.HandlerFunc(authHandler.Logout),
+	}
+	routeMiddleware := api.RouteMiddleware{
+		Session:   sessionMiddleware,
+		CSRF:      authHandler.CSRFMiddleware,
+		LoginCSRF: authHandler.LoginCSRFMiddleware,
+	}
+
 	var db *gorm.DB
-	if provider, ok := repo.(DBProvider); ok {
-		db = provider.GormDB()
+	if pgRepo, ok := repo.(*auth.PostgresRepository); ok && pgRepo != nil {
+		db = pgRepo.DB
+	} else if provider, ok := repo.(dbProvider); ok && provider != nil {
+		db = provider.GetDB()
 	}
 
-	// Access service (also satisfies admin.AdminChecker via RequirePlatformAdmin)
-	accessService := access.NewService(&access.PostgresRepository{DB: db})
-	accessHandler := &access.Handler{Service: accessService}
+	if db != nil {
+		encKey := cfg.DBCredentialEncryptionKey
+		if len(encKey) != 32 {
+			encKey = make([]byte, 32)
+		}
+		cipher := &store.Cipher{Key: encKey}
 
-	// Admin service
-	adminRepo := admin.PostgresRepository{
-		DB:           db,
-		GracePeriod:  cfg.Session.GracePeriod,
-	}
-	adminService := &admin.Service{
-		Repository:   &adminRepo,
-		Access:       accessService,
-		Cipher:       nil,
-		Connections:  nil,
-		HashPassword: auth.HashPassword,
-	}
-	adminHandler := &admin.Handler{Service: adminService}
+		adminRepo := &admin.PostgresRepository{DB: db}
+		targetStore := &store.TargetStore{
+			Databases: adminRepo,
+			Cipher:    cipher,
+		}
 
-	apiRouter := api.NewRouter(api.RouteHandlers{
-		Health:         http.HandlerFunc(health.Health),
-		Login:          http.HandlerFunc(authHandler.Login),
-		Me:             http.HandlerFunc(authHandler.Me),
-		Logout:         http.HandlerFunc(authHandler.Logout),
-		ListUsers:      http.HandlerFunc(adminHandler.ListUsers),
-		CreateUser:     http.HandlerFunc(adminHandler.CreateUser),
-		UpdateUser:     http.HandlerFunc(adminHandler.UpdateUser),
-		ListGroups:     http.HandlerFunc(adminHandler.ListGroups),
-		CreateGroup:    http.HandlerFunc(adminHandler.CreateGroup),
-		UpdateGroup:    http.HandlerFunc(adminHandler.UpdateGroup),
-		DeleteGroup:    http.HandlerFunc(adminHandler.DeleteGroup),
-		AddGroupMember:         http.HandlerFunc(adminHandler.AddGroupMember),
-		RemoveGroupMember:      http.HandlerFunc(adminHandler.RemoveGroupMember),
-		ListManagedDatabases:   http.HandlerFunc(adminHandler.ListManagedDatabases),
-		CreateManagedDatabase:  http.HandlerFunc(adminHandler.CreateManagedDatabase),
-		GetManagedDatabase:     http.HandlerFunc(adminHandler.GetManagedDatabase),
-		UpdateManagedDatabase:  http.HandlerFunc(adminHandler.UpdateManagedDatabase),
-		DisableManagedDatabase: http.HandlerFunc(adminHandler.DisableManagedDatabase),
-		TestDatabaseConnection: http.HandlerFunc(adminHandler.TestDatabaseConnection),
-		SetGroupDatabaseAccess: http.HandlerFunc(adminHandler.SetGroupDatabaseAccess),
-		DeleteGroupDatabaseAccess: http.HandlerFunc(adminHandler.DeleteGroupDatabaseAccess),
-		ListDatabases: http.HandlerFunc(accessHandler.ListDatabases),
-		GetDatabase: http.HandlerFunc(accessHandler.GetDatabase),
-	}, api.RouteMiddleware{
-		Session:       authHandler.SessionMiddleware,
-		PlatformAdmin: accessService.PlatformAdminMiddleware,
-		CSRF:          authHandler.CSRFMiddleware,
-		LoginCSRF:     authHandler.LoginCSRFMiddleware,
-		DatabaseAccess: func(level api.AccessLevel) api.Middleware {
-			return accessService.DatabaseAccessMiddleware(level)
-		},
-	})
+		accessRepo := &access.PostgresRepository{DB: db}
+		accessService := &access.Service{Repository: accessRepo}
+
+		adminService := &admin.Service{
+			Repository:   adminRepo,
+			Access:       accessService,
+			Cipher:       cipher,
+			Connections:  targetStore,
+			HashPassword: auth.HashPassword,
+		}
+		adminHandler := &admin.Handler{Service: adminService}
+
+		queryTimeout := cfg.QueryTimeout
+		if queryTimeout <= 0 {
+			queryTimeout = 5 * time.Second
+		}
+		queryMaxRows := cfg.QueryMaxRows
+		if queryMaxRows <= 0 {
+			queryMaxRows = 100
+		}
+
+		explorerRepo := &explorer.PostgresRepository{
+			Targets:      targetStore,
+			QueryTimeout: queryTimeout,
+		}
+		explorerService := &explorer.Service{
+			Repository:   explorerRepo,
+			Access:       accessService,
+			QueryMaxRows: queryMaxRows,
+		}
+		explorerHandler := &explorer.Handler{Service: explorerService}
+
+		migrationRepo := &migration.PostgresRepository{DB: db}
+		migrationRunner := &migration.Runner{
+			Targets: targetStore,
+			Timeout: queryTimeout,
+		}
+		migrationService := &migration.Service{
+			Repository: migrationRepo,
+			Access:     accessService,
+			Runner:     migrationRunner,
+		}
+		migrationHandler := &migration.Handler{Service: migrationService}
+
+		// Admin users
+		routeHandlers.ListUsers = http.HandlerFunc(adminHandler.ListUsers)
+		routeHandlers.CreateUser = http.HandlerFunc(adminHandler.CreateUser)
+		routeHandlers.UpdateUser = http.HandlerFunc(adminHandler.UpdateUser)
+
+		// Admin groups and membership
+		routeHandlers.ListGroups = http.HandlerFunc(adminHandler.ListGroups)
+		routeHandlers.CreateGroup = http.HandlerFunc(adminHandler.CreateGroup)
+		routeHandlers.UpdateGroup = http.HandlerFunc(adminHandler.UpdateGroup)
+		routeHandlers.DeleteGroup = http.HandlerFunc(adminHandler.DeleteGroup)
+		routeHandlers.AddGroupMember = http.HandlerFunc(adminHandler.AddGroupMember)
+		routeHandlers.RemoveGroupMember = http.HandlerFunc(adminHandler.RemoveGroupMember)
+
+		// Admin managed databases
+		routeHandlers.ListManagedDatabases = http.HandlerFunc(adminHandler.ListManagedDatabases)
+		routeHandlers.CreateManagedDatabase = http.HandlerFunc(adminHandler.CreateManagedDatabase)
+		routeHandlers.GetManagedDatabase = http.HandlerFunc(adminHandler.GetManagedDatabase)
+		routeHandlers.UpdateManagedDatabase = http.HandlerFunc(adminHandler.UpdateManagedDatabase)
+		routeHandlers.DisableManagedDatabase = http.HandlerFunc(adminHandler.DisableManagedDatabase)
+		routeHandlers.TestDatabaseConnection = http.HandlerFunc(adminHandler.TestDatabaseConnection)
+
+		// Admin database grants
+		routeHandlers.SetGroupDatabaseAccess = http.HandlerFunc(adminHandler.SetGroupDatabaseAccess)
+		routeHandlers.DeleteGroupDatabaseAccess = http.HandlerFunc(adminHandler.DeleteGroupDatabaseAccess)
+
+		// Database explorer
+		routeHandlers.ListDatabases = http.HandlerFunc(explorerHandler.ListDatabases)
+		routeHandlers.GetDatabase = http.HandlerFunc(explorerHandler.GetDatabase)
+		routeHandlers.ListSchemas = http.HandlerFunc(explorerHandler.ListSchemas)
+		routeHandlers.ListTables = http.HandlerFunc(explorerHandler.ListTables)
+		routeHandlers.GetTableDetail = http.HandlerFunc(explorerHandler.GetTableDetail)
+		routeHandlers.GetTableRows = http.HandlerFunc(explorerHandler.GetTableRows)
+		routeHandlers.RunQuery = http.HandlerFunc(explorerHandler.RunQuery)
+
+		// Migrations
+		routeHandlers.ListMigrations = http.HandlerFunc(migrationHandler.ListMigrations)
+		routeHandlers.GetMigration = http.HandlerFunc(migrationHandler.GetMigration)
+		routeHandlers.CreateMigration = http.HandlerFunc(migrationHandler.CreateMigration)
+		routeHandlers.UpdateMigration = http.HandlerFunc(migrationHandler.UpdateMigration)
+		routeHandlers.ExecuteMigration = http.HandlerFunc(migrationHandler.ExecuteMigration)
+
+		// Middlewares
+		routeMiddleware.PlatformAdmin = accessService.PlatformAdminMiddleware
+		routeMiddleware.DatabaseAccess = accessService.DatabaseAccessMiddleware
+	}
+
+	apiRouter := api.NewRouter(routeHandlers, routeMiddleware)
 	pages, err := web.New()
 	if err != nil {
 		return nil, err

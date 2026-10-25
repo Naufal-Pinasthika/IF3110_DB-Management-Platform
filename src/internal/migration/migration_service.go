@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -21,13 +22,16 @@ type Repository interface {
 	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error)
 }
 
+
 type AccessChecker interface {
-	RequireDatabase(context.Context, auth.Principal, string, api.AccessLevel) error
+	RequireDatabase(ctx context.Context, actor auth.Principal, databaseID string, level api.AccessLevel) error
 }
 
+
 type SQLRunner interface {
-	Execute(context.Context, string, string) error
+	Execute(ctx context.Context, databaseID, sqlText string) error
 }
+
 
 type Service struct {
 	Repository Repository
@@ -35,46 +39,163 @@ type Service struct {
 	Runner     SQLRunner
 }
 
+
 // ListMigrations returns linear history and draft summaries.
 func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error) {
-	// TODO Require at least VIEW_ONLY and validate the optional status filter.
-	// TODO Map target scoped models to api.MigrationSummary without changing history.
-	return nil, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return nil, err
+	}
+
+	migrations, err := s.Repository.ListMigrations(ctx, databaseID, models.MigrationStatus(status))
+	if err != nil {
+		return nil, err
+	}
+
+	summaries := make([]api.MigrationSummary, 0, len(migrations))
+	for _, m := range migrations {
+		summaries = append(summaries, api.MigrationSummary{
+			ID:         m.ID,
+			Name:       m.Name,
+			Version:    m.Version,
+			Status:     m.Status,
+			ExecutedBy: m.ExecutedBy,
+			ExecutedAt: m.ExecutedAt,
+		})
+	}
+
+	return summaries, nil
 }
+
 
 // GetMigration returns SQL and audit details for a visible migration.
 func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string) (api.MigrationDetail, error) {
-	// TODO Require at least VIEW_ONLY and look up the model using both IDs.
-	// TODO Map the model to api.MigrationDetail without exposing loaded relations.
-	return api.MigrationDetail{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	return api.MigrationDetail{
+		ID:           m.ID,
+		DatabaseID:   m.DatabaseID,
+		Name:         m.Name,
+		SQLText:      m.SQLText,
+		Status:       m.Status,
+		Version:      m.Version,
+		CreatedBy:    m.CreatedBy,
+		ExecutedBy:   m.ExecutedBy,
+		CreatedAt:    m.CreatedAt,
+		UpdatedAt:    m.UpdatedAt,
+		ExecutedAt:   m.ExecutedAt,
+		ErrorSummary: m.ErrorSummary,
+	}, nil
 }
+
 
 // CreateMigration creates a SQL draft for an editor.
 func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, databaseID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error) {
-	// TODO Require VIEW_EDIT and validate a nonempty name up to 200 characters and nonempty SQL.
-	// TODO Build models.Migration using the principal and timestamps with DRAFT status and nil Version.
-	// TODO Map the saved model to api.MigrationCreated.
-	return api.MigrationCreated{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationCreated{}, err
+	}
+
+	if input.Name == "" || len(input.Name) > 200 || input.SQLText == "" {
+		return api.MigrationCreated{}, apperror.ErrInvalidInput
+	}
+
+	m := models.Migration{
+		DatabaseID: databaseID,
+		Name:       input.Name,
+		SQLText:    input.SQLText,
+		CreatedBy:  actor.User.ID,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	saved, err := s.Repository.CreateMigration(ctx, m)
+	if err != nil {
+		return api.MigrationCreated{}, err
+	}
+
+	return api.MigrationCreated{
+		ID:         saved.ID,
+		DatabaseID: saved.DatabaseID,
+		Name:       saved.Name,
+		Status:     saved.Status,
+		Version:    saved.Version,
+	}, nil
 }
+
 
 // UpdateMigration changes SQL before execution.
 func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.UpdateMigrationRequest, now time.Time) (api.MigrationUpdated, error) {
-	// TODO Require VIEW_EDIT and nonempty SQL and update only DRAFT records atomically.
-	// TODO Reject RUNNING and APPLIED and FAILED with a conflict and keep their SQL intact.
-	return api.MigrationUpdated{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationUpdated{}, err
+	}
+
+	if input.SQLText == "" {
+		return api.MigrationUpdated{}, apperror.ErrInvalidInput
+	}
+
+	updated, err := s.Repository.UpdateMigration(ctx, databaseID, migrationID, input.SQLText, now)
+	if err != nil {
+		return api.MigrationUpdated{}, err
+	}
+
+	return api.MigrationUpdated{
+		ID:      updated.ID,
+		Status:  updated.Status,
+		Version: updated.Version,
+	}, nil
 }
+
 
 // ExecuteMigration coordinates a target transaction and persistent history.
 func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
-	// TODO Require VIEW_EDIT and acquire the per database execution lock before claiming a draft.
-	// TODO Reject execution while any unresolved RUNNING record exists for the target.
-	// TODO Claim DRAFT as RUNNING atomically and execute only the returned stored SQL.
-	// TODO Keep the lock until execution and final metadata updates have finished.
-	// TODO Use Runner.Execute so all target statements share one transaction.
-	// TODO On confirmed commit record APPLIED and assign the next successful version.
-	// TODO On confirmed rollback record FAILED without a version and sanitize the error.
-	// TODO If commit outcome is unknown or history recording fails keep RUNNING for investigation.
-	// TODO Do not automatically retry or mark FAILED after a confirmed or uncertain commit.
-	// TODO Use the actual completion time for history rather than the supplied request start time.
-	return api.MigrationExecuted{}, apperror.ErrNotImplemented
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	release, err := s.Repository.LockDatabase(ctx, databaseID)
+	if err != nil {
+		return api.MigrationExecuted{}, apperror.ErrInternal
+	}
+	defer release()
+
+	running, err := s.Repository.MarkRunning(ctx, databaseID, migrationID, actor.User.ID, now)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	execErr := s.Runner.Execute(ctx, databaseID, running.SQLText)
+	completionTime := time.Now()
+
+	if execErr != nil {
+		errSummary := execErr.Error()
+		if idx := strings.Index(errSummary, "pq: "); idx != -1 {
+			errSummary = errSummary[idx:]
+		} else if strings.HasPrefix(errSummary, "invalid input provided: ") {
+			errSummary = strings.TrimPrefix(errSummary, "invalid input provided: ")
+		}
+		_, failErr := s.Repository.MarkFailed(ctx, databaseID, migrationID, actor.User.ID, errSummary, completionTime)
+		if failErr != nil {
+			return api.MigrationExecuted{}, failErr
+		}
+		return api.MigrationExecuted{}, execErr
+	}
+
+	applied, err := s.Repository.MarkApplied(ctx, databaseID, migrationID, actor.User.ID, completionTime)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	return api.MigrationExecuted{
+		ID:         applied.ID,
+		Status:     applied.Status,
+		Version:    applied.Version,
+		ExecutedBy: applied.ExecutedBy,
+		ExecutedAt: applied.ExecutedAt,
+	}, nil
 }

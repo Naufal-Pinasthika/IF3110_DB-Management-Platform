@@ -1,15 +1,20 @@
-// Package store owns PostgreSQL connections rather than permission policy.
 package store
 
 import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net/url"
+	"sync"
 	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	// GORM's postgres driver typically registers "pgx" natively under the hood
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
@@ -27,7 +32,9 @@ type CredentialCipher interface {
 type TargetStore struct {
 	Databases DatabaseRepository
 	Cipher    CredentialCipher
+	pools     sync.Map // stores *sql.DB instances keyed by "dbID-role"
 }
+
 
 // OpenPlatform opens the metadata database rather than a managed target.
 func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
@@ -45,36 +52,157 @@ func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 	pool.SetMaxOpenConns(10)
 	pool.SetMaxIdleConns(5)
 	pool.SetConnMaxLifetime(30 * time.Minute)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	
+	ctxPing, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := pool.PingContext(ctx); err != nil {
+	if err := pool.PingContext(ctxPing); err != nil {
 		pool.Close()
 		return nil, errors.New("could not connect to platform database")
 	}
 	return db, nil
 }
 
+
 // Reader opens a connection with only the reader credentials.
 func (s *TargetStore) Reader(ctx context.Context, databaseID string) (*sql.DB, error) {
-	// TODO Load current settings and reject a disabled target.
-	// TODO Decrypt reader credentials and safely encode the connection string.
-	// TODO Open and ping with a timeout without falling back to the migrator.
-	// TODO Use the pgx driver registered by the GORM PostgreSQL driver for raw target SQL.
-	// TODO Define pool ownership and close or invalidate pools after config changes.
-	return nil, apperror.ErrNotImplemented
+	db, err := s.Databases.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return s.getOrOpenPool(ctx, db, "reader", db.ReaderUsername, db.ReaderPasswordEnc)
 }
+
 
 // Migrator opens a connection for authorized migration execution.
 func (s *TargetStore) Migrator(ctx context.Context, databaseID string) (*sql.DB, error) {
-	// TODO Load current settings and reject a disabled target.
-	// TODO Decrypt migrator credentials and open and ping with a timeout.
-	// TODO Keep user authorization in the service before using this connection.
-	return nil, apperror.ErrNotImplemented
+	db, err := s.Databases.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return s.getOrOpenPool(ctx, db, "migrator", db.MigratorUsername, db.MigratorPasswordEnc)
 }
+
 
 // TestConnection checks both configured roles without changing target data.
 func (s *TargetStore) TestConnection(ctx context.Context, databaseID string) error {
-	// TODO Ping both reader and migrator and check their expected privileges.
-	// TODO Close temporary connections and return sanitized connection errors.
-	return apperror.ErrNotImplemented
+	db, err := s.Databases.GetDatabase(ctx, databaseID)
+	if err != nil {
+		return err
+	}
+
+	testRole := func(username, encryptedPass string) error {
+		pass, err := s.Cipher.Decrypt(encryptedPass)
+		if err != nil {
+			return errors.New("failed to decrypt test credentials")
+		}
+
+		dsn := buildDSN(db, username, pass)
+		conn, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return errors.New("driver initialization failed")
+		}
+		defer conn.Close()
+
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		
+		if err := conn.PingContext(pingCtx); err != nil {
+			return fmt.Errorf("connection test failed: %w", err)
+		}
+		return nil
+	}
+
+	if err := testRole(db.ReaderUsername, db.ReaderPasswordEnc); err != nil {
+		return fmt.Errorf("reader (%s): %v", db.ReaderUsername, err)
+	}
+	if err := testRole(db.MigratorUsername, db.MigratorPasswordEnc); err != nil {
+		return fmt.Errorf("migrator (%s): %v", db.MigratorUsername, err)
+	}
+
+	return nil
+}
+
+
+// InvalidateTargetPools safely drops all cached connection pools for a given database target.
+// Call this whenever a database's configuration (host, port, credentials) is updated or disabled.
+func (s *TargetStore) InvalidateTargetPools(databaseID string) {
+	roles := []string{"reader", "migrator"}
+	for _, role := range roles {
+		key := databaseID + "-" + role
+		if val, ok := s.pools.LoadAndDelete(key); ok {
+			val.(*sql.DB).Close()
+		}
+	}
+}
+
+
+// getOrOpenPool manages the thread-safe connection cache and invalidates dead connections.
+func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDatabase, role, username, encryptedPass string) (*sql.DB, error) {
+	if !db.IsEnabled {
+		return nil, apperror.ErrForbidden
+	}
+
+	cacheKey := db.ID + "-" + role
+	if val, ok := s.pools.Load(cacheKey); ok {
+		pool := val.(*sql.DB)
+		// Quick check to see if the cached connection is still alive
+		if err := pool.PingContext(ctx); err == nil {
+			return pool, nil
+		}
+		pool.Close()
+		s.pools.Delete(cacheKey)
+	}
+
+	pass, err := s.Cipher.Decrypt(encryptedPass)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt target credentials: %w", err)
+	}
+
+	dsn := buildDSN(db, username, pass)
+	pool, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database pool: %w", err)
+	}
+
+	pool.SetMaxOpenConns(10)
+	pool.SetMaxIdleConns(2)
+	pool.SetConnMaxLifetime(15 * time.Minute)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := pool.PingContext(pingCtx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("could not establish connection to target database: %w", err)
+	}
+
+	s.pools.Store(cacheKey, pool)
+	return pool, nil
+}
+
+
+func buildDSN(db models.ManagedDatabase, username, password string) string {
+	host := db.Host
+	if host == "" {
+		host = "postgres"
+	}
+	port := db.Port
+	if port <= 0 {
+		port = 5432
+	}
+	dbName := db.DatabaseName
+	if dbName == "" {
+		dbName = "target_db"
+	}
+	ssl := db.SSLMode
+	if ssl == "" {
+		ssl = "disable"
+	}
+	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		url.QueryEscape(username),
+		url.QueryEscape(password),
+		host,
+		port,
+		url.QueryEscape(dbName),
+		ssl,
+	)
 }

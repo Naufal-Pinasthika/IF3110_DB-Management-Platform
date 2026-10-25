@@ -62,11 +62,18 @@ func New() (http.Handler, error) {
 			_, _ = w.Write(buffer.Bytes())
 		})
 	}
-	for _, name := range []string{"app.css", "app.js", "api.mjs"} {
+
+	for _, name := range []string{"app.css", "app.js", "api.mjs", "favicon.ico"} {
 		mux.HandleFunc("GET /static/"+name, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			http.ServeFileFS(w, r, files, "static/"+name)
 		})
 	}
+	
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("X-Content-Type-Options", "nosniff")
+        http.ServeFileFS(w, r, files, "static/favicon.ico")
+    })
+
 	return mux, nil
 }

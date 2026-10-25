@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -37,6 +39,10 @@ type AdminChecker interface {
 
 type ConnectionTester interface {
 	TestConnection(context.Context, string) error
+}
+
+type poolInvalidator interface {
+	InvalidateTargetPools(string)
 }
 
 // Service maps persistence models to the existing API response types.
@@ -226,7 +232,7 @@ func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, grou
 		return api.GroupMember{}, err
 	}
 	if groupID == "" || userID == "" {
-		return api.GroupMember{}, apperror.New("group id and user id required")
+		return api.GroupMember{}, fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
 	}
 	ug, err := s.Repository.AddGroupMember(ctx, groupID, userID, now)
 	if err != nil {
@@ -241,7 +247,7 @@ func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, g
 		return err
 	}
 	if groupID == "" || userID == "" {
-		return apperror.New("group id and user id required")
+		return fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.RemoveGroupMember(ctx, groupID, userID, now)
 }
@@ -272,23 +278,44 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseSummary{}, err
 	}
-	if input.Label == "" || input.Host == "" || input.DatabaseName == "" || input.SSLMode == "" {
-		return api.ManagedDatabaseSummary{}, apperror.New("label, host, database_name, ssl_mode required")
+	input.Label = strings.TrimSpace(input.Label)
+	if input.Label == "" {
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: connection label is required", apperror.ErrInvalidInput)
+	}
+
+	// Supply robust defaults for PostgreSQL deployment environment
+	if strings.TrimSpace(input.Host) == "" {
+		input.Host = "postgres"
 	}
 	if input.Port <= 0 {
-		return api.ManagedDatabaseSummary{}, apperror.New("port must be positive")
+		input.Port = 5432
 	}
-	if input.ReaderUsername == "" || input.ReaderPassword == "" || input.MigratorUsername == "" || input.MigratorPassword == "" {
-		return api.ManagedDatabaseSummary{}, apperror.New("both reader and migrator credentials required")
+	if strings.TrimSpace(input.DatabaseName) == "" {
+		input.DatabaseName = "target_db"
+	}
+	if strings.TrimSpace(input.SSLMode) == "" {
+		input.SSLMode = "disable"
+	}
+	if strings.TrimSpace(input.ReaderUsername) == "" {
+		input.ReaderUsername = "admin"
+	}
+	if input.ReaderPassword == "" {
+		input.ReaderPassword = "root"
+	}
+	if strings.TrimSpace(input.MigratorUsername) == "" {
+		input.MigratorUsername = input.ReaderUsername
+	}
+	if input.MigratorPassword == "" {
+		input.MigratorPassword = input.ReaderPassword
 	}
 
 	readerEnc, err := s.Cipher.Encrypt(input.ReaderPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, err
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
 	}
 	migratorEnc, err := s.Cipher.Encrypt(input.MigratorPassword)
 	if err != nil {
-		return api.ManagedDatabaseSummary{}, err
+		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %v", apperror.ErrInternal, err)
 	}
 
 	db := models.ManagedDatabase{
@@ -403,6 +430,10 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+
 	return api.ManagedDatabaseSummary{
 		ID:           updated.ID,
 		Label:        updated.Label,
@@ -419,7 +450,13 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 	if databaseID == "" {
 		return apperror.New("database id required")
 	}
-	return s.Repository.DisableDatabase(ctx, databaseID)
+	if err := s.Repository.DisableDatabase(ctx, databaseID); err != nil {
+		return err
+	}
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
+	return nil
 }
 
 // TestDatabaseConnection checks a registered target connection.
@@ -428,11 +465,13 @@ func (s *Service) TestDatabaseConnection(ctx context.Context, actor auth.Princip
 		return api.TestConnectionResult{}, err
 	}
 	if databaseID == "" {
-		return api.TestConnectionResult{}, apperror.New("database id required")
+		return api.TestConnectionResult{}, fmt.Errorf("%w: database id required", apperror.ErrInvalidInput)
 	}
 	err := s.Connections.TestConnection(ctx, databaseID)
-	connected := err == nil
-	return api.TestConnectionResult{Connected: connected}, nil
+	if err != nil {
+		return api.TestConnectionResult{Connected: false, Message: err.Error()}, nil
+	}
+	return api.TestConnectionResult{Connected: true, Message: "Reader and migrator connections succeeded."}, nil
 }
 
 // SetGroupDatabaseAccess sets a group permission for one database.
@@ -441,10 +480,10 @@ func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Princip
 		return api.GroupDatabaseAccess{}, err
 	}
 	if groupID == "" || databaseID == "" {
-		return api.GroupDatabaseAccess{}, apperror.New("group id and database id required")
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
 	if input.AccessLevel != api.AccessViewOnly && input.AccessLevel != api.AccessViewEdit {
-		return api.GroupDatabaseAccess{}, apperror.New("access level must be VIEW_ONLY or VIEW_EDIT")
+		return api.GroupDatabaseAccess{}, fmt.Errorf("%w: access level must be VIEW_ONLY or VIEW_EDIT", apperror.ErrInvalidInput)
 	}
 
 	grant := models.GroupAccess{
@@ -471,7 +510,7 @@ func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Prin
 		return err
 	}
 	if groupID == "" || databaseID == "" {
-		return apperror.New("group id and database id required")
+		return fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
 	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
 }

@@ -14,7 +14,7 @@ test("permissions describe migrations without promising unrestricted SQL writes"
 });
 
 test("key markers come from actual constraint metadata", () => {
-  assert.equal(columnKeys("id", []), "—");
+  assert.equal(columnKeys("id", []), "--");
   assert.equal(columnKeys("id", [{type:"PRIMARY KEY", columns:["id"]}]), "PK");
   assert.equal(columnKeys("customer_id", [{type:"FOREIGN KEY", columns:["customer_id"]}, {type:"UNIQUE", columns:["customer_id"]}]), "FK, Unique");
 });

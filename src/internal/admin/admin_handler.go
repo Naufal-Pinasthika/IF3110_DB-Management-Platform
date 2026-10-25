@@ -2,11 +2,14 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 )
 
@@ -211,7 +214,25 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 	// mapError maps service errors to API error responses.
 	func (h *Handler) mapError(w http.ResponseWriter, err error) {
-		api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "An internal error occurred")
+		switch {
+		case errors.Is(err, auth.ErrUnauthenticated):
+			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		case errors.Is(err, apperror.ErrForbidden):
+			api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Platform admin access required")
+		case errors.Is(err, apperror.ErrNotFound):
+			api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		case errors.Is(err, apperror.ErrConflict):
+			api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
+		case errors.Is(err, apperror.ErrInvalidInput):
+			api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		default:
+			errStr := err.Error()
+			if strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "unique") {
+				api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "A record with this name or label already exists")
+				return
+			}
+			api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		}
 	}
 
 	// AddGroupMember handles PUT /api/v1/admin/groups/{groupId}/members/{userId}.
