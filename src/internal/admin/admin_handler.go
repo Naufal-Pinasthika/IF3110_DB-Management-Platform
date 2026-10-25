@@ -211,315 +211,314 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mapError maps service errors to API error responses.
+func (h *Handler) mapError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, access.ErrUnauthenticated):
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+	case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
+		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Platform admin access required")
+	case errors.Is(err, apperror.ErrNotFound):
+		api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+	case errors.Is(err, apperror.ErrConflict):
+		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
+	case errors.Is(err, apperror.ErrInvalidInput):
+		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+	default:
+		errStr := err.Error()
+		if strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "unique") {
+			api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "A record with this name or label already exists")
+			return
+		}
+		api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+	}
+}
+
+// AddGroupMember handles PUT /api/v1/admin/groups/{groupId}/members/{userId}.
+func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
 	}
 
-	// mapError maps service errors to API error responses.
-	func (h *Handler) mapError(w http.ResponseWriter, err error) {
-		switch {
-		case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, access.ErrUnauthenticated):
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-		case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
-			api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Platform admin access required")
-		case errors.Is(err, apperror.ErrNotFound):
-			api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
-		case errors.Is(err, apperror.ErrConflict):
-			api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
-		case errors.Is(err, apperror.ErrInvalidInput):
-			api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-		default:
-			errStr := err.Error()
-			if strings.Contains(errStr, "duplicate key") || strings.Contains(errStr, "unique") {
-				api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "A record with this name or label already exists")
-				return
-			}
-			api.WriteAPIError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-		}
+	groupID := r.PathValue("groupId")
+	userID := r.PathValue("userId")
+	if groupID == "" || userID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and user id required")
+		return
 	}
 
-	// AddGroupMember handles PUT /api/v1/admin/groups/{groupId}/members/{userId}.
-	func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		groupID := r.PathValue("groupId")
-		userID := r.PathValue("userId")
-		if groupID == "" || userID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and user id required")
-			return
-		}
-
-		member, err := h.Service.AddGroupMember(r.Context(), principal, groupID, userID, time.Now().UTC())
-			if err != nil {
-				h.mapError(w, err)
-				return
-			}
-
-			api.WriteJSON(w, api.DataResponse[api.GroupMember]{Data: member})
+	member, err := h.Service.AddGroupMember(r.Context(), principal, groupID, userID, time.Now().UTC())
+	if err != nil {
+		h.mapError(w, err)
+		return
 	}
 
-	// RemoveGroupMember handles DELETE /api/v1/admin/groups/{groupId}/members/{userId}.
-	func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
+	api.WriteJSON(w, api.DataResponse[api.GroupMember]{Data: member})
+}
 
-		groupID := r.PathValue("groupId")
-		userID := r.PathValue("userId")
-		if groupID == "" || userID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and user id required")
-			return
-		}
-
-		err := h.Service.RemoveGroupMember(r.Context(), principal, groupID, userID, time.Now().UTC())
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+// RemoveGroupMember handles DELETE /api/v1/admin/groups/{groupId}/members/{userId}.
+func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
 	}
 
-	// ListManagedDatabases handles GET /api/v1/admin/databases.
-	func (h *Handler) ListManagedDatabases(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		dbs, err := h.Service.ListManagedDatabases(r.Context(), principal)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		api.WriteJSON(w, api.DataResponse[[]api.ManagedDatabaseSummary]{Data: dbs})
+	groupID := r.PathValue("groupId")
+	userID := r.PathValue("userId")
+	if groupID == "" || userID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and user id required")
+		return
 	}
 
-	// CreateManagedDatabase handles POST /api/v1/admin/databases.
-	func (h *Handler) CreateManagedDatabase(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		var input api.CreateDatabaseRequest
-		if err := decoder.Decode(&input); err != nil {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
-			return
-		}
-		if err := decoder.Decode(&struct{}{}); err != io.EOF {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
-			return
-		}
-
-		db, err := h.Service.CreateManagedDatabase(r.Context(), principal, input)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		w.WriteHeader(http.StatusCreated)
-		api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
+	err := h.Service.RemoveGroupMember(r.Context(), principal, groupID, userID, time.Now().UTC())
+	if err != nil {
+		h.mapError(w, err)
+		return
 	}
 
-	// GetManagedDatabase handles GET /api/v1/admin/databases/{dbId}.
-	func (h *Handler) GetManagedDatabase(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
+	w.WriteHeader(http.StatusNoContent)
+}
 
-		dbID := r.PathValue("dbId")
-		if dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
-			return
-		}
-
-		db, err := h.Service.GetManagedDatabase(r.Context(), principal, dbID)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseDetail]{Data: db})
+// ListManagedDatabases handles GET /api/v1/admin/databases.
+func (h *Handler) ListManagedDatabases(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
 	}
 
-	// UpdateManagedDatabase handles PATCH /api/v1/admin/databases/{dbId}.
-	func (h *Handler) UpdateManagedDatabase(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		dbID := r.PathValue("dbId")
-		if dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
-			return
-		}
-
-		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		var input api.UpdateDatabaseRequest
-		if err := decoder.Decode(&input); err != nil {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
-			return
-		}
-		if err := decoder.Decode(&struct{}{}); err != io.EOF {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
-			return
-		}
-
-		db, err := h.Service.UpdateManagedDatabase(r.Context(), principal, dbID, input)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
+	dbs, err := h.Service.ListManagedDatabases(r.Context(), principal)
+	if err != nil {
+		h.mapError(w, err)
+		return
 	}
 
-	// DisableManagedDatabase handles DELETE /api/v1/admin/databases/{dbId}.
-	func (h *Handler) DisableManagedDatabase(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
+	api.WriteJSON(w, api.DataResponse[[]api.ManagedDatabaseSummary]{Data: dbs})
+}
 
-		dbID := r.PathValue("dbId")
-		if dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
-			return
-		}
-
-		err := h.Service.DisableManagedDatabase(r.Context(), principal, dbID)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+// CreateManagedDatabase handles POST /api/v1/admin/databases.
+func (h *Handler) CreateManagedDatabase(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
 	}
 
-	// DeleteManagedDatabase permanently removes a disabled connection.
-	func (h *Handler) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-		dbID := r.PathValue("dbId")
-		if dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
-			return
-		}
-		if err := h.Service.DeleteManagedDatabase(r.Context(), principal, dbID); err != nil {
-			h.mapError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	var input api.CreateDatabaseRequest
+	if err := decoder.Decode(&input); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
+		return
 	}
 
-	// TestDatabaseConnection handles POST /api/v1/admin/databases/{dbId}/test-connection.
-	func (h *Handler) TestDatabaseConnection(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		dbID := r.PathValue("dbId")
-		if dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
-			return
-		}
-
-		result, err := h.Service.TestDatabaseConnection(r.Context(), principal, dbID)
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		api.WriteJSON(w, api.DataResponse[api.TestConnectionResult]{Data: result})
+	db, err := h.Service.CreateManagedDatabase(r.Context(), principal, input)
+	if err != nil {
+		h.mapError(w, err)
+		return
 	}
 
-	// SetGroupDatabaseAccess handles PUT /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
-	func (h *Handler) SetGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
+	w.WriteHeader(http.StatusCreated)
+	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
+}
 
-		groupID := r.PathValue("groupId")
-		dbID := r.PathValue("dbId")
-		if groupID == "" || dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and database id required")
-			return
-		}
-
-		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-
-		var input api.SetGroupAccessRequest
-		if err := decoder.Decode(&input); err != nil {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
-			return
-		}
-		if err := decoder.Decode(&struct{}{}); err != io.EOF {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
-			return
-		}
-
-		access, err := h.Service.SetGroupDatabaseAccess(r.Context(), principal, groupID, dbID, input, time.Now().UTC())
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		api.WriteJSON(w, api.DataResponse[api.GroupDatabaseAccess]{Data: access})
+// GetManagedDatabase handles GET /api/v1/admin/databases/{dbId}.
+func (h *Handler) GetManagedDatabase(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
 	}
 
-	// DeleteGroupDatabaseAccess handles DELETE /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
-	func (h *Handler) DeleteGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.PrincipalFromContext(r.Context())
-		if !ok {
-			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
-			return
-		}
-
-		groupID := r.PathValue("groupId")
-		dbID := r.PathValue("dbId")
-		if groupID == "" || dbID == "" {
-			api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and database id required")
-			return
-		}
-
-		err := h.Service.DeleteGroupDatabaseAccess(r.Context(), principal, groupID, dbID, time.Now().UTC())
-		if err != nil {
-			h.mapError(w, err)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+	dbID := r.PathValue("dbId")
+	if dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+		return
 	}
 
+	db, err := h.Service.GetManagedDatabase(r.Context(), principal, dbID)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseDetail]{Data: db})
+}
+
+// UpdateManagedDatabase handles PATCH /api/v1/admin/databases/{dbId}.
+func (h *Handler) UpdateManagedDatabase(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+
+	dbID := r.PathValue("dbId")
+	if dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	var input api.UpdateDatabaseRequest
+	if err := decoder.Decode(&input); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
+		return
+	}
+
+	db, err := h.Service.UpdateManagedDatabase(r.Context(), principal, dbID, input)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
+}
+
+// DisableManagedDatabase handles DELETE /api/v1/admin/databases/{dbId}.
+func (h *Handler) DisableManagedDatabase(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+
+	dbID := r.PathValue("dbId")
+	if dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+		return
+	}
+
+	err := h.Service.DisableManagedDatabase(r.Context(), principal, dbID)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteManagedDatabase permanently removes a disabled connection.
+func (h *Handler) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+	dbID := r.PathValue("dbId")
+	if dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+		return
+	}
+	if err := h.Service.DeleteManagedDatabase(r.Context(), principal, dbID); err != nil {
+		h.mapError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// TestDatabaseConnection handles POST /api/v1/admin/databases/{dbId}/test-connection.
+func (h *Handler) TestDatabaseConnection(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+
+	dbID := r.PathValue("dbId")
+	if dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "database id required")
+		return
+	}
+
+	result, err := h.Service.TestDatabaseConnection(r.Context(), principal, dbID)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	api.WriteJSON(w, api.DataResponse[api.TestConnectionResult]{Data: result})
+}
+
+// SetGroupDatabaseAccess handles PUT /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
+func (h *Handler) SetGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+
+	groupID := r.PathValue("groupId")
+	dbID := r.PathValue("dbId")
+	if groupID == "" || dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and database id required")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	var input api.SetGroupAccessRequest
+	if err := decoder.Decode(&input); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
+		return
+	}
+
+	access, err := h.Service.SetGroupDatabaseAccess(r.Context(), principal, groupID, dbID, input, time.Now().UTC())
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	api.WriteJSON(w, api.DataResponse[api.GroupDatabaseAccess]{Data: access})
+}
+
+// DeleteGroupDatabaseAccess handles DELETE /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
+func (h *Handler) DeleteGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+
+	groupID := r.PathValue("groupId")
+	dbID := r.PathValue("dbId")
+	if groupID == "" || dbID == "" {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_ID", "group id and database id required")
+		return
+	}
+
+	err := h.Service.DeleteGroupDatabaseAccess(r.Context(), principal, groupID, dbID, time.Now().UTC())
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
 func (h *Handler) ListAccessSnapshot(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -532,4 +531,29 @@ func (h *Handler) ListAccessSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, api.DataResponse[api.AccessSnapshot]{Data: result})
+}
+func (h *Handler) TestConnectionDraft(w http.ResponseWriter, r *http.Request) {
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok {
+		api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Please log in again")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var input api.TestConnectionRequest
+	if err := decoder.Decode(&input); err != nil {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
+		return
+	}
+	result, err := h.Service.TestConnectionDraft(r.Context(), principal, input)
+	if err != nil {
+		h.mapError(w, err)
+		return
+	}
+	api.WriteJSON(w, api.DataResponse[api.TestConnectionResult]{Data: result})
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"strings"
 	"time"
 
@@ -14,18 +15,22 @@ import (
 	"github.com/lib/pq"
 )
 
-
-type PostgresRepository struct {
+type TargetRepository struct {
 	Targets      *store.TargetStore
 	QueryTimeout time.Duration
 }
 
-
-var _ Repository = (*PostgresRepository)(nil)
-
+var _ Repository = (*TargetRepository)(nil)
 
 // ListSchemas reads visible schemas from the target.
-func (r *PostgresRepository) ListSchemas(ctx context.Context, databaseID string) ([]api.SchemaSummary, error) {
+func (r *TargetRepository) ListSchemas(ctx context.Context, databaseID string) ([]api.SchemaSummary, error) {
+	config, err := r.Targets.Configuration(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	if config.TargetEngine() == models.EngineMySQL {
+		return r.mysqlSchemas(ctx, config)
+	}
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return nil, err
@@ -55,9 +60,15 @@ func (r *PostgresRepository) ListSchemas(ctx context.Context, databaseID string)
 	return schemas, rows.Err()
 }
 
-
 // ListTables reads tables in a selected schema.
-func (r *PostgresRepository) ListTables(ctx context.Context, databaseID, schema string) ([]api.TableSummary, error) {
+func (r *TargetRepository) ListTables(ctx context.Context, databaseID, schema string) ([]api.TableSummary, error) {
+	config, err := r.Targets.Configuration(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	if config.TargetEngine() == models.EngineMySQL {
+		return r.mysqlTables(ctx, config, schema)
+	}
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return nil, err
@@ -86,9 +97,15 @@ func (r *PostgresRepository) ListTables(ctx context.Context, databaseID, schema 
 	return tables, rows.Err()
 }
 
-
 // GetTableDetail reads columns and constraints and indexes.
-func (r *PostgresRepository) GetTableDetail(ctx context.Context, databaseID, schema, table string) (api.TableDetail, error) {
+func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schema, table string) (api.TableDetail, error) {
+	config, err := r.Targets.Configuration(ctx, databaseID)
+	if err != nil {
+		return api.TableDetail{}, err
+	}
+	if config.TargetEngine() == models.EngineMySQL {
+		return r.mysqlTableDetail(ctx, config, schema, table)
+	}
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return api.TableDetail{}, err
@@ -173,9 +190,15 @@ func (r *PostgresRepository) GetTableDetail(ctx context.Context, databaseID, sch
 	return detail, nil
 }
 
-
 // GetTableRows reads one page of table data.
-func (r *PostgresRepository) GetTableRows(ctx context.Context, databaseID, schema, table string, limit, offset int) (api.TableRows, error) {
+func (r *TargetRepository) GetTableRows(ctx context.Context, databaseID, schema, table string, limit, offset int) (api.TableRows, error) {
+	config, err := r.Targets.Configuration(ctx, databaseID)
+	if err != nil {
+		return api.TableRows{}, err
+	}
+	if config.TargetEngine() == models.EngineMySQL && schema != config.DatabaseName {
+		return api.TableRows{}, apperror.ErrForbidden
+	}
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return api.TableRows{}, err
@@ -192,7 +215,12 @@ func (r *PostgresRepository) GetTableRows(ctx context.Context, databaseID, schem
 	defer tx.Rollback()
 
 	// Quote identifiers and fetch limit+1 to determine HasMore
-	query := fmt.Sprintf(`SELECT * FROM %q.%q LIMIT $1 OFFSET $2`, schema, table)
+	quote, placeholders := `"`, "$1 OFFSET $2"
+	if config.TargetEngine() == models.EngineMySQL {
+		quote, placeholders = "`", "? OFFSET ?"
+	}
+	identifier := func(name string) string { return quote + strings.ReplaceAll(name, quote, quote+quote) + quote }
+	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %s", identifier(schema), identifier(table), placeholders)
 	rows, err := tx.QueryContext(txCtx, query, limit+1, offset)
 	if err != nil {
 		return api.TableRows{}, fmt.Errorf("%w: query failed: %v", apperror.ErrInvalidInput, err)
@@ -242,9 +270,8 @@ func (r *PostgresRepository) GetTableRows(ctx context.Context, databaseID, schem
 	return result, rows.Err()
 }
 
-
 // RunQuery executes an approved query with database enforced restrictions.
-func (r *PostgresRepository) RunQuery(ctx context.Context, databaseID string, input api.RunQueryRequest) (api.QueryResult, error) {
+func (r *TargetRepository) RunQuery(ctx context.Context, databaseID string, input api.RunQueryRequest) (api.QueryResult, error) {
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return api.QueryResult{}, err
@@ -307,10 +334,9 @@ func (r *PostgresRepository) RunQuery(ctx context.Context, databaseID string, in
 	return result, rows.Err()
 }
 
-
 // ExplainQuery runs EXPLAIN (FORMAT JSON [, ANALYZE]) on the given SQL within a ReadOnly transaction.
 // For EXPLAIN ANALYZE the transaction is always rolled back so no data is modified.
-func (r *PostgresRepository) ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
+func (r *TargetRepository) ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
 	db, err := r.Targets.Reader(ctx, databaseID)
 	if err != nil {
 		return api.ExplainResult{}, err
@@ -396,7 +422,7 @@ func (r *PostgresRepository) ExplainQuery(ctx context.Context, databaseID string
 
 // ExplainSQL runs EXPLAIN on migration DML after syntax-aware validation.
 // The outer transaction is always rolled back after the preview.
-func (r *PostgresRepository) ExplainSQL(ctx context.Context, databaseID string, sqlText string, analyze bool) (api.ExplainResult, error) {
+func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sqlText string, analyze bool) (api.ExplainResult, error) {
 	db, err := r.Targets.Migrator(ctx, databaseID)
 	if err != nil {
 		return api.ExplainResult{}, err
@@ -426,7 +452,7 @@ func (r *PostgresRepository) ExplainSQL(ctx context.Context, databaseID string, 
 			continue
 		}
 		savepoint := fmt.Sprintf("plan_stmt_%d", i+1)
-		if _, err := tx.ExecContext(txCtx, "SAVEPOINT " + savepoint); err != nil {
+		if _, err := tx.ExecContext(txCtx, "SAVEPOINT "+savepoint); err != nil {
 			return api.ExplainResult{}, fmt.Errorf("%w: could not isolate statement plan: %v", apperror.ErrInternal, err)
 		}
 
@@ -441,8 +467,8 @@ func (r *PostgresRepository) ExplainSQL(ctx context.Context, databaseID string, 
 		if err != nil {
 			// Some PostgreSQL commands do not have a plan (for example CREATE TABLE).
 			allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: err.Error()})
-			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT " + savepoint)
-			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT " + savepoint)
+			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT "+savepoint)
+			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint)
 			continue
 		}
 
@@ -451,7 +477,7 @@ func (r *PostgresRepository) ExplainSQL(ctx context.Context, databaseID string, 
 			_ = rows.Scan(&rawJSON)
 		}
 		rows.Close()
-		if _, err := tx.ExecContext(txCtx, "RELEASE SAVEPOINT " + savepoint); err != nil {
+		if _, err := tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint); err != nil {
 			return api.ExplainResult{}, fmt.Errorf("%w: could not finish statement plan: %v", apperror.ErrInternal, err)
 		}
 
@@ -524,10 +550,15 @@ func buildPlanText(plans []api.ExplainPlan) string {
 		}
 		if p.StatementIndex > 0 || len(plans) > 1 {
 			statementIndex := p.StatementIndex
-			if statementIndex == 0 { statementIndex = i + 1 }
+			if statementIndex == 0 {
+				statementIndex = i + 1
+			}
 			fmt.Fprintf(&sb, "-- Statement %d\n", statementIndex)
 		}
-		if p.Error != "" { fmt.Fprintf(&sb, "Plan unavailable: %s", p.Error); continue }
+		if p.Error != "" {
+			fmt.Fprintf(&sb, "Plan unavailable: %s", p.Error)
+			continue
+		}
 		renderNode(&sb, p.Plan, 0)
 		if p.PlanningTime != nil {
 			fmt.Fprintf(&sb, "\nPlanning Time: %.3f ms", *p.PlanningTime)

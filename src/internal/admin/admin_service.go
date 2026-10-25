@@ -98,10 +98,10 @@ func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input ap
 	}
 
 	user := models.User{
-		Username:     input.Username,
-		PasswordHash: hash,
+		Username:        input.Username,
+		PasswordHash:    hash,
 		IsPlatformAdmin: input.IsPlatformAdmin,
-		IsActive:     true,
+		IsActive:        true,
 	}
 
 	created, err := s.Repository.CreateUser(ctx, user)
@@ -278,6 +278,7 @@ func (s *Service) ListManagedDatabases(ctx context.Context, actor auth.Principal
 			ID:           db.ID,
 			Label:        db.Label,
 			DatabaseName: db.DatabaseName,
+			Engine:       db.TargetEngine(),
 			IsEnabled:    db.IsEnabled,
 		}
 	}
@@ -295,18 +296,32 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: connection label is required", apperror.ErrInvalidInput)
 	}
 
-	// Supply robust defaults for PostgreSQL deployment environment
+	engine, err := normalizeEngine(input.Engine)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, err
+	}
+	input.Engine = engine
+	// Retain PostgreSQL defaults for existing clients.
 	if strings.TrimSpace(input.Host) == "" {
 		input.Host = "postgres"
+		if engine == models.EngineMySQL {
+			input.Host = "mysql"
+		}
 	}
 	if input.Port <= 0 {
 		input.Port = 5432
+		if engine == models.EngineMySQL {
+			input.Port = 3306
+		}
 	}
 	if strings.TrimSpace(input.DatabaseName) == "" {
 		input.DatabaseName = "target_db"
 	}
 	if strings.TrimSpace(input.SSLMode) == "" {
 		input.SSLMode = "disable"
+	}
+	if err := validateSSLMode(engine, input.SSLMode); err != nil {
+		return api.ManagedDatabaseSummary{}, err
 	}
 	if strings.TrimSpace(input.ReaderUsername) == "" {
 		input.ReaderUsername = "admin"
@@ -321,6 +336,11 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		input.MigratorPassword = input.ReaderPassword
 	}
 
+	if input.UseReaderCredentials {
+		input.MigratorUsername = input.ReaderUsername
+		input.MigratorPassword = input.ReaderPassword
+	}
+
 	readerEnc, err := s.Cipher.Encrypt(input.ReaderPassword)
 	if err != nil {
 		return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: encryption failed: %w", apperror.ErrInternal, err)
@@ -331,16 +351,17 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 	}
 
 	db := models.ManagedDatabase{
-		Label:                 input.Label,
-		Host:                  input.Host,
-		Port:                  input.Port,
-		DatabaseName:          input.DatabaseName,
-		SSLMode:               input.SSLMode,
-		ReaderUsername:        input.ReaderUsername,
-		ReaderPasswordEnc:     readerEnc,
-		MigratorUsername:      input.MigratorUsername,
-		MigratorPasswordEnc:   migratorEnc,
-		IsEnabled:             true,
+		Engine:              input.Engine,
+		Label:               input.Label,
+		Host:                input.Host,
+		Port:                input.Port,
+		DatabaseName:        input.DatabaseName,
+		SSLMode:             input.SSLMode,
+		ReaderUsername:      input.ReaderUsername,
+		ReaderPasswordEnc:   readerEnc,
+		MigratorUsername:    input.MigratorUsername,
+		MigratorPasswordEnc: migratorEnc,
+		IsEnabled:           true,
 	}
 
 	created, err := s.Repository.CreateDatabase(ctx, db)
@@ -352,6 +373,7 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		ID:           created.ID,
 		Label:        created.Label,
 		DatabaseName: created.DatabaseName,
+		Engine:       created.TargetEngine(),
 		IsEnabled:    created.IsEnabled,
 	}, nil
 }
@@ -369,15 +391,16 @@ func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, 
 		return api.ManagedDatabaseDetail{}, err
 	}
 	return api.ManagedDatabaseDetail{
-		ID:              db.ID,
-		Label:           db.Label,
-		Host:            db.Host,
-		Port:            db.Port,
-		DatabaseName:    db.DatabaseName,
-		SSLMode:         db.SSLMode,
-		ReaderUsername:  db.ReaderUsername,
+		ID:               db.ID,
+		Label:            db.Label,
+		Host:             db.Host,
+		Port:             db.Port,
+		DatabaseName:     db.DatabaseName,
+		Engine:           db.TargetEngine(),
+		SSLMode:          db.SSLMode,
+		ReaderUsername:   db.ReaderUsername,
 		MigratorUsername: db.MigratorUsername,
-		IsEnabled:       db.IsEnabled,
+		IsEnabled:        db.IsEnabled,
 	}, nil
 }
 
@@ -395,46 +418,9 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 
-	if input.Label != nil {
-		current.Label = *input.Label
-	}
-	if input.Host != nil {
-		current.Host = *input.Host
-	}
-	if input.Port != nil {
-		if *input.Port <= 0 {
-			return api.ManagedDatabaseSummary{}, fmt.Errorf("%w: port must be positive", apperror.ErrInvalidInput)
-		}
-		current.Port = *input.Port
-	}
-	if input.DatabaseName != nil {
-		current.DatabaseName = *input.DatabaseName
-	}
-	if input.SSLMode != nil {
-		current.SSLMode = *input.SSLMode
-	}
-	if input.ReaderUsername != nil {
-		current.ReaderUsername = *input.ReaderUsername
-	}
-	if input.ReaderPassword != nil {
-		enc, err := s.Cipher.Encrypt(*input.ReaderPassword)
-		if err != nil {
-			return api.ManagedDatabaseSummary{}, err
-		}
-		current.ReaderPasswordEnc = enc
-	}
-	if input.MigratorUsername != nil {
-		current.MigratorUsername = *input.MigratorUsername
-	}
-	if input.MigratorPassword != nil {
-		enc, err := s.Cipher.Encrypt(*input.MigratorPassword)
-		if err != nil {
-			return api.ManagedDatabaseSummary{}, err
-		}
-		current.MigratorPasswordEnc = enc
-	}
-	if input.IsEnabled != nil {
-		current.IsEnabled = *input.IsEnabled
+	current, err = s.applyConnectionChanges(current, input)
+	if err != nil {
+		return api.ManagedDatabaseSummary{}, err
 	}
 
 	updated, err := s.Repository.UpdateDatabase(ctx, current)
@@ -450,6 +436,7 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		ID:           updated.ID,
 		Label:        updated.Label,
 		DatabaseName: updated.DatabaseName,
+		Engine:       updated.TargetEngine(),
 		IsEnabled:    updated.IsEnabled,
 	}, nil
 }
@@ -473,12 +460,22 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 
 // DeleteManagedDatabase permanently removes a disabled connection registration.
 func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
-	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil { return err }
-	if databaseID == "" { return apperror.New("database id required") }
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return err
+	}
+	if databaseID == "" {
+		return apperror.New("database id required")
+	}
 	deleter, ok := s.Repository.(DisabledDatabaseDeleter)
-	if !ok { return apperror.ErrInternal }
-	if err := deleter.DeleteDisabledDatabase(ctx, databaseID); err != nil { return err }
-	if inv, ok := s.Connections.(poolInvalidator); ok { inv.InvalidateTargetPools(databaseID) }
+	if !ok {
+		return apperror.ErrInternal
+	}
+	if err := deleter.DeleteDisabledDatabase(ctx, databaseID); err != nil {
+		return err
+	}
+	if inv, ok := s.Connections.(poolInvalidator); ok {
+		inv.InvalidateTargetPools(databaseID)
+	}
 	return nil
 }
 
@@ -538,9 +535,124 @@ func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Prin
 	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
 }
 
+func (s *Service) applyConnectionChanges(current models.ManagedDatabase, input api.UpdateDatabaseRequest) (models.ManagedDatabase, error) {
+	if input.Engine != nil {
+		engine, err := normalizeEngine(*input.Engine)
+		if err != nil {
+			return current, err
+		}
+		current.Engine = engine
+	}
+	if input.Label != nil {
+		current.Label = *input.Label
+	}
+	if input.Host != nil {
+		current.Host = *input.Host
+	}
+	if input.Port != nil {
+		if *input.Port <= 0 {
+			return current, fmt.Errorf("%w: port must be positive", apperror.ErrInvalidInput)
+		}
+		current.Port = *input.Port
+	}
+	if input.DatabaseName != nil {
+		current.DatabaseName = *input.DatabaseName
+	}
+	if input.SSLMode != nil {
+		current.SSLMode = *input.SSLMode
+	}
+	if input.ReaderUsername != nil {
+		current.ReaderUsername = *input.ReaderUsername
+	}
+	if input.ReaderPassword != nil {
+		enc, err := s.Cipher.Encrypt(*input.ReaderPassword)
+		if err != nil {
+			return current, err
+		}
+		current.ReaderPasswordEnc = enc
+	}
+	if input.MigratorUsername != nil {
+		current.MigratorUsername = *input.MigratorUsername
+	}
+	if input.MigratorPassword != nil {
+		enc, err := s.Cipher.Encrypt(*input.MigratorPassword)
+		if err != nil {
+			return current, err
+		}
+		current.MigratorPasswordEnc = enc
+	}
+	if input.IsEnabled != nil {
+		current.IsEnabled = *input.IsEnabled
+	}
+
+	if input.UseReaderCredentials {
+		current.MigratorUsername = current.ReaderUsername
+		current.MigratorPasswordEnc = current.ReaderPasswordEnc
+	}
+	if current.SSLMode != "" {
+		if err := validateSSLMode(current.TargetEngine(), current.SSLMode); err != nil {
+			return current, err
+		}
+	}
+	return current, nil
+}
+
+func normalizeEngine(engine string) (string, error) {
+	engine = strings.ToLower(strings.TrimSpace(engine))
+	if engine == "" {
+		engine = models.EnginePostgres
+	}
+	if engine != models.EnginePostgres && engine != models.EngineMySQL {
+		return "", fmt.Errorf("%w: engine must be postgres or mysql", apperror.ErrInvalidInput)
+	}
+	return engine, nil
+}
+
+func validateSSLMode(engine, mode string) error {
+	if mode == "disable" || mode == "require" || mode == "verify-full" || (engine == models.EnginePostgres && mode == "verify-ca") {
+		return nil
+	}
+	return fmt.Errorf("%w: unsupported SSL mode for %s", apperror.ErrInvalidInput, engine)
+}
 func (s *Service) ListAccessSnapshot(ctx context.Context, actor auth.Principal) (api.AccessSnapshot, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.AccessSnapshot{}, err
 	}
 	return s.Repository.ListAccessSnapshot(ctx)
+}
+
+func (s *Service) TestConnectionDraft(ctx context.Context, actor auth.Principal, input api.TestConnectionRequest) (api.TestConnectionResult, error) {
+	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
+		return api.TestConnectionResult{}, err
+	}
+	var current models.ManagedDatabase
+	var err error
+	if input.DatabaseID != "" {
+		current, err = s.Repository.GetDatabase(ctx, input.DatabaseID)
+		if err != nil {
+			return api.TestConnectionResult{}, err
+		}
+	}
+	current, err = s.applyConnectionChanges(current, input.UpdateDatabaseRequest)
+	if err != nil {
+		return api.TestConnectionResult{}, err
+	}
+	if strings.TrimSpace(current.Host) == "" || current.Port < 1 || current.Port > 65535 || strings.TrimSpace(current.DatabaseName) == "" || strings.TrimSpace(current.ReaderUsername) == "" || strings.TrimSpace(current.MigratorUsername) == "" || current.ReaderPasswordEnc == "" || current.MigratorPasswordEnc == "" {
+		return api.TestConnectionResult{}, fmt.Errorf("%w: complete the connection details and both credentials before testing", apperror.ErrInvalidInput)
+	}
+	switch current.SSLMode {
+	case "disable", "require", "verify-ca", "verify-full":
+	default:
+		return api.TestConnectionResult{}, fmt.Errorf("%w: invalid SSL mode", apperror.ErrInvalidInput)
+	}
+	tester, ok := s.Connections.(interface {
+		TestConfiguration(context.Context, models.ManagedDatabase) error
+	})
+	if !ok {
+		return api.TestConnectionResult{}, apperror.ErrNotImplemented
+	}
+	if err := tester.TestConfiguration(ctx, current); err != nil {
+		return api.TestConnectionResult{Connected: false, Message: err.Error()}, nil
+	}
+	return api.TestConnectionResult{Connected: true, Message: "Reader and migrator connections succeeded."}, nil
 }
