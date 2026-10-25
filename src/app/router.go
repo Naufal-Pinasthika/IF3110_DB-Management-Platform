@@ -16,7 +16,7 @@ import (
 // DBProvider provides access to the underlying database connection.
 // Implemented by auth.PostgresRepository.
 type DBProvider interface {
-	DB() *gorm.DB
+	GormDB() *gorm.DB
 }
 
 // NewRouter composes the production API, middleware, and embedded frontend.
@@ -29,7 +29,7 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 
 	var db *gorm.DB
 	if provider, ok := repo.(DBProvider); ok {
-		db = provider.DB()
+		db = provider.GormDB()
 	}
 
 	// Access service (also satisfies admin.AdminChecker via RequirePlatformAdmin)

@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+func (r *PostgresRepository) GormDB() *gorm.DB {
+    return r.DB
+}
+
 // PostgresRepository uses GORM models and leaves HTTP mapping to the service.
 type PostgresRepository struct {
 	DB *gorm.DB
