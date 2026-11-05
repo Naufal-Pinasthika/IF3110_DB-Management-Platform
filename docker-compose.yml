@@ -9,12 +9,12 @@ services:
       POSTGRES_USER: target_db_user
       POSTGRES_PASSWORD: target_db_password_12345
     ports:
-      - "5433:5432"
+      - "45433:5432"
     volumes:
       - target_db_1_data:/var/lib/postgresql/data
       - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
 
-  target-db-2:
+  target-db-2:    
     image: postgres:17
     container_name: target_db_2
     environment:

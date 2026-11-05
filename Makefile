@@ -1,6 +1,6 @@
 MODULE := github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform
 
-.PHONY: check test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build
+.PHONY: check test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build frontend-build frontend-dev
 
 check:
 	go vet ./...
@@ -40,7 +40,13 @@ test-browser:
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
 	REQUIRE_INTEGRATION_TESTS=1 REQUIRE_BROWSER_TESTS=1 go -C tests test -race -count=1 -timeout=5m ./integration/... -run 'TestAuthBrowserIntegration|TestFrontendBrowserFixtures' -v
 
-build:
+frontend-build:
+	npm --prefix frontend run build
+
+frontend-dev:
+	npm --prefix frontend run dev
+
+build: frontend-build
 	mkdir -p tests/artifacts
 	go build -o tests/artifacts/server ./src/cmd/server
 

@@ -1,79 +1,66 @@
-// Package web serves non-SPA Go templates and embedded static assets.
+// Package web serves the React SPA built by Vite and embedded into the server.
 package web
 
 import (
-	"bytes"
 	"embed"
-	"html/template"
+	"io/fs"
 	"net/http"
-	"net/url"
+	"path"
+	"strings"
 )
 
-//go:embed templates/*.html static/*
+// The placeholder keeps Go builds usable for API-only development before the
+// first frontend build. Vite replaces this directory with production assets.
+//go:embed all:dist
 var files embed.FS
 
-type page struct {
-	Kind, Title, Description               string
-	DatabaseID, Schema, Table, MigrationID string
-	DatabaseURL                            string
-}
-
 func New() (http.Handler, error) {
-	templates, err := template.ParseFS(files, "templates/*.html")
+	assets, err := fs.Sub(files, "dist")
 	if err != nil {
 		return nil, err
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/databases", http.StatusSeeOther)
-	})
-	for _, route := range []struct{ pattern, kind, title, description string }{
-		{"/login", "login", "Sign in", "Access your database workspace."},
-		{"/databases", "databases", "Databases", "Choose a database to explore its schema, run queries, or manage migrations."},
-		{"/databases/{dbId}", "database", "Schema browser", "Browse schemas and tables in this database."},
-		{"/databases/{dbId}/schemas/{schema}/tables/{table}", "table", "Table", "Inspect columns, constraints, indexes, and table data."},
-		{"/databases/{dbId}/query", "query", "SQL query", "Run a read-only query against this database."},
-		{"/databases/{dbId}/migrations", "migrations", "Migrations", "Review schema changes and their execution history."},
-		{"/databases/{dbId}/migrations/new", "migration-new", "New migration", "Write and save a draft before executing it."},
-		{"/databases/{dbId}/migrations/{migrationId}", "migration", "Migration details", "Review the SQL and execution details."},
-		{"/admin/users", "users", "Users", "Manage platform accounts and account access."},
-		{"/admin/groups", "groups", "Groups & access", "Manage groups, membership, and database permissions."},
-		{"/admin/databases", "connections", "Connections", "Manage PostgreSQL connections available to the platform."},
-	} {
-		mux.HandleFunc("GET "+route.pattern, func(w http.ResponseWriter, r *http.Request) {
-			data := page{Kind: route.kind, Title: route.title, Description: route.description,
-				DatabaseID: r.PathValue("dbId"), Schema: r.PathValue("schema"), Table: r.PathValue("table"), MigrationID: r.PathValue("migrationId")}
-			if data.Kind == "table" {
-				data.Title = data.Schema + "." + data.Table
-			}
-			if data.DatabaseID != "" {
-				data.DatabaseURL = "/databases/" + url.PathEscape(data.DatabaseID)
-			}
-			var buffer bytes.Buffer
-			if err := templates.ExecuteTemplate(&buffer, "page", data); err != nil {
-				http.Error(w, "Unable to display this page. Please try again.", http.StatusInternalServerError)
+	index, indexErr := fs.ReadFile(assets, "index.html")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'")
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "." {
+			name = ""
+		}
+		if strings.HasPrefix(name, "api/") || name == "api" || name == ".gitkeep" || strings.HasPrefix(name, ".") {
+			http.NotFound(w, r)
+			return
+		}
+		if name != "" && name != "index.html" {
+			if info, err := fs.Stat(assets, name); err == nil && !info.IsDir() {
+				if strings.HasPrefix(name, "assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				http.ServeFileFS(w, r, assets, name)
 				return
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Referrer-Policy", "same-origin")
-			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'")
-			_, _ = w.Write(buffer.Bytes())
-		})
-	}
-
-	for _, name := range []string{"app.css", "app.js", "api.mjs", "favicon.ico"} {
-		mux.HandleFunc("GET /static/"+name, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			http.ServeFileFS(w, r, files, "static/"+name)
-		})
-	}
-	
-	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("X-Content-Type-Options", "nosniff")
-        http.ServeFileFS(w, r, files, "static/favicon.ico")
-    })
-
-	return mux, nil
+		}
+		// Missing bundles and favicon requests must not receive HTML fallback.
+		if strings.HasPrefix(name, "assets/") || name == "assets" || strings.HasPrefix(name, "static/") || name == "favicon.ico" || (path.Ext(name) != "" && !strings.HasPrefix(name, "databases/")) {
+			http.NotFound(w, r)
+			return
+		}
+		if indexErr != nil {
+			http.Error(w, "The frontend is unavailable. Please contact the platform administrator.", http.StatusServiceUnavailable)
+			return
+		}
+		// React Router resolves application routes, including direct deep links.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.Method == http.MethodHead {
+			return
+		}
+		_, _ = w.Write(index)
+	}), nil
 }

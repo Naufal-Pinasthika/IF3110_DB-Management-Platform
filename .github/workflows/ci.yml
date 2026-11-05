@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
+      - name: Install frontend dependencies for the embedded SPA build
+        run: npm --prefix frontend ci
       - name: Static checks, unit tests, HTTP/frontend checks, and server build
         run: make check test build
         env:

@@ -5,4 +5,7 @@
 tests
 docs
 node_modules
+**/node_modules
+frontend/dist
+web/dist
 *.md
