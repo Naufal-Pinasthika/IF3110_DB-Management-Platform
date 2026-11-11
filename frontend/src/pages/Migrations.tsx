@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { api, databaseAPI, databaseURL, encode, formatDate } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { ExplainResult, Migration, MigrationSummary, SchemaDiff } from '../types'
-import { useDatabase } from '../components/layout'
-import { ActionButton, Badge, EmptyRow, ErrorState, Loading, PageHeading, useFormAction, useUnsavedChanges } from '../components/ui'
+import { useDatabase } from '../database-hooks'
+import { ActionButton, Badge, EmptyRow, ErrorState, Loading, PageHeading } from '../components/ui'
+import { useFormAction, useUnsavedChanges } from '../form-hooks'
 import Plans from '../components/Plans'
 
 export function Migrations() {
@@ -69,15 +70,12 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const editable = canEdit && draft
   const endpoint = `${databaseAPI(database.id)}/migrations${migration ? `/${encode(migration.id)}` : ''}`
   const policy = database.engine === 'mysql' ? 'MySQL: one schema statement per migration (DDL auto-commits), or transactional INSERT/UPDATE/DELETE on InnoDB tables.' : 'All statements execute together in a transaction.'
-  const loadedSQL = useRef(migration?.sql_text)
-  useEffect(() => {
-    if (loadedSQL.current === migration?.sql_text) return
-    if (!dirty && migration) {
-      loadedSQL.current = migration.sql_text
-      setSQL(migration.sql_text)
-      setSavedSQL(migration.sql_text)
-    }
-  }, [migration, dirty])
+  const [loadedSQL, setLoadedSQL] = useState(migration?.sql_text)
+  if (loadedSQL !== migration?.sql_text && !dirty && migration) {
+    setLoadedSQL(migration.sql_text)
+    setSQL(migration.sql_text)
+    setSavedSQL(migration.sql_text)
+  }
   const run = (kind: string, work: () => Promise<unknown>) => {
     void action.run(async () => {
       setOperation(kind)

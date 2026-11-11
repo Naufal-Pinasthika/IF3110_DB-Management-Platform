@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test unit/frontend/*_test.mjs",
+    "test": "npm --prefix ../frontend test",
     "test:syntax": "node --input-type=module --check < ../web/static/app.js && node --check ../web/static/api.mjs",
     "browser:install": "playwright install chromium"
   },

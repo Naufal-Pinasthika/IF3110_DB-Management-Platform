@@ -1,17 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { QueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { Outlet } from 'react-router'
-import { api, APIError } from './api'
-import type { User } from './types'
-
-type Notice = { message: string; type: 'success' | 'error' | '' }
-type Confirmation = { title: string; description: string; label?: string }
-const UIContext = createContext<{
-  notify: (message: string, type?: Notice['type']) => void
-  confirm: (options: Confirmation) => Promise<boolean>
-} | null>(null)
+import { UIContext } from './ui-context'
+import type { Confirmation, Notice } from './ui-context'
+import { resetSession } from './session'
 
 export function UIProvider({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -57,39 +50,6 @@ export function UIProvider({ children }: { children: ReactNode }) {
       </div>
     </dialog>
   </UIContext.Provider>
-}
-
-export function useUI() {
-  const context = useContext(UIContext)
-  if (!context) throw new Error('UIProvider is missing')
-  return context
-}
-
-export function useSession() {
-  const client = useQueryClient()
-  return useQuery({
-    queryKey: ['session'],
-    queryFn: async ({ signal }): Promise<User | null> => {
-      try { return await api<User>('/api/v1/auth/me', { signal }) }
-      catch (error) {
-        if (error instanceof APIError && error.status === 401) {
-          window.dispatchEvent(new Event('discard-changes'))
-          client.removeQueries({ predicate: query => query.queryKey[0] !== 'session' })
-          return null
-        }
-        throw error
-      }
-    },
-    staleTime: 30_000,
-    refetchOnWindowFocus: true,
-  })
-}
-
-export async function resetSession(client: QueryClient, user: User | null) {
-  await client.cancelQueries()
-  // Keep the session Query instance so mounted route guards see the change.
-  client.setQueryData<User | null>(['session'], user)
-  client.removeQueries({ predicate: query => query.queryKey[0] !== 'session' })
 }
 
 export function SessionBoundary() {

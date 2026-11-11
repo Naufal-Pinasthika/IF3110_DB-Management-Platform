@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,12 @@ func TestRouterRequiresSessionAndSameOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	index := httptest.NewRecorder()
+	router.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/login", nil))
+	stylesheet := regexp.MustCompile(`href="(/assets/[^" ]+\.css)"`).FindStringSubmatch(index.Body.String())
+	if len(stylesheet) != 2 {
+		t.Fatal("SPA stylesheet not found; run npm --prefix frontend run build")
+	}
 	for _, tc := range []struct {
 		method, path string
 		want         int
@@ -26,7 +33,8 @@ func TestRouterRequiresSessionAndSameOrigin(t *testing.T) {
 		{"GET", "/health", 200},
 		{"GET", "/login", 200},
 		{"GET", "/databases", 200},
-		{"GET", "/static/app.css", 200},
+		{"GET", stylesheet[1], 200},
+		{"GET", "/static/app.css", 404},
 		{"GET", "/api/v1/auth/me", 401},
 		{"POST", "/api/v1/auth/logout", 401},
 		{"POST", "/api/v1/auth/login", 403},

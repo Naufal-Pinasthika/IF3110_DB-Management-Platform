@@ -9,7 +9,7 @@ check:
 	node --check tests/browser/auth_test.mjs
 	node --check tests/browser/fixtures_test.mjs
 
-# Fast default: no PostgreSQL, Chromium, or npm install required.
+# Local tests need frontend dependencies installed, but no PostgreSQL or Chromium.
 test: test-unit test-web
 
 test-unit:
@@ -17,8 +17,8 @@ test-unit:
 	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config -coverprofile=artifacts/unit-coverage.out ./unit/...
 	npm --prefix tests test
 
-test-web:
-	go -C tests test -race -count=1 ./integration/web ./integration/auth -run 'TestPagesRender|TestRouteBoundaries|TestTemplateEscapesPathValues|TestRouterRequiresSessionAndSameOrigin|TestSessionMiddlewarePreservesRepositoryErrors'
+test-web: frontend-build
+	go -C tests test -race -count=1 ./integration/web ./integration/auth -run 'TestPagesRender|TestRouteBoundaries|TestSPA|TestRouterRequiresSessionAndSameOrigin|TestSessionMiddlewarePreservesRepositoryErrors'
 
 test-db-up:
 	docker compose -f tests/compose.yml up -d --wait postgres

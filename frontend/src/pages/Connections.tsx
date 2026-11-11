@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, encode } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { Connection, ConnectionTest } from '../types'
 import ConnectionDialog from '../components/ConnectionDialog'
 import { ActionButton, Badge, EmptyRow, ErrorState, PageHeading } from '../components/ui'

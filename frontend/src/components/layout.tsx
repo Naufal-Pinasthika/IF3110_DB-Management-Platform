@@ -1,21 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, NavLink, Navigate, Outlet, useLocation, useMatch, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router'
-import { accessDescription, accessLabel, api, databaseAPI, databaseURL, encode } from '../api'
-import { resetSession, useSession, useUI } from '../providers'
-import type { Database, NamedObject } from '../types'
+import { useQueryClient } from '@tanstack/react-query'
+import { Link, NavLink, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router'
+import { accessDescription, accessLabel, api, databaseURL, encode } from '../api'
+import { resetSession, useSession } from '../session'
+import { useUI } from '../ui-context'
+import { useDatabaseQuery, useSchemas, useTables } from '../database-hooks'
 import { ActionButton, ErrorState, Icon, Loading } from './ui'
-
-export function useDatabaseQuery(id: string) {
-  return useQuery({ queryKey: ['database', id], queryFn: ({ signal }) => api<Database>(databaseAPI(id), { signal }), enabled: Boolean(id) })
-}
-export function useDatabase() { return useOutletContext<Database>() }
-export function useSchemas(id: string) {
-  return useQuery({ queryKey: ['schemas', id], queryFn: ({ signal }) => api<NamedObject[]>(`${databaseAPI(id)}/schemas`, { signal }) })
-}
-export function useTables(id: string, schema: string, enabled = true) {
-  return useQuery({ queryKey: ['tables', id, schema], queryFn: ({ signal }) => api<NamedObject[]>(`${databaseAPI(id)}/schemas/${encode(schema)}/tables`, { signal }), enabled: Boolean(schema) && enabled })
-}
 
 function SchemaBranch({ databaseId, name, selected, filter }: { databaseId: string; name: string; selected: boolean; filter: string }) {
   const [open, setOpen] = useState(selected)
@@ -94,11 +84,14 @@ export function Shell() {
   const menuButton = useRef<HTMLButtonElement>(null)
   const main = useRef<HTMLElement>(null)
   const base = databaseURL(dbId)
+  const route = location.pathname + location.search
+  const [previousRoute, setPreviousRoute] = useState(route)
+  if (previousRoute !== route) {
+    setPreviousRoute(route)
+    setMobileOpen(false)
+  }
   useEffect(() => {
     main.current?.focus()
-    // Route changes also close the drawer after a guarded navigation succeeds.
-    document.body.classList.remove('navigation-open')
-    setMobileOpen(false)
   }, [location.pathname, location.search])
   useEffect(() => {
     document.body.classList.toggle('navigation-open', mobileOpen)

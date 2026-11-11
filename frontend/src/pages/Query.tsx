@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router'
 import { api, databaseAPI, errorMessage, qualifiedName } from '../api'
-import { useDatabase } from '../components/layout'
-import { DataTable, ErrorState, PageHeading, useFormAction } from '../components/ui'
+import { useDatabase } from '../database-hooks'
+import { DataTable, ErrorState, PageHeading } from '../components/ui'
+import { useFormAction } from '../form-hooks'
 import Plans from '../components/Plans'
 import type { ExplainResult, QueryResult } from '../types'
 

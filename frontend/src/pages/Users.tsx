@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, encode } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { AdminUser } from '../types'
-import { ActionButton, Badge, EmptyRow, ErrorState, Modal, PageHeading, useFormAction } from '../components/ui'
+import { ActionButton, Badge, EmptyRow, ErrorState, Modal, PageHeading } from '../components/ui'
+import { useFormAction } from '../form-hooks'
 
 export default function Users() {
   const users = useQuery({ queryKey: ['admin-users'], queryFn: ({ signal }) => api<AdminUser[]>('/api/v1/admin/users', { signal }) })
@@ -24,11 +25,11 @@ export default function Users() {
 function UserDialog({ user, onClose }: { user?: AdminUser; onClose: () => void }) {
   const initial = { username: user?.username || '', password: '', is_active: user?.is_active ?? true, is_platform_admin: false }
   const [values, setValues] = useState(initial)
-  const saved = useRef(JSON.stringify(initial))
+  const [saved] = useState(() => JSON.stringify(initial))
   const action = useFormAction()
   const client = useQueryClient()
   const { confirm, notify } = useUI()
-  return <Modal title={user ? 'Edit user' : 'New user'} onClose={onClose} dirty={saved.current !== JSON.stringify(values)} busy={action.busy}>
+  return <Modal title={user ? 'Edit user' : 'New user'} onClose={onClose} dirty={saved !== JSON.stringify(values)} busy={action.busy}>
     {close => <form id="user-form" aria-busy={action.busy} onSubmit={event => {
       event.preventDefault()
       void action.run(async () => {

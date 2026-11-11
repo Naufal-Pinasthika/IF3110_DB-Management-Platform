@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router'
 import { accessLabel, api, encode } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { AccessLevel, AccessSnapshot, AdminUser, Connection, Grant, Group } from '../types'
-import { ActionButton, Badge, EmptyRow, ErrorState, Loading, Modal, PageHeading, Tabs, useFormAction } from '../components/ui'
+import { ActionButton, Badge, EmptyRow, ErrorState, Loading, Modal, PageHeading, Tabs } from '../components/ui'
+import { useFormAction } from '../form-hooks'
 
 interface GroupData extends AccessSnapshot { groups: Group[]; users: AdminUser[]; databases: Connection[] }
 type Editor = { kind: 'group'; group?: Group } | { kind: 'member'; group: Group } | { kind: 'grant'; group: Group; grant?: Grant }
@@ -99,12 +100,12 @@ function GroupEditor({ editor, data, onClose, onSaved }: { editor: Editor; data?
   const grant = editor.kind === 'grant' ? editor.grant : undefined
   const initial = { name: editor.kind === 'group' ? editor.group?.name || '' : '', user_id: '', database_id: grant?.database_id || '', access_level: grant?.access_level || 'VIEW_ONLY' as AccessLevel }
   const [values, setValues] = useState(initial)
-  const saved = useRef(JSON.stringify(initial))
+  const [saved] = useState(() => JSON.stringify(initial))
   const action = useFormAction()
   const availableUsers = (data?.users || []).filter(user => user.is_active && !data?.members.some(member => member.group_id === editor.group?.id && member.user_id === user.id))
   const availableDatabases = (data?.databases || []).filter(database => grant ? database.id === grant.database_id : database.is_enabled && !data?.grants.some(item => item.group_id === editor.group?.id && item.database_id === database.id))
   const title = editor.kind === 'group' ? editor.group ? 'Rename group' : 'New group' : editor.kind === 'member' ? 'Add member' : grant ? 'Edit database access' : 'Add database access'
-  return <Modal title={title} onClose={onClose} busy={action.busy} dirty={saved.current !== JSON.stringify(values)}>
+  return <Modal title={title} onClose={onClose} busy={action.busy} dirty={saved !== JSON.stringify(values)}>
     {close => <form aria-busy={action.busy} onSubmit={event => {
       event.preventDefault()
       void action.run(async () => {

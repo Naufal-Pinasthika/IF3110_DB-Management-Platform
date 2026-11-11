@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, encode } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { ConnectionDetail, ConnectionTest } from '../types'
-import { ErrorState, Loading, Modal, useFormAction } from './ui'
+import { ErrorState, Loading, Modal } from './ui'
+import { useFormAction } from '../form-hooks'
 
 export default function ConnectionDialog({ id, onClose }: { id?: string; onClose: () => void }) {
   const connection = useQuery({ queryKey: ['admin-connection', id], queryFn: ({ signal }) => api<ConnectionDetail>(`/api/v1/admin/databases/${encode(id!)}`, { signal }), enabled: Boolean(id), staleTime: 0 })
@@ -22,7 +23,7 @@ function ConnectionForm({ connection, onClose }: { connection?: ConnectionDetail
     edit_reader: !connection, edit_migrator: !connection,
   }
   const [values, setValues] = useState(initial)
-  const saved = useRef(JSON.stringify(initial))
+  const [saved] = useState(() => JSON.stringify(initial))
   const [test, setTest] = useState<ConnectionTest | null>(null)
   const [showReader, setShowReader] = useState(false)
   const [showMigrator, setShowMigrator] = useState(false)
@@ -58,7 +59,7 @@ function ConnectionForm({ connection, onClose }: { connection?: ConnectionDetail
       </> : <div className="secret-state"><span>Stored password unchanged</span><button className="button small" type="button" onClick={() => update(`edit_${role}`, true)}>Change password</button></div>}
     </div>
   }
-  return <Modal title={connection ? 'Edit connection' : 'Add connection'} className="connection-dialog" onClose={onClose} busy={action.busy} dirty={JSON.stringify(values) !== saved.current}>
+  return <Modal title={connection ? 'Edit connection' : 'Add connection'} className="connection-dialog" onClose={onClose} busy={action.busy} dirty={JSON.stringify(values) !== saved}>
     {close => <form ref={form} id="connection-form" aria-busy={action.busy} onSubmit={event => {
       event.preventDefault()
       const data = payload()

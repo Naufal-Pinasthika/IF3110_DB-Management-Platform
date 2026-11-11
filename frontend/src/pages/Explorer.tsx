@@ -2,9 +2,9 @@ import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams, useParams } from 'react-router'
 import { useState } from 'react'
 import { api, databaseAPI, databaseURL, encode, qualifiedName } from '../api'
-import { useUI } from '../providers'
+import { useUI } from '../ui-context'
 import type { TableDetail, TableRows } from '../types'
-import { useDatabase, useSchemas, useTables } from '../components/layout'
+import { useDatabase, useSchemas, useTables } from '../database-hooks'
 import { ActionButton, DataTable, EmptyRow, ErrorState, Loading, PageHeading, Tabs } from '../components/ui'
 
 export function Explorer() {
