@@ -26,6 +26,7 @@ test-db-up:
 # Apply idempotent platform schema upgrades to an already initialized local database.
 migrate-platform:
 	docker compose exec -T postgres psql -U admin -d platform_db < db/platform/000005_add_database_engine.sql
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000006_add_group_leader.sql
 
 test-integration:
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }

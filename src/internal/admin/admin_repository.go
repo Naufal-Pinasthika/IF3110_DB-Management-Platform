@@ -56,6 +56,23 @@ func (r *PostgresRepository) CreateUser(ctx context.Context, user models.User) (
 // updates an account and revokes sessions when required.
 func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, revokeSessions bool, now time.Time) (models.User, error) {
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Leader assignment takes the same user lock, so disabling cannot race it.
+		var current models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", user.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperror.ErrNotFound
+			}
+			return err
+		}
+		if !user.IsActive {
+			var ledGroups int64
+			if err := tx.Model(&models.Group{}).Where("leader_id = ?", user.ID).Count(&ledGroups).Error; err != nil {
+				return err
+			}
+			if ledGroups > 0 {
+				return fmt.Errorf("%w: assign another group leader before disabling this user", apperror.ErrConflict)
+			}
+		}
 		// Update user using map to allow false values
 		updates := map[string]interface{}{
 			"username":          user.Username,
@@ -94,10 +111,20 @@ func (r *PostgresRepository) ListGroups(ctx context.Context) ([]models.Group, er
 	return groups, err
 }
 
-// creates a uniquely named group.
-func (r *PostgresRepository) CreateGroup(ctx context.Context, name string) (models.Group, error) {
-	group := models.Group{Name: name}
-	err := r.DB.WithContext(ctx).Create(&group).Error
+// creates a group and its leader membership atomically.
+func (r *PostgresRepository) CreateGroup(ctx context.Context, name, leaderID string) (models.Group, error) {
+	var group models.Group
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		leader, err := activeGroupLeader(tx, leaderID)
+		if err != nil {
+			return err
+		}
+		group = models.Group{Name: name, LeaderID: &leader.ID}
+		if err := tx.Create(&group).Error; err != nil {
+			return err
+		}
+		return tx.Create(&models.UserGroup{GroupID: group.ID, UserID: leader.ID}).Error
+	})
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
 			return models.Group{}, fmt.Errorf("%w: a group with name '%s' already exists", apperror.ErrConflict, name)
@@ -107,18 +134,59 @@ func (r *PostgresRepository) CreateGroup(ctx context.Context, name string) (mode
 	return group, err
 }
 
-// renames a group.
-func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID, name string) (models.Group, error) {
-	err := r.DB.WithContext(ctx).
-		Model(&models.Group{}).
-		Where("id = ?", groupID).
-		Update("name", name).Error
-	if err != nil {
-		return models.Group{}, err
-	}
+// updates a group's supplied fields; a replacement leader must already be a member.
+func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID string, name, leaderID *string) (models.Group, error) {
 	var group models.Group
-	err = r.DB.WithContext(ctx).Where("id = ?", groupID).First(&group).Error
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{}
+		if leaderID != nil {
+			// Always lock the user before the group, matching create/disable operations.
+			leader, err := activeGroupLeader(tx, *leaderID)
+			if err != nil {
+				return err
+			}
+			updates["leader_id"] = leader.ID
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, "id = ?", groupID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperror.ErrNotFound
+			}
+			return err
+		}
+		if leaderID != nil {
+			var membership int64
+			if err := tx.Model(&models.UserGroup{}).Where("group_id = ? AND user_id = ?", groupID, updates["leader_id"]).Count(&membership).Error; err != nil {
+				return err
+			}
+			if membership == 0 {
+				return fmt.Errorf("%w: leader must be a member of this group", apperror.ErrInvalidInput)
+			}
+		}
+		if name != nil {
+			updates["name"] = *name
+		}
+		if err := tx.Model(&group).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.First(&group, "id = ?", groupID).Error
+	})
 	return group, err
+}
+
+// locks the candidate user so leader assignment and account disabling serialize.
+func activeGroupLeader(tx *gorm.DB, userID string) (models.User, error) {
+	var user models.User
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return user, fmt.Errorf("%w: leader must be an existing active user", apperror.ErrInvalidInput)
+	}
+	if err != nil {
+		return user, err
+	}
+	if !user.IsActive {
+		return user, fmt.Errorf("%w: leader must be an active user", apperror.ErrInvalidInput)
+	}
+	return user, nil
 }
 
 func (r *PostgresRepository) DeleteGroup(ctx context.Context, groupID string, now time.Time) error {
@@ -171,6 +239,22 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 // removes membership
 func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, userID string, now time.Time) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Serialize with leader replacement before removing the membership.
+		var group models.Group
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, "id = ?", groupID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperror.ErrNotFound
+			}
+			return err
+		}
+		// Compare UUID values in PostgreSQL, including alternate URL spellings.
+		var ledGroups int64
+		if err := tx.Model(&models.Group{}).Where("id = ? AND leader_id = ?", group.ID, userID).Count(&ledGroups).Error; err != nil {
+			return err
+		}
+		if ledGroups > 0 {
+			return fmt.Errorf("%w: assign another leader before removing this member", apperror.ErrConflict)
+		}
 		if err := tx.Where("user_id = ? AND group_id = ?", userID, groupID).
 			Delete(&models.UserGroup{}).Error; err != nil {
 			return err

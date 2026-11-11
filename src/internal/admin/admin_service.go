@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -20,8 +21,8 @@ type Repository interface {
 	CreateUser(ctx context.Context, user models.User) (models.User, error)
 	UpdateUser(ctx context.Context, user models.User, revokeSessions bool, now time.Time) (models.User, error)
 	ListGroups(ctx context.Context) ([]models.Group, error)
-	CreateGroup(ctx context.Context, name string) (models.Group, error)
-	UpdateGroup(ctx context.Context, groupID, name string) (models.Group, error)
+	CreateGroup(ctx context.Context, name, leaderID string) (models.Group, error)
+	UpdateGroup(ctx context.Context, groupID string, name, leaderID *string) (models.Group, error)
 	DeleteGroup(ctx context.Context, groupID string, now time.Time) error
 	AddGroupMember(ctx context.Context, groupID, userID string, now time.Time) (models.UserGroup, error)
 	RemoveGroupMember(ctx context.Context, groupID, userID string, now time.Time) error
@@ -186,12 +187,12 @@ func (s *Service) ListGroups(ctx context.Context, actor auth.Principal) ([]api.G
 	}
 	result := make([]api.Group, len(groups))
 	for i, g := range groups {
-		result[i] = api.Group{ID: g.ID, Name: g.Name}
+		result[i] = groupResponse(g)
 	}
 	return result, nil
 }
 
-// CreateGroup creates a named group.
+// CreateGroup creates a named group with an active leader.
 func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input api.CreateGroupRequest) (api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.Group{}, err
@@ -199,15 +200,18 @@ func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input a
 	if input.Name == "" || len(input.Name) > 100 {
 		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
 	}
+	if !validLeaderID(input.LeaderID) {
+		return api.Group{}, fmt.Errorf("%w: leader_id must be a valid user UUID", apperror.ErrInvalidInput)
+	}
 
-	group, err := s.Repository.CreateGroup(ctx, input.Name)
+	group, err := s.Repository.CreateGroup(ctx, input.Name, input.LeaderID)
 	if err != nil {
 		return api.Group{}, err
 	}
-	return api.Group{ID: group.ID, Name: group.Name}, nil
+	return groupResponse(group), nil
 }
 
-// UpdateGroup updates a group name.
+// UpdateGroup changes only the supplied group name or leader.
 func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID string, input api.UpdateGroupRequest) (api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.Group{}, err
@@ -215,15 +219,37 @@ func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID
 	if groupID == "" {
 		return api.Group{}, fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
 	}
-	if input.Name == nil || *input.Name == "" || len(*input.Name) > 100 {
+	if input.Name == nil && input.LeaderID == nil {
+		return api.Group{}, fmt.Errorf("%w: no fields to update", apperror.ErrInvalidInput)
+	}
+	if input.Name != nil && (*input.Name == "" || len(*input.Name) > 100) {
 		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
 	}
+	if input.LeaderID != nil && !validLeaderID(*input.LeaderID) {
+		return api.Group{}, fmt.Errorf("%w: leader_id must be a valid user UUID", apperror.ErrInvalidInput)
+	}
 
-	group, err := s.Repository.UpdateGroup(ctx, groupID, *input.Name)
+	group, err := s.Repository.UpdateGroup(ctx, groupID, input.Name, input.LeaderID)
 	if err != nil {
 		return api.Group{}, err
 	}
-	return api.Group{ID: group.ID, Name: group.Name}, nil
+	return groupResponse(group), nil
+}
+
+func validLeaderID(id string) bool {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return false
+	}
+	decoded, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
+	return err == nil && len(decoded) == 16
+}
+
+func groupResponse(group models.Group) api.Group {
+	result := api.Group{ID: group.ID, Name: group.Name}
+	if group.LeaderID != nil {
+		result.LeaderID = *group.LeaderID
+	}
+	return result
 }
 
 // DeleteGroup removes a group with its memberships and grants.

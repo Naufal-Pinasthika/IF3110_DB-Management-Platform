@@ -86,20 +86,23 @@ type AdminUser struct {
 // ------------------------------------------------------------
 // POST /api/v1/admin/groups
 type CreateGroupRequest struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	LeaderID string `json:"leader_id"` // (Milestone 2 stuff) assigns the group leader responsible for migration approval
 }
 
 // PATCH /api/v1/admin/groups/{groupId}
 type UpdateGroupRequest struct {
-	Name *string `json:"name,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	LeaderID *string `json:"leader_id,omitempty"` // (Milestone 2 stuff) update group leader
 }
 
 // POST /api/v1/admin/groups response body (Group)
 // PATCH /api/v1/admin/groups/{groupId} response body (Group)
 // GET /api/v1/admin/groups response body ([]Group)
 type Group struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	LeaderID string `json:"leader_id"` // (Milestone 2 stuff) identifies the groups migration leader
 }
 
 // PUT /api/v1/admin/groups/{groupId}/members/{userId} response body

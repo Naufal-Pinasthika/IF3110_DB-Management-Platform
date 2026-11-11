@@ -35,8 +35,9 @@ type User struct {
 func (User) TableName() string { return "users" }
 
 type Group struct {
-	ID   string `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	Name string `gorm:"type:varchar(100);not null;uniqueIndex:groups_name_key"`
+	ID       string  `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	Name     string  `gorm:"type:varchar(100);not null;uniqueIndex:groups_name_key"`
+	LeaderID *string `gorm:"type:uuid;index:groups_leader_id_idx"` // Milestone 2: nullable only while an existing group awaits leader assignment.
 }
 
 func (Group) TableName() string { return "groups" }
