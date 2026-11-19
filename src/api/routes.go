@@ -42,6 +42,9 @@ type RouteHandlers struct {
 	ExecuteMigration          http.Handler
 	ExplainMigration          http.Handler
 	CompareSchema             http.Handler
+	ListJobs                  http.Handler
+	GetJob                    http.Handler
+	ReconcileJob              http.Handler
 }
 
 type RouteMiddleware struct {
@@ -133,6 +136,11 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	// Read only query endpoint
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/queries", handlers.RunQuery, session, databaseView, csrf)
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/queries/explain", handlers.ExplainQuery, session, databaseView, csrf)
+
+	// Asynchronous jobs
+	registerRoute(mux, "GET", "/api/v1/databases/{dbId}/jobs", handlers.ListJobs, session, databaseView)
+	registerRoute(mux, "GET", "/api/v1/databases/{dbId}/jobs/{jobId}", handlers.GetJob, session, databaseView)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/jobs/{jobId}/reconcile", handlers.ReconcileJob, session, databaseEdit, csrf)
 
 	// Migrations
 	registerRoute(mux, "GET", "/api/v1/databases/{dbId}/migrations", handlers.ListMigrations, session, databaseView)

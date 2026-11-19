@@ -19,6 +19,7 @@ type Config struct {
 	Session                   SessionConfig
 	QueryTimeout              time.Duration
 	QueryMaxRows              int
+	Jobs                      JobsConfig
 }
 
 type SessionConfig struct {
@@ -41,6 +42,10 @@ func Load() (Config, error) {
 		QueryMaxRows:        100,
 	}
 	var err error
+	cfg.Jobs, err = loadJobsConfig()
+	if err != nil {
+		return Config{}, err
+	}
 	cfg.Session.CookieSecure, err = strconv.ParseBool(envOrDefault("SESSION_COOKIE_SECURE", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("SESSION_COOKIE_SECURE must be a boolean")
@@ -91,6 +96,11 @@ func (c Config) Validate() error {
 	}
 	if len(c.DBCredentialEncryptionKey) != 32 {
 		return fmt.Errorf("DB_CREDENTIAL_ENCRYPTION_KEY must be 32 bytes")
+	}
+	if c.Jobs != (JobsConfig{}) {
+		if err := c.Jobs.Validate(); err != nil {
+			return err
+		}
 	}
 	s := c.Session
 	if s.CookieName == "" || s.IdleTimeout <= 0 || s.GracePeriod <= 0 || s.RotationInterval <= s.GracePeriod || s.AbsoluteTimeout <= s.RotationInterval {

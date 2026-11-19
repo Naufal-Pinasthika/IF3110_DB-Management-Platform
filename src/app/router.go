@@ -13,8 +13,10 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/explorer"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/health"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/jobs"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/migration"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/web"
 )
 
@@ -24,6 +26,10 @@ type dbProvider interface {
 
 // NewRouter composes the production API, middleware, and embedded frontend.
 func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
+	return NewRouterWithJobs(repo, cfg, JobsIntegration{})
+}
+
+func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration JobsIntegration) (http.Handler, error) {
 	service, err := auth.NewService(repo, cfg.Session)
 	if err != nil {
 		return nil, err
@@ -104,20 +110,18 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 		}
 		explorerHandler := &explorer.Handler{Service: explorerService}
 
-		migrationRepo := &migration.PostgresRepository{DB: db}
-		migrationRunner := &migration.Runner{
-			Targets: targetStore,
-			Timeout: queryTimeout,
+		migrationService := newMigrationService(db, cfg, targetStore, accessService, explorerRepo)
+		registry := integration.Registry
+		if registry == nil {
+			registry, _ = any(migrationService).(jobs.ExecutionRegistry)
 		}
-		schemaDiffer := &migration.SchemaDiffer{Targets: targetStore, Timeout: queryTimeout}
-		migrationService := &migration.Service{
-			Repository: migrationRepo,
-			Access:     accessService,
-			Runner:     migrationRunner,
-			Explainer:  explorerRepo,
-			SchemaDiff: schemaDiffer,
-		}
+		jobService := NewJobService(db, cfg, registry)
+		migrationService.Dispatcher = jobService
+		jobHandler := &jobs.Handler{Service: jobService}
 		migrationHandler := &migration.Handler{Service: migrationService}
+		routeHandlers.ListJobs = http.HandlerFunc(jobHandler.List)
+		routeHandlers.GetJob = http.HandlerFunc(jobHandler.Get)
+		routeHandlers.ReconcileJob = http.HandlerFunc(jobHandler.Reconcile)
 
 		// Admin users
 		routeHandlers.ListUsers = http.HandlerFunc(adminHandler.ListUsers)
@@ -181,5 +185,5 @@ func NewRouter(repo auth.Repository, cfg config.Config) (http.Handler, error) {
 	mux.Handle("/api/", apiRouter)
 	mux.Handle("/health", apiRouter)
 	mux.Handle("/", pages)
-	return mux, nil
+	return telemetry.HTTP(mux), nil
 }
