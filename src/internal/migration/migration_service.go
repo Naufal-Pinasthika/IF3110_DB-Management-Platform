@@ -2,10 +2,10 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
-	"errors"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
@@ -45,6 +45,7 @@ type Service struct {
 	Runner     SQLRunner
 	Explainer  SQLExplainer
 	SchemaDiff SchemaComparator
+	Dispatcher Dispatcher
 }
 
 // requirePostgresTarget keeps PostgreSQL-specific explain and schema-diff

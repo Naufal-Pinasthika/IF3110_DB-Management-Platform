@@ -21,6 +21,7 @@ COPY web ./web
 COPY --from=frontend-build /app/web/dist ./web/dist
 
 RUN CGO_ENABLED=1 go build -o /server ./src/cmd/server
+RUN CGO_ENABLED=1 go build -o /worker ./src/cmd/worker
 
 # run
 FROM alpine:3.20
@@ -28,6 +29,7 @@ FROM alpine:3.20
 WORKDIR /app
 
 COPY --from=build /server ./server
+COPY --from=build /worker ./worker
 
 ENV APP_ADDR=:8080
 EXPOSE 8080
