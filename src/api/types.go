@@ -31,10 +31,14 @@ const (
 type MigrationStatus = models.MigrationStatus
 
 const (
-	MigrationDraft   = models.MigrationDraft
-	MigrationRunning = models.MigrationRunning
-	MigrationApplied = models.MigrationApplied
-	MigrationFailed  = models.MigrationFailed
+	MigrationDraft         = models.MigrationDraft
+	MigrationPendingReview = models.MigrationPendingReview
+	MigrationApproved      = models.MigrationApproved
+	MigrationQueued        = models.MigrationQueued
+	MigrationRunning       = models.MigrationRunning
+	MigrationApplied       = models.MigrationApplied
+	MigrationFailed        = models.MigrationFailed
+	MigrationRejected      = models.MigrationRejected
 )
 
 // ------------------------------------------------------------
@@ -381,8 +385,14 @@ type SchemaDiffResult struct {
 // ------------------------------------------------------------
 // POST /api/v1/databases/{dbId}/migrations request body
 type CreateMigrationRequest struct {
-	Name    string `json:"name"`
-	SQLText string `json:"sql_text"`
+	Name               string  `json:"name"`
+	SQLText            string  `json:"sql_text"`
+	SQLDown            *string `json:"sql_down,omitempty"`
+	IsIrreversible     bool    `json:"is_irreversible,omitempty"`
+	IrreversibleReason *string `json:"irreversible_reason,omitempty"`
+	MigrationType      string  `json:"migration_type,omitempty"`
+	BatchAttribute     *string `json:"batch_attribute,omitempty"`
+	BatchSize          *int    `json:"batch_size,omitempty"`
 }
 
 // POST /api/v1/databases/{dbId}/migrations response body
@@ -396,7 +406,12 @@ type MigrationCreated struct {
 
 // PATCH /api/v1/databases/{dbId}/migrations/{migrationId} request body
 type UpdateMigrationRequest struct {
-	SQLText string `json:"sql_text"`
+	SQLText            *string `json:"sql_text,omitempty"`
+	SQLDown            *string `json:"sql_down,omitempty"`
+	IsIrreversible     *bool   `json:"is_irreversible,omitempty"`
+	IrreversibleReason *string `json:"irreversible_reason,omitempty"`
+	BatchAttribute     *string `json:"batch_attribute,omitempty"`
+	BatchSize          *int    `json:"batch_size,omitempty"`
 }
 
 // PATCH /api/v1/databases/{dbId}/migrations/{migrationId} response body
@@ -408,37 +423,89 @@ type MigrationUpdated struct {
 
 // POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute response body
 type MigrationExecuted struct {
-	ID         string          `json:"id"`
-	Status     MigrationStatus `json:"status"`
-	Version    *int64          `json:"version"`
-	ExecutedBy *string         `json:"executed_by"`
-	ExecutedAt *time.Time      `json:"executed_at"`
+	ID          string          `json:"id"`
+	Status      MigrationStatus `json:"status"`
+	Version     *int64          `json:"version"`
+	ExecutedBy  *string         `json:"executed_by"`
+	ExecutedAt  *time.Time      `json:"executed_at"`
+	JobID       string          `json:"job_id,omitempty"`
+	ExecutionID string          `json:"execution_id,omitempty"`
+}
+
+type MigrationApprovalItem struct {
+	ID             string     `json:"id"`
+	GroupID        string     `json:"group_id"`
+	GroupName      string     `json:"group_name"`
+	LeaderID       string     `json:"leader_id"`
+	LeaderUsername string     `json:"leader_username"`
+	Status         string     `json:"status"`
+	Comment        *string    `json:"comment,omitempty"`
+	DecidedAt      *time.Time `json:"decided_at,omitempty"`
+}
+
+type DecideApprovalRequest struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
+type RollbackRequest struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // GET /api/v1/databases/{dbId}/migrations response body ([]MigrationSummary)
 type MigrationSummary struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Version    *int64          `json:"version"`
-	Status     MigrationStatus `json:"status"`
-	ExecutedBy *string         `json:"executed_by"`
-	ExecutedAt *time.Time      `json:"executed_at"`
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	Version            *int64          `json:"version"`
+	Status             MigrationStatus `json:"status"`
+	MigrationType      string          `json:"migration_type,omitempty"`
+	IsIrreversible     bool            `json:"is_irreversible,omitempty"`
+	ExecutedBy         *string         `json:"executed_by"`
+	ExecutedAt         *time.Time      `json:"executed_at"`
+	HasDown            bool            `json:"has_down,omitempty"`
 }
 
 // GET /api/v1/databases/{dbId}/migrations/{migrationId} response body
 type MigrationDetail struct {
-	ID           string          `json:"id"`
-	DatabaseID   string          `json:"database_id"`
-	Name         string          `json:"name"`
-	SQLText      string          `json:"sql_text"`
-	Status       MigrationStatus `json:"status"`
-	Version      *int64          `json:"version"`
-	CreatedBy    string          `json:"created_by"`
-	ExecutedBy   *string         `json:"executed_by"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	ExecutedAt   *time.Time      `json:"executed_at"`
-	ErrorSummary *string         `json:"error_summary"`
+	ID                 string                  `json:"id"`
+	DatabaseID         string                  `json:"database_id"`
+	Name               string                  `json:"name"`
+	SQLText            string                  `json:"sql_text"`
+	SQLDown            *string                 `json:"sql_down,omitempty"`
+	IsIrreversible     bool                    `json:"is_irreversible"`
+	IrreversibleReason *string                 `json:"irreversible_reason,omitempty"`
+	MigrationType      string                  `json:"migration_type"`
+	BatchAttribute     *string                 `json:"batch_attribute,omitempty"`
+	BatchSize          *int                    `json:"batch_size,omitempty"`
+	Status             MigrationStatus         `json:"status"`
+	Version            *int64                  `json:"version"`
+	CreatedBy          string                  `json:"created_by"`
+	ExecutedBy         *string                 `json:"executed_by"`
+	CreatedAt          time.Time               `json:"created_at"`
+	UpdatedAt          time.Time               `json:"updated_at"`
+	ExecutedAt         *time.Time              `json:"executed_at"`
+	ErrorSummary       *string                 `json:"error_summary"`
+	Approvals          []MigrationApprovalItem `json:"approvals,omitempty"`
+	CanRollback        bool                    `json:"can_rollback"`
+	CanForward         bool                    `json:"can_forward"`
+}
+
+type MigrationExecutionSummary struct {
+	ID                    string     `json:"id"`
+	MigrationID           string     `json:"migration_id"`
+	MigrationName         string     `json:"migration_name"`
+	DatabaseID            string     `json:"database_id"`
+	ActionType            string     `json:"action_type"`
+	RolledBackExecutionID *string    `json:"rolled_back_execution_id,omitempty"`
+	Status                string     `json:"status"`
+	ExecutedSQL           string     `json:"executed_sql"`
+	ExecutedBy            string     `json:"executed_by"`
+	ExecutedByUsername    string     `json:"executed_by_username,omitempty"`
+	StartedAt             time.Time  `json:"started_at"`
+	FinishedAt            *time.Time `json:"finished_at,omitempty"`
+	Version               *int64     `json:"version,omitempty"`
+	ErrorSummary          *string    `json:"error_summary,omitempty"`
+	CommittedBatches      int64      `json:"committed_batches"`
+	CommittedRows         int64      `json:"committed_rows"`
 }
 
 // AccessSnapshot contains only membership identifiers and group grants, never credentials.

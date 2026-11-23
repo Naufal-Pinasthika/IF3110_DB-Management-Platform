@@ -69,6 +69,7 @@ services:
       - ./db/platform/000005_add_database_engine.sql:/docker-entrypoint-initdb.d/04-database-engine.sql:ro
       - ./db/platform/000006_add_group_leader.sql:/docker-entrypoint-initdb.d/05-group-leader.sql:ro
       - ./db/platform/000007_add_migration_jobs.sql:/docker-entrypoint-initdb.d/06-migration-jobs.sql:ro
+      - ./db/platform/000008_migration_workflow_and_batches.sql:/docker-entrypoint-initdb.d/07-migration-workflow.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d platform_db"]
       interval: 2s

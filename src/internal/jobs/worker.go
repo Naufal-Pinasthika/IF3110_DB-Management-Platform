@@ -29,6 +29,8 @@ type Worker struct {
 	Options    Options
 	pool       *sql.DB
 	id         string
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func NewWorker(repository *PostgresRepository, executor Executor, options Options) (*Worker, error) {
@@ -58,6 +60,35 @@ func NewWorker(repository *PostgresRepository, executor Executor, options Option
 
 	return &Worker{Repository: repository, Executor: executor, Options: options,
 		pool: pool, id: host + "-" + hex.EncodeToString(nonce[:])}, nil
+}
+
+// Start initiates background worker execution using a cancellable child of ctx.
+func (w *Worker) Start(ctx context.Context) {
+	runCtx, cancel := context.WithCancel(ctx)
+	w.cancel = cancel
+	w.done = make(chan struct{})
+	go func() {
+		defer close(w.done)
+		if err := w.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			telemetry.Log(runCtx, slog.LevelError, "worker.run_failed", "worker_id", w.id, "error", err.Error())
+		}
+	}()
+}
+
+// Stop signals cancellation to the worker and waits for all running goroutines to exit.
+func (w *Worker) Stop(ctx context.Context) error {
+	if w.cancel != nil {
+		w.cancel()
+	}
+	if w.done != nil {
+		select {
+		case <-w.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // Run stops claims on cancellation and waits for executors before releasing locks

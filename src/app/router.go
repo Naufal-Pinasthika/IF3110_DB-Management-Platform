@@ -167,6 +167,12 @@ func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration Jobs
 		routeHandlers.CreateMigration = http.HandlerFunc(migrationHandler.CreateMigration)
 		routeHandlers.UpdateMigration = http.HandlerFunc(migrationHandler.UpdateMigration)
 		routeHandlers.ExecuteMigration = http.HandlerFunc(migrationHandler.ExecuteMigration)
+		routeHandlers.SubmitMigrationReview = http.HandlerFunc(migrationHandler.SubmitReview)
+		routeHandlers.ApproveMigration = http.HandlerFunc(migrationHandler.Approve)
+		routeHandlers.RejectMigration = http.HandlerFunc(migrationHandler.Reject)
+		routeHandlers.RollbackMigration = http.HandlerFunc(migrationHandler.Rollback)
+		routeHandlers.ForwardMigration = http.HandlerFunc(migrationHandler.Forward)
+		routeHandlers.ListMigrationHistory = http.HandlerFunc(migrationHandler.ListHistory)
 		routeHandlers.ExplainMigration = http.HandlerFunc(migrationHandler.ExplainMigration)
 		routeHandlers.CompareSchema = http.HandlerFunc(migrationHandler.CompareSchema)
 

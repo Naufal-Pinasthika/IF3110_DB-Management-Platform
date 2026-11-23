@@ -16,10 +16,14 @@ const (
 type MigrationStatus string
 
 const (
-	MigrationDraft   MigrationStatus = "DRAFT"
-	MigrationRunning MigrationStatus = "RUNNING"
-	MigrationApplied MigrationStatus = "APPLIED"
-	MigrationFailed  MigrationStatus = "FAILED"
+	MigrationDraft         MigrationStatus = "DRAFT"
+	MigrationPendingReview MigrationStatus = "PENDING_REVIEW"
+	MigrationApproved      MigrationStatus = "APPROVED"
+	MigrationQueued        MigrationStatus = "QUEUED"
+	MigrationRunning       MigrationStatus = "RUNNING"
+	MigrationApplied       MigrationStatus = "APPLIED"
+	MigrationFailed        MigrationStatus = "FAILED"
+	MigrationRejected      MigrationStatus = "REJECTED"
 )
 
 // User stores a platform account rather than an API response.
@@ -117,21 +121,76 @@ func (Session) TableName() string { return "sessions" }
 // Migration stores a draft or immutable execution history for one target.
 // A nil Version preserves SQL NULL until a migration has been applied.
 type Migration struct {
-	ID           string          `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	DatabaseID   string          `gorm:"type:uuid;not null;uniqueIndex:migrations_version_unique,priority:1;index:migrations_database_status_idx,priority:1"`
-	Name         string          `gorm:"type:varchar(200);not null"`
-	SQLText      string          `gorm:"type:text;not null"`
-	Status       MigrationStatus `gorm:"type:migration_status;not null;default:'DRAFT';index:migrations_database_status_idx,priority:2"`
-	Version      *int64          `gorm:"type:bigint;uniqueIndex:migrations_version_unique,priority:2"`
-	CreatedBy    string          `gorm:"type:uuid;not null"`
-	ExecutedBy   *string         `gorm:"type:uuid"`
-	CreatedAt    time.Time       `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt    time.Time       `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
-	ExecutedAt   *time.Time      `gorm:"type:timestamptz"`
-	ErrorSummary *string         `gorm:"type:text"`
-	Database     ManagedDatabase `gorm:"foreignKey:DatabaseID;references:ID;constraint:migrations_database_id_fkey,OnDelete:RESTRICT" json:"-"`
-	Creator      User            `gorm:"foreignKey:CreatedBy;references:ID;constraint:migrations_created_by_fkey,OnDelete:RESTRICT" json:"-"`
-	Executor     *User           `gorm:"foreignKey:ExecutedBy;references:ID;constraint:migrations_executed_by_fkey,OnDelete:RESTRICT" json:"-"`
+	ID                 string          `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	DatabaseID         string          `gorm:"type:uuid;not null;uniqueIndex:migrations_version_unique,priority:1;index:migrations_database_status_idx,priority:1"`
+	Name               string          `gorm:"type:varchar(200);not null"`
+	SQLText            string          `gorm:"type:text;not null"`
+	SQLDown            *string         `gorm:"type:text"`
+	IsIrreversible     bool            `gorm:"not null;default:false"`
+	IrreversibleReason *string         `gorm:"type:text"`
+	MigrationType      string          `gorm:"type:varchar(20);not null;default:'REGULAR'"`
+	BatchAttribute     *string         `gorm:"type:varchar(100)"`
+	BatchSize          *int            `gorm:"type:integer;default:1000"`
+	Status             MigrationStatus `gorm:"type:migration_status;not null;default:'DRAFT';index:migrations_database_status_idx,priority:2"`
+	Version            *int64          `gorm:"type:bigint;uniqueIndex:migrations_version_unique,priority:2"`
+	CreatedBy          string          `gorm:"type:uuid;not null"`
+	ExecutedBy         *string         `gorm:"type:uuid"`
+	CreatedAt          time.Time       `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt          time.Time       `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
+	ExecutedAt         *time.Time      `gorm:"type:timestamptz"`
+	ErrorSummary       *string         `gorm:"type:text"`
+	Database           ManagedDatabase `gorm:"foreignKey:DatabaseID;references:ID;constraint:migrations_database_id_fkey,OnDelete:RESTRICT" json:"-"`
+	Creator            User            `gorm:"foreignKey:CreatedBy;references:ID;constraint:migrations_created_by_fkey,OnDelete:RESTRICT" json:"-"`
+	Executor           *User           `gorm:"foreignKey:ExecutedBy;references:ID;constraint:migrations_executed_by_fkey,OnDelete:RESTRICT" json:"-"`
 }
 
 func (Migration) TableName() string { return "migrations" }
+
+type ApprovalStatus string
+
+const (
+	ApprovalPending  ApprovalStatus = "PENDING"
+	ApprovalApproved ApprovalStatus = "APPROVED"
+	ApprovalRejected ApprovalStatus = "REJECTED"
+)
+
+type MigrationApproval struct {
+	ID          string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	MigrationID string         `gorm:"type:uuid;not null;index:migration_approvals_migration_idx"`
+	GroupID     string         `gorm:"type:uuid;not null"`
+	LeaderID    string         `gorm:"type:uuid;not null;index:migration_approvals_leader_idx"`
+	Status      ApprovalStatus `gorm:"type:varchar(20);not null;default:'PENDING'"`
+	Comment     *string        `gorm:"type:text"`
+	DecidedAt   *time.Time     `gorm:"type:timestamptz"`
+	CreatedAt   time.Time      `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
+
+	Migration Migration `gorm:"foreignKey:MigrationID;references:ID;constraint:migration_approvals_migration_id_fkey,OnDelete:CASCADE" json:"-"`
+	Group     Group     `gorm:"foreignKey:GroupID;references:ID;constraint:migration_approvals_group_id_fkey,OnDelete:CASCADE" json:"-"`
+	Leader    User      `gorm:"foreignKey:LeaderID;references:ID;constraint:migration_approvals_leader_id_fkey,OnDelete:RESTRICT" json:"-"`
+}
+
+func (MigrationApproval) TableName() string { return "migration_approvals" }
+
+type MigrationExecution struct {
+	ID                    string     `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	MigrationID           string     `gorm:"type:uuid;not null;index:migration_executions_migration_idx"`
+	DatabaseID            string     `gorm:"type:uuid;not null;index:migration_executions_db_idx,priority:1"`
+	ActionType            string     `gorm:"type:varchar(20);not null"` // FORWARD, ROLLBACK, REVERT_BATCH, RETRY
+	RolledBackExecutionID *string    `gorm:"type:uuid;index:migration_executions_rollback_idx"`
+	Status                string     `gorm:"type:varchar(30);not null"`
+	ExecutedSQL           string     `gorm:"type:text;not null"`
+	ExecutedBy            string     `gorm:"type:uuid;not null"`
+	StartedAt             time.Time  `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP;index:migration_executions_db_idx,priority:2"`
+	FinishedAt            *time.Time `gorm:"type:timestamptz"`
+	Version               *int64     `gorm:"type:bigint"`
+	ErrorSummary          *string    `gorm:"type:text"`
+	CommittedBatches      int64      `gorm:"type:bigint;not null;default:0"`
+	CommittedRows         int64      `gorm:"type:bigint;not null;default:0"`
+	LastCursorValue       *string    `gorm:"type:text"`
+
+	Migration Migration       `gorm:"foreignKey:MigrationID;references:ID" json:"-"`
+	Database  ManagedDatabase `gorm:"foreignKey:DatabaseID;references:ID" json:"-"`
+	Executor  User            `gorm:"foreignKey:ExecutedBy;references:ID" json:"-"`
+}
+
+func (MigrationExecution) TableName() string { return "migration_executions" }

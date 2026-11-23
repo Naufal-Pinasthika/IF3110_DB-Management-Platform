@@ -44,6 +44,12 @@ type RouteHandlers struct {
 	CompareSchema             http.Handler
 	ListJobs                  http.Handler
 	GetJob                    http.Handler
+	SubmitMigrationReview     http.Handler
+	ApproveMigration          http.Handler
+	RejectMigration           http.Handler
+	RollbackMigration         http.Handler
+	ForwardMigration          http.Handler
+	ListMigrationHistory      http.Handler
 }
 
 type RouteMiddleware struct {
@@ -146,6 +152,12 @@ func RegisterRoutes(mux *http.ServeMux, handlers RouteHandlers, middleware Route
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations", handlers.CreateMigration, session, databaseEdit, csrf)
 	registerRoute(mux, "PATCH", "/api/v1/databases/{dbId}/migrations/{migrationId}", handlers.UpdateMigration, session, databaseEdit, csrf)
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/execute", handlers.ExecuteMigration, session, databaseEdit, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/submit-review", handlers.SubmitMigrationReview, session, databaseEdit, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/approve", handlers.ApproveMigration, session, databaseView, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/reject", handlers.RejectMigration, session, databaseView, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/rollback", handlers.RollbackMigration, session, databaseEdit, csrf)
+	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/forward", handlers.ForwardMigration, session, databaseEdit, csrf)
+	registerRoute(mux, "GET", "/api/v1/databases/{dbId}/migration-history", handlers.ListMigrationHistory, session, databaseView)
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/{migrationId}/explain", handlers.ExplainMigration, session, databaseEdit, csrf)
 	registerRoute(mux, "POST", "/api/v1/databases/{dbId}/migrations/schema-diff", handlers.CompareSchema, session, databaseEdit, csrf)
 }
