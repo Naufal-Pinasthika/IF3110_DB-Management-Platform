@@ -51,13 +51,17 @@ export function RequireSession() {
   const location = useLocation()
   if (session.isPending) return <Loading>Loading your workspace…</Loading>
   if (session.error) return <main className="content"><ErrorState error={session.error} retry={() => session.refetch()} /></main>
-  if (!session.data) return <Navigate to={`/login?${new URLSearchParams({ next: location.pathname + location.search + location.hash })}`} replace />
+  if (!session.data) {
+    const isSensitive = location.pathname.startsWith('/admin') || (location.pathname.startsWith('/databases/') && location.pathname !== '/databases')
+    const search = isSensitive ? '' : `?${new URLSearchParams({ next: location.pathname + location.search + location.hash })}`
+    return <Navigate to={`/login${search}`} replace />
+  }
   return <Outlet />
 }
 
 export function RequireAdmin() {
   const { data: user } = useSession()
-  if (!user?.is_platform_admin) return <div className="notice error" role="alert">Administrator access is required to manage this section.</div>
+  if (!user?.is_platform_admin) return <Navigate to="/databases" replace />
   return <Outlet />
 }
 
@@ -141,8 +145,8 @@ export function Shell() {
               if (!window.dispatchEvent(event) && !await confirm({ title: 'Leave without saving?', description: 'Your unsaved changes will be lost.', label: 'Sign out' })) return
               await api('/api/v1/auth/logout', { method: 'POST' })
               window.dispatchEvent(new Event('discard-changes'))
-              await resetSession(client, null)
               await navigate('/login', { replace: true })
+              await resetSession(client, null)
             }}>Sign out</ActionButton>
           </div>
         </header>

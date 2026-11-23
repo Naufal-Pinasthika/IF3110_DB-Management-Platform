@@ -5,7 +5,7 @@ import { api, databaseAPI, databaseURL, encode, formatDate } from '../api'
 import { useUI } from '../ui-context'
 import type { ExplainResult, Migration, MigrationExecutionSummary, MigrationSummary, SchemaDiff } from '../types'
 import { useDatabase } from '../database-hooks'
-import { ActionButton, Badge, EmptyRow, ErrorState, Loading, PageHeading } from '../components/ui'
+import { ActionButton, Badge, EmptyRow, ErrorState, Loading, Modal, PageHeading } from '../components/ui'
 import { useFormAction, useUnsavedChanges } from '../form-hooks'
 import { useSession } from '../session'
 import Plans from '../components/Plans'
@@ -229,6 +229,8 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
     app => app.leader_id === currentUser?.id && app.status === 'PENDING'
   )
   const canDecide = Boolean(pendingApproval)
+  const [decisionDialog, setDecisionDialog] = useState<'approve' | 'reject' | null>(null)
+  const [reviewComment, setReviewComment] = useState('')
 
   const canEdit = database.effective_access === 'VIEW_EDIT'
   const draft = creating || migration.status === 'DRAFT' || migration.status === 'REJECTED'
@@ -606,35 +608,17 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   className="button primary"
                   type="button"
                   disabled={action.busy}
-                  onClick={() => run('approve', async () => {
-                    if (!await confirm({
-                      title: 'Approve migration?',
-                      description: 'Confirm that your group approves this migration for execution.',
-                      label: 'Approve',
-                    })) return
-                    await api(`${endpoint}/approve`, { method: 'POST', data: {} })
-                    notify('Approval recorded.')
-                    await changed()
-                  })}
+                  onClick={() => { setReviewComment(''); setDecisionDialog('approve') }}
                 >
-                  {operation === 'approve' ? 'Approving…' : 'Approve'}
+                  Approve
                 </button>
                 <button
                   className="button danger"
                   type="button"
                   disabled={action.busy}
-                  onClick={() => run('reject', async () => {
-                    if (!await confirm({
-                      title: 'Reject migration?',
-                      description: 'Are you sure you want to reject this migration? It will return to draft for changes.',
-                      label: 'Reject',
-                    })) return
-                    await api(`${endpoint}/reject`, { method: 'POST', data: {} })
-                    notify('Migration rejected.')
-                    await changed()
-                  })}
+                  onClick={() => { setReviewComment(''); setDecisionDialog('reject') }}
                 >
-                  {operation === 'reject' ? 'Rejecting…' : 'Reject'}
+                  Reject
                 </button>
               </>
             )}
@@ -747,6 +731,79 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           </div>
           <Plans result={plan} />
         </section>
+      )}
+
+      {decisionDialog && (
+        <Modal
+          title={decisionDialog === 'approve' ? 'Approve migration' : 'Reject migration'}
+          onClose={() => setDecisionDialog(null)}
+          busy={action.busy}
+        >
+          {close => (
+            <form
+              aria-busy={action.busy}
+              onSubmit={event => {
+                event.preventDefault()
+                void action.run(async () => {
+                  const endpointPath = `${endpoint}/${decisionDialog}`
+                  const payload: { comment?: string } = {}
+                  if (reviewComment.trim()) {
+                    payload.comment = reviewComment.trim()
+                  }
+                  await api(endpointPath, {
+                    method: 'POST',
+                    data: payload,
+                  })
+                  notify(decisionDialog === 'approve' ? 'Approval recorded.' : 'Migration rejected.')
+                  setDecisionDialog(null)
+                  await changed()
+                })
+              }}
+            >
+              <fieldset className="form-fields" disabled={action.busy}>
+                <p className="muted">
+                  {decisionDialog === 'approve'
+                    ? `Confirm that your group approves "${migration?.name}" for execution.`
+                    : `Reject "${migration?.name}". It will be returned to draft state for revisions.`}
+                </p>
+                <label htmlFor="review-comment">
+                  Review comment {decisionDialog === 'reject' ? '(Recommended)' : '(Optional)'}
+                </label>
+                <textarea
+                  id="review-comment"
+                  rows={3}
+                  autoFocus
+                  placeholder={
+                    decisionDialog === 'approve'
+                      ? 'e.g. Schemas and queries look good for our services.'
+                      : 'e.g. Please add rollback SQL or revise table constraints.'
+                  }
+                  value={reviewComment}
+                  onChange={e => setReviewComment(e.target.value)}
+                />
+              </fieldset>
+              <ErrorState error={action.error} />
+              <div className="form-actions">
+                <button className="button" type="button" disabled={action.busy} onClick={close}>
+                  Cancel
+                </button>
+                <button
+                  className={`button ${decisionDialog === 'approve' ? 'primary' : 'danger'}`}
+                  type="submit"
+                  disabled={action.busy}
+                >
+                  {action.busy
+                    ? decisionDialog === 'approve'
+                      ? 'Approving…'
+                      : 'Rejecting…'
+                    : decisionDialog === 'approve'
+                    ? 'Approve migration'
+                    : 'Reject migration'}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
       )}
     </>
   )

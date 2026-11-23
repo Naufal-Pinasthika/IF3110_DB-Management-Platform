@@ -7,6 +7,14 @@ import type { User } from '../types'
 import { ErrorState, Icon, PageHeading } from '../components/ui'
 import { useFormAction } from '../form-hooks'
 
+function computeDestination(rawNext: string | null, isPlatformAdmin = false): string {
+  if (!rawNext || rawNext === '/login') return '/databases'
+  const path = returnPath(rawNext)
+  if (path.startsWith('/admin') && !isPlatformAdmin) return '/databases'
+  if (path.startsWith('/databases/') && path !== '/databases') return '/databases'
+  return path
+}
+
 export default function Login() {
   const session = useSession()
   const client = useQueryClient()
@@ -16,12 +24,8 @@ export default function Login() {
   const [capsLock, setCapsLock] = useState(false)
   const password = useRef<HTMLInputElement>(null)
   const action = useFormAction()
-  const rawNext = search.get('next')
-  // Avoid dumping a newly signed-in user into a previous user's specific database URL
-  const next = rawNext && !rawNext.startsWith('/databases/') && rawNext !== '/login'
-    ? returnPath(rawNext)
-    : '/databases'
-  if (session.data) return <Navigate to={next} replace />
+  const destination = computeDestination(search.get('next'), session.data?.is_platform_admin)
+  if (session.data) return <Navigate to={destination} replace />
   return <main id="main" className="login-layout"><section className="login-form-wrap" aria-label="Sign in">
     <div className="login-brand"><Icon name="database" /><span>Database Platform</span></div>
     <PageHeading title="Sign in" />
@@ -33,7 +37,8 @@ export default function Login() {
           const user = await api<User>('/api/v1/auth/login', { method: 'POST', data: { username: data.get('username'), password: data.get('password') } })
           if (password.current) password.current.value = ''
           await resetSession(client, user)
-          await navigate(next, { replace: true })
+          const target = computeDestination(search.get('next'), user.is_platform_admin)
+          await navigate(target, { replace: true })
         } catch (error) { password.current?.focus(); throw error }
       })
     }} aria-busy={action.busy}>

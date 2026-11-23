@@ -37,6 +37,7 @@ const router = createBrowserRouter([{
         { path: 'migrations/:migrationId', element: <MigrationRoute /> },
       ] },
       { element: <RequireAdmin />, children: [
+        { path: '/admin', element: <Navigate to="/admin/users" replace /> },
         { path: '/admin/users', element: <Users /> },
         { path: '/admin/groups', element: <Groups /> },
         { path: '/admin/databases', element: <Connections /> },
