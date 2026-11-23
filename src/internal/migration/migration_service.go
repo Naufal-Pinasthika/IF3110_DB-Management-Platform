@@ -82,11 +82,8 @@ func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, da
 	if err != nil {
 		return api.ExplainResult{}, err
 	}
-	if m.Status != models.MigrationDraft {
+	if m.Status != models.MigrationDraft && m.Status != models.MigrationRejected {
 		return api.ExplainResult{}, apperror.ErrConflict
-	}
-	if err := validateDMLSQL(m.SQLText); err != nil {
-		return api.ExplainResult{}, err
 	}
 	if s.Explainer == nil {
 		return api.ExplainResult{}, fmt.Errorf("%w: migration plan analysis is unavailable", apperror.ErrInternal)

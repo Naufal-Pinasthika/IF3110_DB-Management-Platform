@@ -456,6 +456,33 @@ func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sq
 			return api.ExplainResult{}, fmt.Errorf("%w: could not isolate statement plan: %v", apperror.ErrInternal, err)
 		}
 
+		if !isExplainableStmt(stmt) {
+			start := time.Now()
+			_, execErr := tx.ExecContext(txCtx, stmt)
+			dur := float64(time.Since(start).Microseconds()) / 1000.0 // ms
+			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT "+savepoint)
+			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint)
+
+			if execErr != nil {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					Error:          execErr.Error(),
+				})
+			} else {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					ExecutionTime:  &dur,
+					Plan: api.ExplainNode{
+						NodeType:     "DDL Execution (previewed & rolled back)",
+						RelationName: summarizeDDL(stmt),
+					},
+				})
+			}
+			continue
+		}
+
 		var explainSQL string
 		if analyze {
 			explainSQL = "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + stmt
@@ -465,10 +492,26 @@ func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sq
 
 		rows, err := tx.QueryContext(txCtx, explainSQL)
 		if err != nil {
-			// Some PostgreSQL commands do not have a plan (for example CREATE TABLE).
-			allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: err.Error()})
+			// Fallback: try executing directly in savepoint in case EXPLAIN failed on DDL/utility command
+			start := time.Now()
+			_, execErr := tx.ExecContext(txCtx, stmt)
+			dur := float64(time.Since(start).Microseconds()) / 1000.0
 			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT "+savepoint)
 			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint)
+
+			if execErr == nil {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					ExecutionTime:  &dur,
+					Plan: api.ExplainNode{
+						NodeType:     "DDL Execution (previewed & rolled back)",
+						RelationName: summarizeDDL(stmt),
+					},
+				})
+			} else {
+				allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: execErr.Error()})
+			}
 			continue
 		}
 
@@ -536,6 +579,58 @@ func splitStatements(sql string) []string {
 		}
 	}
 	return out
+}
+
+func isExplainableStmt(stmt string) bool {
+	s := strings.TrimSpace(stmt)
+	for {
+		if strings.HasPrefix(s, "--") {
+			idx := strings.Index(s, "\n")
+			if idx == -1 {
+				return false
+			}
+			s = strings.TrimSpace(s[idx+1:])
+			continue
+		}
+		if strings.HasPrefix(s, "/*") {
+			idx := strings.Index(s, "*/")
+			if idx == -1 {
+				return false
+			}
+			s = strings.TrimSpace(s[idx+2:])
+			continue
+		}
+		break
+	}
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return false
+	}
+	firstWord := strings.ToUpper(fields[0])
+	switch firstWord {
+	case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "VALUES", "WITH", "DECLARE", "EXECUTE":
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeDDL(stmt string) string {
+	s := strings.TrimSpace(stmt)
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 {
+		firstLine := strings.TrimSpace(lines[0])
+		firstLine = strings.TrimSuffix(firstLine, "(")
+		firstLine = strings.TrimSpace(firstLine)
+		if len(firstLine) > 60 {
+			return firstLine[:57] + "..."
+		}
+		return firstLine
+	}
+	if len(s) > 60 {
+		return s[:57] + "..."
+	}
+	return s
 }
 
 // buildPlanText produces a simple text summary from parsed plan objects.

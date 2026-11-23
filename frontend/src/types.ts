@@ -1,7 +1,7 @@
 export type AccessLevel = 'VIEW_ONLY' | 'VIEW_EDIT'
 export interface User { id: string; username: string; is_platform_admin: boolean }
 export interface AdminUser extends User { is_active: boolean }
-export interface Group { id: string; name: string }
+export interface Group { id: string; name: string; leader_id?: string | null }
 export interface Member { group_id: string; user_id: string }
 export interface Grant { group_id: string; database_id: string; access_level: AccessLevel }
 export interface AccessSnapshot { members: Member[]; grants: Grant[] }

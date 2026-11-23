@@ -166,6 +166,12 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID string, na
 			if membership == 0 {
 				return fmt.Errorf("%w: leader must be a member of this group", apperror.ErrInvalidInput)
 			}
+			// Sync any pending migration approvals for this group to the new leader
+			if err := tx.Model(&models.MigrationApproval{}).
+				Where("group_id = ? AND status = ?", groupID, models.ApprovalPending).
+				Update("leader_id", updates["leader_id"]).Error; err != nil {
+				return err
+			}
 		}
 		if name != nil {
 			updates["name"] = *name
@@ -228,6 +234,14 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 			DoNothing: true,
 		}).Create(&ug).Error; err != nil {
 			return err
+		}
+
+		// If the group has no leader yet, designate this member as leader.
+		var grp models.Group
+		if err := tx.First(&grp, "id = ?", groupID).Error; err == nil {
+			if grp.LeaderID == nil || *grp.LeaderID == "" {
+				_ = tx.Model(&models.Group{}).Where("id = ?", groupID).Update("leader_id", userID).Error
+			}
 		}
 
 		if err := tx.Model(&models.Session{}).

@@ -78,6 +78,18 @@ func (r *PostgresRepository) GetMigrationWithApprovals(ctx context.Context, data
 		return m, nil, err
 	}
 
+	// Sync pending approvals if the group leader changed
+	_ = r.DB.WithContext(ctx).Exec(`
+		UPDATE migration_approvals ma
+		SET leader_id = g.leader_id
+		FROM groups g
+		WHERE ma.migration_id = ? 
+		  AND ma.group_id = g.id 
+		  AND ma.status = 'PENDING' 
+		  AND g.leader_id IS NOT NULL 
+		  AND ma.leader_id != g.leader_id
+	`, migrationID).Error
+
 	var approvals []models.MigrationApproval
 	err = r.DB.WithContext(ctx).
 		Preload("Group").
@@ -265,6 +277,18 @@ func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, mi
 }
 
 func (r *PostgresRepository) GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error) {
+	// Sync pending approvals if the group leader changed
+	_ = r.DB.WithContext(ctx).Exec(`
+		UPDATE migration_approvals ma
+		SET leader_id = g.leader_id
+		FROM groups g
+		WHERE ma.migration_id = ? 
+		  AND ma.group_id = g.id 
+		  AND ma.status = 'PENDING' 
+		  AND g.leader_id IS NOT NULL 
+		  AND ma.leader_id != g.leader_id
+	`, migrationID).Error
+
 	var approvals []models.MigrationApproval
 	err := r.DB.WithContext(ctx).
 		Where("migration_id = ? AND leader_id = ? AND status = ?", migrationID, leaderID, models.ApprovalPending).
@@ -314,7 +338,24 @@ func (r *PostgresRepository) GetDatabaseGroupsWithLeaders(ctx context.Context, d
 		Joins("INNER JOIN group_access ON group_access.group_id = groups.id").
 		Where("group_access.database_id = ?", databaseID).
 		Find(&groups).Error
-	return groups, err
+	if err != nil {
+		return nil, err
+	}
+	for i := range groups {
+		if groups[i].LeaderID == nil || *groups[i].LeaderID == "" {
+			var member models.UserGroup
+			mErr := r.DB.WithContext(ctx).
+				Joins("JOIN users ON users.id = user_groups.user_id").
+				Where("user_groups.group_id = ? AND users.is_active = ?", groups[i].ID, true).
+				First(&member).Error
+			if mErr == nil && member.UserID != "" {
+				leaderID := member.UserID
+				_ = r.DB.WithContext(ctx).Model(&models.Group{}).Where("id = ? AND (leader_id IS NULL OR leader_id = '')", groups[i].ID).Update("leader_id", leaderID).Error
+				groups[i].LeaderID = &leaderID
+			}
+		}
+	}
+	return groups, nil
 }
 
 func (r *PostgresRepository) GetLastAppliedMigration(ctx context.Context, databaseID string) (*models.Migration, error) {

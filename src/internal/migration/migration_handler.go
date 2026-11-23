@@ -243,12 +243,15 @@ func writeError(w http.ResponseWriter, err error) {
 		api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 
 	case errors.Is(err, apperror.ErrConflict):
-		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "State conflict or already running")
+		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
 
 	case errors.Is(err, apperror.ErrInvalidInput):
 		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 
-	case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
+	case errors.Is(err, apperror.ErrForbidden):
+		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+
+	case errors.Is(err, access.ErrForbidden):
 		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Insufficient database access")
 
 	case errors.Is(err, access.ErrUnauthenticated), errors.Is(err, auth.ErrUnauthenticated):

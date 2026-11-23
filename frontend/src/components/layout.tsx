@@ -65,7 +65,7 @@ export function DatabaseLayout() {
   const { dbId = '' } = useParams()
   const database = useDatabaseQuery(dbId)
   if (database.isPending) return <Loading>Loading database…</Loading>
-  if (database.error) return <ErrorState error={database.error} retry={() => database.refetch()} />
+  if (database.error) return <main className="content"><ErrorState error={database.error} /><div style={{ marginTop: '1rem' }}><Link to="/databases" className="button primary">Back to your databases</Link></div></main>
   if (!database.data) return null
   return <Outlet context={database.data} key={dbId} />
 }

@@ -7,6 +7,7 @@ import type { ExplainResult, Migration, MigrationExecutionSummary, MigrationSumm
 import { useDatabase } from '../database-hooks'
 import { ActionButton, Badge, EmptyRow, ErrorState, Loading, PageHeading } from '../components/ui'
 import { useFormAction, useUnsavedChanges } from '../form-hooks'
+import { useSession } from '../session'
 import Plans from '../components/Plans'
 
 export function Migrations() {
@@ -222,6 +223,12 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const navigate = useNavigate()
   const client = useQueryClient()
   const { confirm, notify } = useUI()
+  const session = useSession()
+  const currentUser = session.data
+  const pendingApproval = migration?.approvals?.find(
+    app => app.leader_id === currentUser?.id && app.status === 'PENDING'
+  )
+  const canDecide = Boolean(pendingApproval)
 
   const canEdit = database.effective_access === 'VIEW_EDIT'
   const draft = creating || migration.status === 'DRAFT' || migration.status === 'REJECTED'
@@ -276,10 +283,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         </p>
       )}
 
-      {migration?.status === 'PENDING_REVIEW' && (
+      {migration?.status === 'PENDING_REVIEW' && canDecide && (
         <div className="notice" role="status" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <strong>Pending Multi-Group Leader Approval</strong>
-          <p>Every group having access to this database must have its leader review and approve these changes before execution.</p>
+          <strong>Action Required: Review Pending</strong>
+          <p>Your approval is required as group leader before this migration can execute.</p>
         </div>
       )}
 
@@ -593,7 +600,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               </button>
             )}
 
-            {migration && migration.status === 'PENDING_REVIEW' && (
+            {migration && migration.status === 'PENDING_REVIEW' && canDecide && (
               <>
                 <button
                   className="button primary"

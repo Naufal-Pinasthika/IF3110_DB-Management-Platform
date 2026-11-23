@@ -16,7 +16,11 @@ export default function Login() {
   const [capsLock, setCapsLock] = useState(false)
   const password = useRef<HTMLInputElement>(null)
   const action = useFormAction()
-  const next = returnPath(search.get('next'))
+  const rawNext = search.get('next')
+  // Avoid dumping a newly signed-in user into a previous user's specific database URL
+  const next = rawNext && !rawNext.startsWith('/databases/') && rawNext !== '/login'
+    ? returnPath(rawNext)
+    : '/databases'
   if (session.data) return <Navigate to={next} replace />
   return <main id="main" className="login-layout"><section className="login-form-wrap" aria-label="Sign in">
     <div className="login-brand"><Icon name="database" /><span>Database Platform</span></div>
