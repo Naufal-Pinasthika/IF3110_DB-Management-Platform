@@ -306,8 +306,18 @@ func TestGroups(t *testing.T) {
 		}
 	})
 
-	t.Run("create returns created group", func(t *testing.T) {
-		repo := &mockRepository{createGroupFn: func(_ context.Context, name string) (models.Group, error) {
+	t.Run("create rejects invalid leader id", func(t *testing.T) {
+		svc := newService(&mockRepository{})
+		if _, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: "invalid-uuid"}); err == nil {
+			t.Fatal("invalid leader_id accepted, want error")
+		}
+	})
+
+	t.Run("create returns created group without leader", func(t *testing.T) {
+		repo := &mockRepository{createGroupFn: func(_ context.Context, name, leaderID string) (models.Group, error) {
+			if leaderID != "" {
+				t.Fatalf("expected empty leaderID, got %s", leaderID)
+			}
 			return models.Group{ID: "g1", Name: name}, nil
 		}}
 		svc := newService(repo)
@@ -315,19 +325,60 @@ func TestGroups(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if group.ID != "g1" || group.Name != "devs" {
+		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != "" {
 			t.Fatalf("group = %+v", group)
 		}
 	})
 
-	t.Run("update rejects empty id or invalid name", func(t *testing.T) {
+	t.Run("create returns created group with leader", func(t *testing.T) {
+		leaderID := "11111111-1111-1111-1111-111111111111"
+		repo := &mockRepository{createGroupFn: func(_ context.Context, name, lid string) (models.Group, error) {
+			if lid != leaderID {
+				t.Fatalf("expected leaderID %s, got %s", leaderID, lid)
+			}
+			return models.Group{ID: "g1", Name: name, LeaderID: &leaderID}, nil
+		}}
+		svc := newService(repo)
+		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != leaderID {
+			t.Fatalf("group = %+v", group)
+		}
+	})
+
+	t.Run("update rejects empty id or invalid fields", func(t *testing.T) {
 		svc := newService(&mockRepository{})
 		name := "devs"
+		invalidLeader := "not-a-uuid"
 		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "", api.UpdateGroupRequest{Name: &name}); err == nil {
 			t.Fatal("empty group id accepted, want error")
 		}
 		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{}); err == nil {
-			t.Fatal("nil name accepted, want error")
+			t.Fatal("empty request accepted, want error")
+		}
+		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{LeaderID: &invalidLeader}); err == nil {
+			t.Fatal("invalid leader id accepted, want error")
+		}
+	})
+
+	t.Run("update calls repository and returns updated group", func(t *testing.T) {
+		leaderID := "11111111-1111-1111-1111-111111111111"
+		newName := "updated-devs"
+		repo := &mockRepository{updateGroupFn: func(_ context.Context, groupID string, n, l *string) (models.Group, error) {
+			if groupID != "g1" || *n != newName || *l != leaderID {
+				t.Fatalf("unexpected update args: groupID=%s, name=%v, leaderID=%v", groupID, n, l)
+			}
+			return models.Group{ID: groupID, Name: *n, LeaderID: l}, nil
+		}}
+		svc := newService(repo)
+		group, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{Name: &newName, LeaderID: &leaderID})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if group.ID != "g1" || group.Name != newName || group.LeaderID != leaderID {
+			t.Fatalf("group = %+v", group)
 		}
 	})
 
@@ -377,6 +428,24 @@ func TestGroups(t *testing.T) {
 		}
 		if err := svc.RemoveGroupMember(ctx, adminPrincipal, "g1", "", now); err == nil {
 			t.Fatal("empty user id accepted, want error")
+		}
+	})
+
+	t.Run("remove member propagates repository call", func(t *testing.T) {
+		called := false
+		repo := &mockRepository{removeGroupMemberFn: func(_ context.Context, g, u string, _ time.Time) error {
+			if g != "g1" || u != "u1" {
+				t.Fatalf("unexpected remove args: %s, %s", g, u)
+			}
+			called = true
+			return nil
+		}}
+		svc := newService(repo)
+		if err := svc.RemoveGroupMember(ctx, adminPrincipal, "g1", "u1", now); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !called {
+			t.Fatal("expected removeGroupMemberFn to be called")
 		}
 	})
 }

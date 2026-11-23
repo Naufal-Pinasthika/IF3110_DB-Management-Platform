@@ -4,7 +4,8 @@ MODULE := github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform
 
 check:
 	go vet ./...
-	go -C tests vet ./...
+	go -C tests mod verify
+	go -C tests vet -mod=readonly ./...
 	npm --prefix tests run test:syntax
 	node --check tests/browser/auth_test.mjs
 	node --check tests/browser/fixtures_test.mjs
@@ -14,7 +15,7 @@ test: test-unit test-web
 
 test-unit:
 	mkdir -p tests/artifacts
-	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config -coverprofile=artifacts/unit-coverage.out ./unit/...
+	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config,$(MODULE)/src/internal/migration -coverprofile=artifacts/unit-coverage.out ./unit/...
 	npm --prefix tests test
 
 test-web: frontend-build

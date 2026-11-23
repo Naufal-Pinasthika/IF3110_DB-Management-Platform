@@ -111,19 +111,24 @@ func (r *PostgresRepository) ListGroups(ctx context.Context) ([]models.Group, er
 	return groups, err
 }
 
-// creates a group and its leader membership atomically.
+// creates a group and its optional leader membership atomically.
 func (r *PostgresRepository) CreateGroup(ctx context.Context, name, leaderID string) (models.Group, error) {
 	var group models.Group
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		leader, err := activeGroupLeader(tx, leaderID)
-		if err != nil {
-			return err
+		if leaderID != "" {
+			leader, err := activeGroupLeader(tx, leaderID)
+			if err != nil {
+				return err
+			}
+			group = models.Group{Name: name, LeaderID: &leader.ID}
+			if err := tx.Create(&group).Error; err != nil {
+				return err
+			}
+			return tx.Create(&models.UserGroup{GroupID: group.ID, UserID: leader.ID}).Error
 		}
-		group = models.Group{Name: name, LeaderID: &leader.ID}
-		if err := tx.Create(&group).Error; err != nil {
-			return err
-		}
-		return tx.Create(&models.UserGroup{GroupID: group.ID, UserID: leader.ID}).Error
+
+		group = models.Group{Name: name}
+		return tx.Create(&group).Error
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique") {
