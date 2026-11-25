@@ -308,6 +308,16 @@ func (r *PostgresRepository) UpdateApprovalStatus(ctx context.Context, approvalI
 }
 
 func (r *PostgresRepository) CheckAndSetApproved(ctx context.Context, databaseID, migrationID string) (bool, error) {
+	var totalCount int64
+	if err := r.DB.WithContext(ctx).Model(&models.MigrationApproval{}).
+		Where("migration_id = ?", migrationID).
+		Count(&totalCount).Error; err != nil {
+		return false, err
+	}
+	if totalCount == 0 {
+		return false, nil
+	}
+
 	var pendingCount int64
 	if err := r.DB.WithContext(ctx).Model(&models.MigrationApproval{}).
 		Where("migration_id = ? AND status != ?", migrationID, models.ApprovalApproved).
@@ -340,20 +350,6 @@ func (r *PostgresRepository) GetDatabaseGroupsWithLeaders(ctx context.Context, d
 		Find(&groups).Error
 	if err != nil {
 		return nil, err
-	}
-	for i := range groups {
-		if groups[i].LeaderID == nil || *groups[i].LeaderID == "" {
-			var member models.UserGroup
-			mErr := r.DB.WithContext(ctx).
-				Joins("JOIN users ON users.id = user_groups.user_id").
-				Where("user_groups.group_id = ? AND users.is_active = ?", groups[i].ID, true).
-				First(&member).Error
-			if mErr == nil && member.UserID != "" {
-				leaderID := member.UserID
-				_ = r.DB.WithContext(ctx).Model(&models.Group{}).Where("id = ? AND (leader_id IS NULL OR leader_id = '')", groups[i].ID).Update("leader_id", leaderID).Error
-				groups[i].LeaderID = &leaderID
-			}
-		}
 	}
 	return groups, nil
 }

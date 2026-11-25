@@ -192,7 +192,7 @@ func (s *Service) ListGroups(ctx context.Context, actor auth.Principal) ([]api.G
 	return result, nil
 }
 
-// CreateGroup creates a named group with an optional active leader.
+// CreateGroup creates a named group with an active leader.
 func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input api.CreateGroupRequest) (api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.Group{}, err
@@ -200,7 +200,7 @@ func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input a
 	if input.Name == "" || len(input.Name) > 100 {
 		return api.Group{}, fmt.Errorf("%w: group name required, max 100 characters", apperror.ErrInvalidInput)
 	}
-	if input.LeaderID != "" && !validLeaderID(input.LeaderID) {
+	if !validLeaderID(input.LeaderID) {
 		return api.Group{}, fmt.Errorf("%w: leader_id must be a valid user UUID", apperror.ErrInvalidInput)
 	}
 
@@ -238,6 +238,9 @@ func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID
 
 func validLeaderID(id string) bool {
 	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return false
+	}
+	if id == "00000000-0000-0000-0000-000000000000" {
 		return false
 	}
 	decoded, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))

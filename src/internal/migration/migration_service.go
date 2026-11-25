@@ -386,12 +386,35 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 		return api.MigrationExecuted{}, err
 	}
 
-	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
+	m, approvals, err := s.Repository.GetMigrationWithApprovals(ctx, databaseID, migrationID)
 	if err != nil {
 		return api.MigrationExecuted{}, err
 	}
 	if m.Status != models.MigrationApproved {
 		return api.MigrationExecuted{}, fmt.Errorf("%w: migration must be APPROVED before execution", apperror.ErrConflict)
+	}
+
+	// Revalidate that every group currently granted access to this database has a leader and approved this migration.
+	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if len(groups) == 0 {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
+	}
+	approvedGroups := make(map[string]bool, len(approvals))
+	for _, a := range approvals {
+		if a.Status == models.ApprovalApproved {
+			approvedGroups[a.GroupID] = true
+		}
+	}
+	for _, g := range groups {
+		if g.LeaderID == nil || *g.LeaderID == "" {
+			return api.MigrationExecuted{}, fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
+		}
+		if !approvedGroups[g.ID] {
+			return api.MigrationExecuted{}, fmt.Errorf("%w: missing approval from leader of group %q", apperror.ErrConflict, g.Name)
+		}
 	}
 
 	exec := models.MigrationExecution{
