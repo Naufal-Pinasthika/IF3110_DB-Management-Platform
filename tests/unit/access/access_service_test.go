@@ -81,6 +81,24 @@ func TestEffectiveAccess(t *testing.T) {
 			wantLevel: api.AccessViewEdit,
 		},
 		{
+			name:      "platform admin without grants is forbidden",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{},
+			wantErr:   access.ErrForbidden,
+		},
+		{
+			name:      "platform admin with view only grant gets view only",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{makeGrant("group-1", "db-1", models.AccessViewOnly)},
+			wantLevel: api.AccessViewOnly,
+		},
+		{
+			name:      "platform admin with view edit grant gets view edit",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{makeGrant("group-1", "db-1", models.AccessViewEdit)},
+			wantLevel: api.AccessViewEdit,
+		},
+		{
 			name:      "repository error propagated",
 			principal: makePrincipal("user-1", false),
 			grantsErr: errUnavailable,
@@ -90,7 +108,11 @@ func TestEffectiveAccess(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockRepository{grants: tc.grants, grantsErr: tc.grantsErr}
+			repo := &mockRepository{
+				dbSummary: makeDatabase("db-1", "One", "db1"),
+				grants:    tc.grants,
+				grantsErr: tc.grantsErr,
+			}
 			svc := newService(repo)
 			level, err := svc.EffectiveAccess(ctx, tc.principal, "db-1")
 			if !errors.Is(err, tc.wantErr) {
@@ -157,11 +179,34 @@ func TestRequireDatabase(t *testing.T) {
 			required:  api.AccessViewOnly,
 			wantErr:   access.ErrForbidden,
 		},
+		{
+			name:      "platform admin without grants forbidden for view only",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{},
+			required:  api.AccessViewOnly,
+			wantErr:   access.ErrForbidden,
+		},
+		{
+			name:      "platform admin with view only rejected for view edit",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{makeGrant("group-1", "db-1", models.AccessViewOnly)},
+			required:  api.AccessViewEdit,
+			wantErr:   access.ErrForbidden,
+		},
+		{
+			name:      "platform admin with view edit allowed for view edit",
+			principal: makePrincipal("admin-1", true),
+			grants:    []models.GroupAccess{makeGrant("group-1", "db-1", models.AccessViewEdit)},
+			required:  api.AccessViewEdit,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockRepository{grants: tc.grants}
+			repo := &mockRepository{
+				dbSummary: makeDatabase("db-1", "One", "db1"),
+				grants:    tc.grants,
+			}
 			svc := newService(repo)
 			err := svc.RequireDatabase(ctx, tc.principal, "db-1", tc.required)
 			if !errors.Is(err, tc.wantErr) {
@@ -220,6 +265,26 @@ func TestListDatabases(t *testing.T) {
 		}
 		if dbs[1].ID != "db-2" || dbs[1].EffectiveAccess != api.AccessViewOnly {
 			t.Fatalf("db-2 = %+v, want VIEW_ONLY", dbs[1])
+		}
+	})
+
+	t.Run("platform admin sees only granted databases with group effective access", func(t *testing.T) {
+		repo := &mockRepository{
+			databases: []models.ManagedDatabase{
+				makeDatabase("db-1", "One", "db1"),
+				makeDatabase("db-2", "Two", "db2"),
+			},
+			grants: []models.GroupAccess{
+				makeGrant("group-1", "db-1", models.AccessViewOnly),
+			},
+		}
+		svc := newService(repo)
+		dbs, err := svc.ListDatabases(ctx, makePrincipal("admin-1", true))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(dbs) != 1 || dbs[0].ID != "db-1" || dbs[0].EffectiveAccess != api.AccessViewOnly {
+			t.Fatalf("databases = %+v, want only db-1 with VIEW_ONLY", dbs)
 		}
 	})
 }
