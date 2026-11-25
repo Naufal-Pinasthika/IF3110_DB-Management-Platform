@@ -306,27 +306,12 @@ func TestGroups(t *testing.T) {
 		}
 	})
 
-	t.Run("create rejects invalid leader id", func(t *testing.T) {
+	t.Run("create rejects missing or invalid leader id", func(t *testing.T) {
 		svc := newService(&mockRepository{})
-		if _, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: "invalid-uuid"}); err == nil {
-			t.Fatal("invalid leader_id accepted, want error")
-		}
-	})
-
-	t.Run("create returns created group without leader", func(t *testing.T) {
-		repo := &mockRepository{createGroupFn: func(_ context.Context, name, leaderID string) (models.Group, error) {
-			if leaderID != "" {
-				t.Fatalf("expected empty leaderID, got %s", leaderID)
+		for _, leaderID := range []string{"", "invalid-uuid", "00000000-0000-0000-0000-000000000000"} {
+			if _, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID}); err == nil {
+				t.Fatalf("leader_id %q accepted, want error", leaderID)
 			}
-			return models.Group{ID: "g1", Name: name}, nil
-		}}
-		svc := newService(repo)
-		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs"})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != "" {
-			t.Fatalf("group = %+v", group)
 		}
 	})
 

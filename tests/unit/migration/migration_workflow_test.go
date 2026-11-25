@@ -401,6 +401,76 @@ func TestMigrationWorkflowApprovals(t *testing.T) {
 			t.Fatalf("expected PENDING_REVIEW on resubmit, got %v (err: %v)", resubmitted.Status, err)
 		}
 	})
+
+	t.Run("Already-approved leader cannot approve again", func(t *testing.T) {
+		m3, _ := repo.CreateMigration(ctx, models.Migration{
+			DatabaseID: dbID,
+			Name:       "add_audit_col",
+			SQLText:    "ALTER TABLE users ADD COLUMN updated_at TIMESTAMPTZ;",
+			CreatedBy:  leader1,
+			Status:     models.MigrationDraft,
+		})
+		_, _ = svc.SubmitReview(ctx, makePrincipal(leader1), dbID, m3.ID, time.Now())
+		repo.approvals[m3.ID][0].ID = "app-31"
+		repo.approvals[m3.ID][1].ID = "app-32"
+
+		if _, err := svc.ApproveMigration(ctx, makePrincipal(leader1), dbID, m3.ID, api.DecideApprovalRequest{}, time.Now()); err != nil {
+			t.Fatalf("first approval failed: %v", err)
+		}
+		if _, err := svc.ApproveMigration(ctx, makePrincipal(leader1), dbID, m3.ID, api.DecideApprovalRequest{}, time.Now()); !errors.Is(err, apperror.ErrForbidden) {
+			t.Fatalf("duplicate approval error = %v, want ErrForbidden", err)
+		}
+	})
+
+	t.Run("Single user leading multiple groups approves all their groups at once", func(t *testing.T) {
+		sharedRepo := newMockRepo()
+		sharedSvc := &migration.Service{Repository: sharedRepo, Access: &mockAccess{}, Dispatcher: dispatcher}
+		sharedRepo.groups = []models.Group{
+			{ID: "g-a", Name: "Team A", LeaderID: &leader1},
+			{ID: "g-b", Name: "Team B", LeaderID: &leader1},
+		}
+		ms, _ := sharedRepo.CreateMigration(ctx, models.Migration{
+			DatabaseID: dbID, Name: "shared_leader_mig", SQLText: "SELECT 1;", CreatedBy: leader1, Status: models.MigrationDraft,
+		})
+		_, err := sharedSvc.SubmitReview(ctx, makePrincipal(leader1), dbID, ms.ID, time.Now())
+		if err != nil {
+			t.Fatalf("submit failed: %v", err)
+		}
+		sharedRepo.approvals[ms.ID][0].ID = "app-s1"
+		sharedRepo.approvals[ms.ID][1].ID = "app-s2"
+
+		detail, err := sharedSvc.ApproveMigration(ctx, makePrincipal(leader1), dbID, ms.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil {
+			t.Fatalf("approve failed: %v", err)
+		}
+		if detail.Status != models.MigrationApproved {
+			t.Fatalf("status = %s, want APPROVED", detail.Status)
+		}
+	})
+
+	t.Run("ExecuteMigration revalidates newly-added group access after approval", func(t *testing.T) {
+		revalRepo := newMockRepo()
+		revalSvc := &migration.Service{Repository: revalRepo, Access: &mockAccess{}, Dispatcher: dispatcher}
+		revalRepo.groups = []models.Group{
+			{ID: "g-1", Name: "Engineering", LeaderID: &leader1},
+		}
+		mr, _ := revalRepo.CreateMigration(ctx, models.Migration{
+			DatabaseID: dbID, Name: "reval_mig", SQLText: "SELECT 1;", CreatedBy: leader1, Status: models.MigrationDraft,
+		})
+		_, _ = revalSvc.SubmitReview(ctx, makePrincipal(leader1), dbID, mr.ID, time.Now())
+		revalRepo.approvals[mr.ID][0].ID = "app-r1"
+		_, err := revalSvc.ApproveMigration(ctx, makePrincipal(leader1), dbID, mr.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil {
+			t.Fatalf("approve failed: %v", err)
+		}
+
+		// A second group is granted access to the database after approval
+		revalRepo.groups = append(revalRepo.groups, models.Group{ID: "g-2", Name: "Analytics", LeaderID: &leader2})
+		_, err = revalSvc.ExecuteMigration(ctx, makePrincipal(leader1), dbID, mr.ID, time.Now())
+		if !errors.Is(err, apperror.ErrConflict) {
+			t.Fatalf("execute with unapproved new group: err = %v, want ErrConflict", err)
+		}
+	})
 }
 
 func TestRollbackAndHideRollback(t *testing.T) {

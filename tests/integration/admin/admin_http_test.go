@@ -146,9 +146,16 @@ func TestAdminAndAccessHTTPIntegration(t *testing.T) {
 	}
 
 	// Group + database + grant flow.
-	w = request("POST", "/api/v1/admin/groups", `{"name":"analysts"}`, adminCSRF, adminCookies)
+	// Creating a group without a leader is rejected.
+	status(request("POST", "/api/v1/admin/groups", `{"name":"analysts"}`, adminCSRF, adminCookies), 400)
+
+	w = request("POST", "/api/v1/admin/groups", `{"name":"analysts","leader_id":"`+bob.ID+`"}`, adminCSRF, adminCookies)
 	status(w, 201)
 	groupID := dataID(t, w)
+
+	// Current leader cannot be removed from the group or deactivated before assigning a replacement.
+	status(request("DELETE", "/api/v1/admin/groups/"+groupID+"/members/"+bob.ID, "", adminCSRF, adminCookies), 409)
+	status(request("PATCH", "/api/v1/admin/users/"+bob.ID, `{"is_active":false}`, adminCSRF, adminCookies), 409)
 
 	w = request("POST", "/api/v1/admin/databases", `{"label":"analytics"}`, adminCSRF, adminCookies)
 	status(w, 201)
@@ -157,13 +164,14 @@ func TestAdminAndAccessHTTPIntegration(t *testing.T) {
 	status(request("PUT", "/api/v1/admin/groups/"+groupID+"/members/"+bob.ID, "", adminCSRF, adminCookies), 200)
 	status(request("PUT", "/api/v1/admin/groups/"+groupID+"/databases/"+dbID+"/access", `{"access_level":"VIEW_ONLY"}`, adminCSRF, adminCookies), 200)
 
-	// Platform admins can see enabled databases in the explorer even without
-	// a group grant; this keeps their database list aligned with admin management.
+	// Platform admin without a group grant must not automatically see or modify databases.
 	w = request("GET", "/api/v1/databases", "", "", adminCookies)
 	status(w, 200)
-	if !strings.Contains(w.Body.String(), "analytics") || !strings.Contains(w.Body.String(), "VIEW_EDIT") {
-		t.Fatalf("platform admin should see enabled analytics with VIEW_EDIT: %s", w.Body.String())
+	if strings.Contains(w.Body.String(), "analytics") {
+		t.Fatalf("platform admin without group grant should not see analytics: %s", w.Body.String())
 	}
+	status(request("GET", "/api/v1/databases/"+dbID+"/schemas", "", "", adminCookies), 403)
+	status(request("POST", "/api/v1/databases/"+dbID+"/migrations", `{"name":"m0","sql_text":"SELECT 1"}`, adminCSRF, adminCookies), 403)
 
 	// The granted user sees the database with VIEW_ONLY effective access.
 	bobCookies, bobCSRF := login("bob", "user-pass-123")
@@ -177,7 +185,7 @@ func TestAdminAndAccessHTTPIntegration(t *testing.T) {
 	status(request("POST", "/api/v1/databases/"+dbID+"/migrations", `{"name":"m1","sql_text":"SELECT 1"}`, bobCSRF, bobCookies), 403)
 
 	// Multi-group effective access: VIEW_EDIT wins over VIEW_ONLY.
-	w = request("POST", "/api/v1/admin/groups", `{"name":"editors"}`, adminCSRF, adminCookies)
+	w = request("POST", "/api/v1/admin/groups", `{"name":"editors","leader_id":"`+bob.ID+`"}`, adminCSRF, adminCookies)
 	status(w, 201)
 	editorGroupID := dataID(t, w)
 	status(request("PUT", "/api/v1/admin/groups/"+editorGroupID+"/members/"+bob.ID, "", adminCSRF, adminCookies), 200)
