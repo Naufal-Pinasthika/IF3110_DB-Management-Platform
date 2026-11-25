@@ -19,7 +19,7 @@ export function Migrations() {
     refetchInterval: query => query.state.data?.some(item => item.status === 'RUNNING') ? 3000 : false,
   })
   return <>
-    <PageHeading title="Migrations">{database.effective_access === 'VIEW_EDIT' && <Link className="button primary" to={`${databaseURL(database.id)}/migrations/new`}>New migration</Link>}<ActionButton onAction={() => query.refetch()}>Refresh</ActionButton></PageHeading>
+    <PageHeading title="Migrations"><Link className="button" to={`${databaseURL(database.id)}/migrations/workflow`}>M2 workflow preview</Link>{database.effective_access === 'VIEW_EDIT' && <Link className="button primary" to={`${databaseURL(database.id)}/migrations/new`}>New migration</Link>}<ActionButton onAction={() => query.refetch()}>Refresh</ActionButton></PageHeading>
     <ErrorState error={query.error} retry={() => query.refetch()} />
     <section className="panel"><div className="panel-toolbar"><div><h2>Migration history</h2><p>Drafts and executed changes for this database.</p></div>
       <label className="toolbar-actions" htmlFor="migration-filter">Status<select id="migration-filter" value={filter} onChange={event => setSearch(event.target.value ? { status: event.target.value } : {})}><option value="">All statuses</option><option value="DRAFT">Draft</option><option value="RUNNING">Running</option><option value="APPLIED">Applied</option><option value="FAILED">Failed</option></select></label>
