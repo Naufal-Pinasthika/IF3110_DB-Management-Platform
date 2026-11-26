@@ -1,20 +1,25 @@
 MODULE := github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform
 
-.PHONY: check test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build frontend-build frontend-dev worker
+.PHONY: check check-deps test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build frontend-build frontend-dev worker
 
-check:
+check: check-deps
 	go vet ./...
 	go -C tests vet ./...
 	npm --prefix tests run test:syntax
 	node --check tests/browser/auth_test.mjs
 	node --check tests/browser/fixtures_test.mjs
 
+# Fail on module drift instead of repairing dependencies implicitly in CI.
+check-deps:
+	go mod tidy -diff
+	go -C tests mod tidy -diff
+
 # Local tests need frontend dependencies installed, but no PostgreSQL or Chromium.
 test: test-unit test-web
 
 test-unit:
 	mkdir -p tests/artifacts
-	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config -coverprofile=artifacts/unit-coverage.out ./unit/...
+	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config,$(MODULE)/src/internal/admin,$(MODULE)/src/internal/access -coverprofile=artifacts/unit-coverage.out ./unit/...
 	npm --prefix tests test
 
 test-web: frontend-build

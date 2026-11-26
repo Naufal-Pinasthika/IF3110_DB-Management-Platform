@@ -8,6 +8,7 @@ import (
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/admin"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
@@ -306,16 +307,26 @@ func TestGroups(t *testing.T) {
 		}
 	})
 
+	t.Run("create rejects missing or malformed leader", func(t *testing.T) {
+		svc := newService(&mockRepository{})
+		for _, leaderID := range []string{"", "not-a-uuid", "zzzzzzzz-1111-4111-8111-111111111111"} {
+			_, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID})
+			if !errors.Is(err, apperror.ErrInvalidInput) {
+				t.Fatalf("leader %q: error = %v, want invalid input", leaderID, err)
+			}
+		}
+	})
+
 	t.Run("create returns created group", func(t *testing.T) {
-		repo := &mockRepository{createGroupFn: func(_ context.Context, name string) (models.Group, error) {
-			return models.Group{ID: "g1", Name: name}, nil
+		repo := &mockRepository{createGroupFn: func(_ context.Context, name, leaderID string) (models.Group, error) {
+			return models.Group{ID: "g1", Name: name, LeaderID: &leaderID}, nil
 		}}
 		svc := newService(repo)
-		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs"})
+		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: "11111111-1111-4111-8111-111111111111"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if group.ID != "g1" || group.Name != "devs" {
+		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != "11111111-1111-4111-8111-111111111111" {
 			t.Fatalf("group = %+v", group)
 		}
 	})
@@ -450,7 +461,6 @@ func TestCreateManagedDatabase(t *testing.T) {
 		}
 	})
 
-	
 	t.Run("applies default values when optional fields are omitted", func(t *testing.T) {
 		var capturedDB models.ManagedDatabase
 

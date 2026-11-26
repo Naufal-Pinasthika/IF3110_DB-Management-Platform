@@ -85,6 +85,8 @@ func Database(t *testing.T) *gorm.DB {
 	for _, name := range []string{
 		"000001_create_platform_schema.sql",
 		"000005_add_database_engine.sql",
+		"000006_add_group_leader.sql",
+		"000007_add_migration_jobs.sql",
 	} {
 		migration, err := os.ReadFile(filepath.Join(Root(), "db/platform", name))
 		if err != nil {
