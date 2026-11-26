@@ -291,7 +291,7 @@ Dimana pada stress test yang kami lakukan, pengujian memakai:
 Dengan mesin 
 - OS: Ubuntu 24.04.3 LTS, 
 - CPU: 20 vCPU
-- RAM: ~8GiB Generator dan aplikasi berjalan
+- RAM: ~8GiB 
 
 Beriku hasil stress testingnya
 
