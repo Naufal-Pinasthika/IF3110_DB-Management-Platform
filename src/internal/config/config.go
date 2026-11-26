@@ -36,7 +36,7 @@ type SessionConfig struct {
 func Load() (Config, error) {
 	cfg := Config{
 		AppAddr:             envOrDefault("APP_ADDR", ":8080"),
-		PublicOrigin:        envOrDefault("PUBLIC_ORIGIN", "http://localhost:28080"),
+		PublicOrigin:        envOrDefault("PUBLIC_ORIGIN", "http://localhost:6767"),
 		PlatformDatabaseURL: os.Getenv("PLATFORM_DATABASE_URL"),
 		Session:             SessionConfig{CookieName: "sid"},
 		QueryTimeout:        5 * time.Second,

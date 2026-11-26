@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: target_db_user
       POSTGRES_PASSWORD: target_db_password_12345
     ports:
-      - "45433:5432"
+      - "127.0.0.1:56733:5432"
     volumes:
       - target_db_1_data:/var/lib/postgresql/data
       - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -22,7 +22,7 @@ services:
       POSTGRES_USER: target_db_user
       POSTGRES_PASSWORD: target_db_password_12345
     ports:
-      - "5434:5432"
+      - "127.0.0.1:56734:5432"
     volumes:
       - target_db_2_data:/var/lib/postgresql/data
       - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -35,7 +35,7 @@ services:
       POSTGRES_USER: target_db_user
       POSTGRES_PASSWORD: target_db_password_12345
     ports:
-      - "5435:5432"
+      - "127.0.0.1:56735:5432"
     volumes:
       - target_db_3_data:/var/lib/postgresql/data
       - ./db/target/01-init-target-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
@@ -49,7 +49,7 @@ services:
       MYSQL_USER: target_db_user
       MYSQL_PASSWORD: target_db_password_12345
     ports:
-      - "3307:3306"
+      - "127.0.0.1:56736:3306"
     volumes:
       - target_mysql_data:/var/lib/mysql
 
@@ -60,7 +60,7 @@ services:
       POSTGRES_PASSWORD: root
       POSTGRES_DB: platform_db
     ports:
-      - "5432:5432"
+      - "127.0.0.1:56732:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/platform/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/01-platform-schema.sql:ro
@@ -70,12 +70,6 @@ services:
       - ./db/platform/000006_add_group_leader.sql:/docker-entrypoint-initdb.d/05-group-leader.sql:ro
       - ./db/platform/000007_add_migration_jobs.sql:/docker-entrypoint-initdb.d/06-migration-jobs.sql:ro
       - ./db/platform/000008_migration_workflow_and_batches.sql:/docker-entrypoint-initdb.d/07-migration-workflow.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U admin -d platform_db"]
-      interval: 2s
-      timeout: 5s
-      retries: 15
-
 
   backend:
     build:
@@ -85,7 +79,7 @@ services:
       APP_ADDR: ":8080"
       PLATFORM_DATABASE_URL: "postgres://admin:root@postgres:5432/platform_db?sslmode=disable"
       DB_CREDENTIAL_ENCRYPTION_KEY: "${DB_CREDENTIAL_ENCRYPTION_KEY:?Set DB_CREDENTIAL_ENCRYPTION_KEY in .env}"
-      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://localhost:28080}"
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-http://localhost:6767}"
       SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
       SESSION_IDLE_TIMEOUT: "${SESSION_IDLE_TIMEOUT:-30m}"
       SESSION_ABSOLUTE_TIMEOUT: "${SESSION_ABSOLUTE_TIMEOUT:-24h}"
@@ -102,9 +96,9 @@ services:
       JOBS_SHUTDOWN_TIMEOUT: "${JOBS_SHUTDOWN_TIMEOUT:-30s}"
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_started
     ports:
-      - "28080:8080"
+      - "6767:8080"
 
   # Enable once migration implements Executor and ExecutionRegistry.
   worker:
@@ -116,7 +110,7 @@ services:
     environment: *backend-environment
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_started
     stop_grace_period: 40s
 
 
