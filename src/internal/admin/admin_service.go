@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
 
 type Repository interface {
@@ -110,6 +112,8 @@ func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input ap
 		return api.AdminUser{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "admin.user_created", "actor", actor.User.ID, "target_user_id", created.ID, "username", created.Username, "is_platform_admin", created.IsPlatformAdmin, "status", "success")
+
 	return api.AdminUser{
 		ID:              created.ID,
 		Username:        created.Username,
@@ -168,6 +172,8 @@ func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID s
 		return api.AdminUser{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "admin.user_updated", "actor", actor.User.ID, "target_user_id", updated.ID, "is_active", updated.IsActive, "is_platform_admin", updated.IsPlatformAdmin, "sessions_revoked", revokeSessions, "status", "success")
+
 	return api.AdminUser{
 		ID:              updated.ID,
 		Username:        updated.Username,
@@ -208,7 +214,9 @@ func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input a
 	if err != nil {
 		return api.Group{}, err
 	}
-	return groupResponse(group), nil
+	res := groupResponse(group)
+	telemetry.Log(ctx, slog.LevelInfo, "admin.group_created", "actor", actor.User.ID, "group_id", res.ID, "group_name", res.Name, "leader_id", res.LeaderID, "status", "success")
+	return res, nil
 }
 
 // UpdateGroup changes only the supplied group name or leader.
@@ -233,7 +241,9 @@ func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID
 	if err != nil {
 		return api.Group{}, err
 	}
-	return groupResponse(group), nil
+	res := groupResponse(group)
+	telemetry.Log(ctx, slog.LevelInfo, "admin.group_updated", "actor", actor.User.ID, "group_id", res.ID, "group_name", res.Name, "leader_id", res.LeaderID, "status", "success")
+	return res, nil
 }
 
 func validLeaderID(id string) bool {
@@ -263,7 +273,11 @@ func (s *Service) DeleteGroup(ctx context.Context, actor auth.Principal, groupID
 	if groupID == "" {
 		return fmt.Errorf("%w: group id required", apperror.ErrInvalidInput)
 	}
-	return s.Repository.DeleteGroup(ctx, groupID, now)
+	if err := s.Repository.DeleteGroup(ctx, groupID, now); err != nil {
+		return err
+	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.group_deleted", "actor", actor.User.ID, "group_id", groupID, "status", "success")
+	return nil
 }
 
 // AddGroupMember adds a user while allowing multiple groups.
@@ -278,6 +292,7 @@ func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, grou
 	if err != nil {
 		return api.GroupMember{}, err
 	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.group_member_added", "actor", actor.User.ID, "group_id", ug.GroupID, "target_user_id", ug.UserID, "status", "success")
 	return api.GroupMember{GroupID: ug.GroupID, UserID: ug.UserID}, nil
 }
 
@@ -289,7 +304,11 @@ func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, g
 	if groupID == "" || userID == "" {
 		return fmt.Errorf("%w: group id and user id required", apperror.ErrInvalidInput)
 	}
-	return s.Repository.RemoveGroupMember(ctx, groupID, userID, now)
+	if err := s.Repository.RemoveGroupMember(ctx, groupID, userID, now); err != nil {
+		return err
+	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.group_member_removed", "actor", actor.User.ID, "group_id", groupID, "target_user_id", userID, "status", "success")
+	return nil
 }
 
 // ListManagedDatabases lists all registered targets for administration.
@@ -398,6 +417,8 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "admin.database_created", "actor", actor.User.ID, "database_id", created.ID, "label", created.Label, "engine", created.TargetEngine(), "status", "success")
+
 	return api.ManagedDatabaseSummary{
 		ID:           created.ID,
 		Label:        created.Label,
@@ -461,6 +482,8 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 		inv.InvalidateTargetPools(databaseID)
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "admin.database_updated", "actor", actor.User.ID, "database_id", updated.ID, "label", updated.Label, "is_enabled", updated.IsEnabled, "status", "success")
+
 	return api.ManagedDatabaseSummary{
 		ID:           updated.ID,
 		Label:        updated.Label,
@@ -484,6 +507,7 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 	if inv, ok := s.Connections.(poolInvalidator); ok {
 		inv.InvalidateTargetPools(databaseID)
 	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.database_disabled", "actor", actor.User.ID, "database_id", databaseID, "status", "success")
 	return nil
 }
 
@@ -505,6 +529,7 @@ func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principa
 	if inv, ok := s.Connections.(poolInvalidator); ok {
 		inv.InvalidateTargetPools(databaseID)
 	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.database_deleted", "actor", actor.User.ID, "database_id", databaseID, "status", "success")
 	return nil
 }
 
@@ -546,6 +571,8 @@ func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Princip
 		return api.GroupDatabaseAccess{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "admin.access_granted", "actor", actor.User.ID, "group_id", saved.GroupID, "database_id", saved.DatabaseID, "access_level", string(saved.AccessLevel), "status", "success")
+
 	return api.GroupDatabaseAccess{
 		GroupID:     saved.GroupID,
 		DatabaseID:  saved.DatabaseID,
@@ -561,7 +588,11 @@ func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Prin
 	if groupID == "" || databaseID == "" {
 		return fmt.Errorf("%w: group id and database id required", apperror.ErrInvalidInput)
 	}
-	return s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now)
+	if err := s.Repository.DeleteGroupDatabaseAccess(ctx, groupID, databaseID, now); err != nil {
+		return err
+	}
+	telemetry.Log(ctx, slog.LevelInfo, "admin.access_revoked", "actor", actor.User.ID, "group_id", groupID, "database_id", databaseID, "status", "success")
+	return nil
 }
 
 func (s *Service) applyConnectionChanges(current models.ManagedDatabase, input api.UpdateDatabaseRequest) (models.ManagedDatabase, error) {

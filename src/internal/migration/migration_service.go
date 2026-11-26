@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
@@ -12,6 +14,7 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/contracts"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/jobs"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
 
 type AccessChecker interface {
@@ -221,6 +224,16 @@ func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, dat
 		return api.MigrationCreated{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "migration.created",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", saved.ID,
+		"migration_name", saved.Name,
+		"migration_type", saved.MigrationType,
+		"is_irreversible", saved.IsIrreversible,
+		"status", string(saved.Status),
+	)
+
 	return api.MigrationCreated{
 		ID:         saved.ID,
 		DatabaseID: saved.DatabaseID,
@@ -311,6 +324,14 @@ func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databa
 		return api.MigrationDetail{}, err
 	}
 
+	telemetry.Log(ctx, slog.LevelInfo, "migration.review_submitted",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"required_approvals", len(approvals),
+		"status", string(models.MigrationPendingReview),
+	)
+
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
 
@@ -342,7 +363,16 @@ func (s *Service) ApproveMigration(ctx context.Context, actor auth.Principal, da
 		}
 	}
 
-	_, _ = s.Repository.CheckAndSetApproved(ctx, databaseID, migrationID)
+	approvedAll, _ := s.Repository.CheckAndSetApproved(ctx, databaseID, migrationID)
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.approved",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"approved_groups", len(approvals),
+		"fully_approved", approvedAll,
+		"status", "approved",
+	)
 
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
@@ -376,6 +406,13 @@ func (s *Service) RejectMigration(ctx context.Context, actor auth.Principal, dat
 	if err := s.Repository.RejectMigration(ctx, databaseID, migrationID); err != nil {
 		return api.MigrationDetail{}, err
 	}
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.rejected",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"status", string(models.MigrationRejected),
+	)
 
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
@@ -443,6 +480,16 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}
 
 	_, _ = s.Repository.MarkRunning(ctx, databaseID, migrationID, actor.User.ID, now)
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.queued",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", m.ID,
+		"execution_id", exec.ID,
+		"job_id", receipt.JobID,
+		"action_type", exec.ActionType,
+		"status", string(receipt.Status),
+	)
 
 	return api.MigrationExecuted{
 		ID:          m.ID,
@@ -514,6 +561,16 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 	if err != nil {
 		return api.MigrationExecuted{}, err
 	}
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.rollback_queued",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"execution_id", exec.ID,
+		"job_id", receipt.JobID,
+		"action_type", exec.ActionType,
+		"status", string(receipt.Status),
+	)
 
 	return api.MigrationExecuted{
 		ID:          migrationID,
@@ -609,7 +666,8 @@ func (s *Service) ReadProgress(ctx context.Context, ref contracts.ExecutionRef) 
 }
 
 // Execute satisfies jobs.Executor.
-func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (contracts.ExecutionResult, error) {
+func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res contracts.ExecutionResult, retErr error) {
+	started := time.Now()
 	exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID)
 	var m models.Migration
 	if err == nil {
@@ -620,6 +678,85 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (cont
 			return contracts.ExecutionResult{State: contracts.ExecutionFailed, RetryAdvice: contracts.RetryStop, ErrorCode: err.Error()}, err
 		}
 	}
+
+	actorID := m.CreatedBy
+	actionType := "FORWARD"
+	executedSQL := m.SQLText
+	var version int64
+	if m.Version != nil {
+		version = *m.Version
+	}
+	if exec != nil {
+		if exec.ExecutedBy != "" {
+			actorID = exec.ExecutedBy
+		}
+		if exec.ActionType != "" {
+			actionType = exec.ActionType
+		}
+		if exec.ExecutedSQL != "" {
+			executedSQL = exec.ExecutedSQL
+		} else if actionType == "ROLLBACK" && m.SQLDown != nil {
+			executedSQL = *m.SQLDown
+		}
+		if exec.Version != nil {
+			version = *exec.Version
+		}
+	}
+
+	mode := "regular"
+	if m.MigrationType == "BATCH" {
+		mode = "batch"
+	}
+
+	ctx = telemetry.Correlate(ctx, actorID, ref.DatabaseID, "", ref.ExecutionID)
+	ctx = telemetry.WithMigration(ctx, m.ID)
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.execution_started",
+		"migration_id", m.ID,
+		"execution_id", ref.ExecutionID,
+		"version", version,
+		"actor", actorID,
+		"action_type", actionType,
+		"mode", mode,
+		"query", executedSQL,
+		"status", "started",
+	)
+
+	defer func() {
+		dur := time.Since(started)
+		status := strings.ToLower(string(res.State))
+		if status == "" {
+			status = "failed"
+		}
+		telemetry.ObserveMigrationDuration(mode, actionType, status, dur)
+		level := slog.LevelInfo
+		errMsg := ""
+		sqlState := ""
+		if retErr != nil || res.State != contracts.ExecutionSucceeded {
+			level = slog.LevelError
+			if retErr != nil {
+				errMsg = telemetry.SanitizeValue(retErr.Error())
+				sqlState = telemetry.SQLState(retErr)
+			} else if res.ErrorCode != "" {
+				errMsg = res.ErrorCode
+			}
+		}
+		telemetry.Log(ctx, level, "migration.execution_finished",
+			"migration_id", m.ID,
+			"execution_id", ref.ExecutionID,
+			"version", version,
+			"actor", actorID,
+			"action_type", actionType,
+			"mode", mode,
+			"query", executedSQL,
+			"status", status,
+			"duration_ms", float64(dur)/float64(time.Millisecond),
+			"committed_batches", res.CommittedBatches,
+			"committed_rows", res.CommittedRows,
+			"error", errMsg,
+			"sqlstate", sqlState,
+		)
+	}()
 
 	isBatch := m.MigrationType == "BATCH"
 	batchAttr := "id"
@@ -673,6 +810,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (cont
 
 			return contracts.ExecutionResult{
 				State:            contracts.ExecutionSucceeded,
+				RetryAdvice:      contracts.RetryStop,
 				CommittedBatches: revertedBatches,
 				CommittedRows:    revertedRows,
 			}, nil
@@ -692,7 +830,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (cont
 		_ = s.Repository.UpdateExecution(ctx, exec)
 		_, _ = s.Repository.MarkRolledBack(ctx, ref.DatabaseID, m.ID, now)
 
-		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded}, nil
+		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded, RetryAdvice: contracts.RetryStop}, nil
 	}
 
 	// FORWARD execution
@@ -753,6 +891,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (cont
 		_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, m.CreatedBy, now)
 		return contracts.ExecutionResult{
 			State:            contracts.ExecutionSucceeded,
+			RetryAdvice:      contracts.RetryStop,
 			CommittedBatches: committedBatches,
 			CommittedRows:    committedRows,
 		}, nil
@@ -800,12 +939,32 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (cont
 	_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, m.CreatedBy, now)
 
 	return contracts.ExecutionResult{
-		State: contracts.ExecutionSucceeded,
+		State:       contracts.ExecutionSucceeded,
+		RetryAdvice: contracts.RetryStop,
 	}, nil
 }
 
 // Inspect satisfies jobs.Executor.
 func (s *Service) Inspect(ctx context.Context, ref contracts.ExecutionRef) (contracts.ExecutionResult, error) {
+	if exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID); err == nil && exec != nil {
+		switch exec.Status {
+		case "SUCCEEDED":
+			return contracts.ExecutionResult{
+				State:            contracts.ExecutionSucceeded,
+				RetryAdvice:      contracts.RetryStop,
+				CommittedBatches: exec.CommittedBatches,
+				CommittedRows:    exec.CommittedRows,
+			}, nil
+		case "FAILED":
+			return contracts.ExecutionResult{
+				State:            contracts.ExecutionFailed,
+				RetryAdvice:      contracts.RetryStop,
+				CommittedBatches: exec.CommittedBatches,
+				CommittedRows:    exec.CommittedRows,
+			}, nil
+		}
+	}
+
 	runner, ok := s.Runner.(*Runner)
 	if ok {
 		batches, rows, _, err := runner.InspectCheckpoints(ctx, ref.DatabaseID, ref.ExecutionID)
@@ -822,8 +981,8 @@ func (s *Service) Inspect(ctx context.Context, ref contracts.ExecutionRef) (cont
 
 	m, err := s.Repository.GetMigration(ctx, ref.DatabaseID, ref.ExecutionID)
 	if err == nil && m.Status == models.MigrationApplied {
-		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded}, nil
+		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded, RetryAdvice: contracts.RetryStop}, nil
 	}
 
-	return contracts.ExecutionResult{State: contracts.ExecutionUnknown, BlocksDatabase: true}, nil
+	return contracts.ExecutionResult{State: contracts.ExecutionUnknown, RetryAdvice: contracts.RetryReconcile, BlocksDatabase: true}, nil
 }

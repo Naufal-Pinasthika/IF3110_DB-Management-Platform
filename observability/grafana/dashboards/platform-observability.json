@@ -1,0 +1,175 @@
+{
+  "uid": "db-platform-observability",
+  "title": "DB Management Platform — Queue, Migration & DB Pool",
+  "tags": ["if3110", "migrations", "postgres", "observability"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Migration Jobs by Status (Current)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "max by (status) (platform_migration_jobs_by_status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Migration Jobs by Status Over Time",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "max by (status) (platform_migration_jobs_by_status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Queue Wait Time (p50 & p95)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 5 },
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(platform_migration_queue_wait_seconds_bucket[5m])))",
+          "legendFormat": "Queue Wait p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(platform_migration_queue_wait_seconds_bucket[5m])))",
+          "legendFormat": "Queue Wait p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, result) (rate(platform_migration_lock_wait_seconds_bucket[5m])))",
+          "legendFormat": "Lock Wait p95 ({{result}})",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Migration Duration (p50 & p95)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 5 },
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, mode, action) (rate(platform_migration_duration_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{mode}} / {{action}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, mode, action) (rate(platform_migration_duration_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{mode}} / {{action}}",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Batches & Rows Processed + Retries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by (action, status) (increase(platform_migration_batches_processed_total[5m]))",
+          "legendFormat": "Batches ({{action}}/{{status}})",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (reason) (increase(platform_migration_job_retries_total[5m]))",
+          "legendFormat": "Retries ({{reason}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Total Rows Processed (Migrations)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by (action) (platform_migration_rows_processed_total)",
+          "legendFormat": "Rows ({{action}})",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (status) (platform_migration_jobs_total)",
+          "legendFormat": "Jobs {{status}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Database Connection Pool — Active (In Use) & Idle",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 19 },
+      "targets": [
+        {
+          "expr": "sum by (service, pool, state) (platform_db_pool_connections{state=~\"in_use|idle|max_open\"})",
+          "legendFormat": "{{service}} {{pool}} ({{state}})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Database Connection Pool — Wait Time & Wait Count",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "expr": "sum by (service, pool) (rate(platform_db_pool_wait_duration_seconds_total[5m]))",
+          "legendFormat": "Wait sec/s ({{service}} {{pool}})",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (service, pool) (increase(platform_db_pool_wait_count_total[5m]))",
+          "legendFormat": "Wait count ({{service}} {{pool}})",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

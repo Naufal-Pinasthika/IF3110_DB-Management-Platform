@@ -196,6 +196,10 @@ func (w *Worker) process(ctx context.Context, job Job, lock *databaseLock) {
 		telemetry.Log(ctx, slog.LevelError, "job.claim_failed", "job_id", job.ID, "database_id", job.DatabaseID, "error_code", "CLAIM_UNAVAILABLE")
 		return
 	}
+	opCtx = telemetry.WithAttempt(opCtx, job.AttemptCount)
+	if job.AttemptCount == 1 && !job.CreatedAt.IsZero() {
+		telemetry.ObserveQueueWait(time.Since(job.CreatedAt))
+	}
 	kind := "execute"
 	if inspect {
 		kind = "inspect"
@@ -225,7 +229,12 @@ func (w *Worker) process(ctx context.Context, job Job, lock *databaseLock) {
 			"database_id", job.DatabaseID, "error_code", "FINISH_UNCONFIRMED")
 		return // Preserve inspection state and the database block for recovery
 	}
-	telemetry.Log(ctx, slog.LevelInfo, "job.attempt_finished", "job_id", job.ID, "execution_id", job.ExecutionID,
+	if done.Status == contracts.JobRetryWait {
+		telemetry.IncJobRetry(string(done.Result.RetryAdvice))
+	} else {
+		telemetry.IncJobFinished(string(done.Status))
+	}
+	telemetry.Log(opCtx, slog.LevelInfo, "job.attempt_finished", "job_id", job.ID, "execution_id", job.ExecutionID,
 		"database_id", job.DatabaseID, "status", done.Status, "outcome", done.Result.State,
 		"attempt", job.AttemptCount, "retry_advice", done.Result.RetryAdvice,
 		"committed_batches", done.Result.CommittedBatches, "committed_rows", done.Result.CommittedRows,

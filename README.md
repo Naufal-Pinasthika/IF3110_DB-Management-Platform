@@ -207,5 +207,18 @@ IF3110_DB-Management-Platform
         ├── admin/
         ├── auth/
         ├── config/
-        └── frontend/
+        ├── frontend/
+        └── telemetry/
 ```
+
+## Activity Logging, Tracing & Bonus Observability
+
+- Aplikasi mengeluarkan structured JSON logs (`log/slog`) ke `stdout` dengan redaction otomatis untuk credential/token/session dan korelasi `trace_id`/`span_id` OpenTelemetry lintas `API -> Queue -> Worker -> Lock -> Migration/Batch/SQL` serta query read-only Explorer.
+- Endpoint metrik Prometheus tersedia di `GET /metrics` (`http://localhost:28080/metrics`).
+- Untuk menjalankan stack observability terpusat (**OpenTelemetry Collector + Tempo + Loki + Prometheus + Grafana** dengan dashboard ter-provisioning otomatis):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+```
+
+Lihat detail konfigurasi, contoh output log/span/metrik, dan korelasi log-trace di [docs/observability.md](docs/observability.md).

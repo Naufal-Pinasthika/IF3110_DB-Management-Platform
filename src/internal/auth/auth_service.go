@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
 
 // define repository func interface
@@ -73,15 +75,22 @@ func (s *Service) Login(ctx context.Context, input api.LoginRequest, now time.Ti
 		// still verifies to prevent timing attack
 		// https://security.stackexchange.com/questions/239054/timing-attacks-in-password-hash-comparisons
 		_ = VerifyPassword(input.Password, s.tempPasswordHash)
+		telemetry.Log(ctx, slog.LevelWarn, "auth.login_failed", "username", input.Username, "status", "failed", "reason", "invalid_credentials")
 		return  LoginResult{}, ErrInvalidCredentials
 	}
 	if err != nil {
+		telemetry.Log(ctx, slog.LevelError, "auth.login_failed", "username", input.Username, "status", "error", "reason", "repository_error")
 		return LoginResult{}, err
 	}
 
 	// verifies its password relative to its hash
 	passwordValid := VerifyPassword(input.Password, user.PasswordHash)
 	if passwordValid != nil || !user.IsActive {
+		reason := "invalid_credentials"
+		if passwordValid == nil && !user.IsActive {
+			reason = "inactive_account"
+		}
+		telemetry.Log(ctx, slog.LevelWarn, "auth.login_failed", "actor", user.ID, "username", user.Username, "status", "failed", "reason", reason)
 		return LoginResult{}, ErrInvalidCredentials
 	}
 
@@ -109,8 +118,11 @@ func (s *Service) Login(ctx context.Context, input api.LoginRequest, now time.Ti
 
 	errCreateSession := s.Repository.CreateSession(ctx, &session)
 	if errCreateSession != nil {
+		telemetry.Log(ctx, slog.LevelError, "auth.login_failed", "actor", user.ID, "status", "error", "reason", "session_create_failed")
 		return LoginResult{}, errCreateSession
 	}
+
+	telemetry.Log(ctx, slog.LevelInfo, "auth.login_succeeded", "actor", user.ID, "username", user.Username, "status", "success")
 
 	// return LoginResult successfully
 	return LoginResult{
@@ -262,7 +274,13 @@ func (s *Service) RotateSession(ctx context.Context, session models.Session, now
 // revoke a session on the server
 // basically a wrapper from RevokeSession() on auth_repository
 func (s *Service) Logout(ctx context.Context, actor Principal, now time.Time) error {
-	return s.Repository.RevokeSession(ctx, actor.SessionID, now)
+	err := s.Repository.RevokeSession(ctx, actor.SessionID, now)
+	if err != nil {
+		telemetry.Log(ctx, slog.LevelError, "auth.logout_failed", "actor", actor.User.ID, "status", "failed")
+		return err
+	}
+	telemetry.Log(ctx, slog.LevelInfo, "auth.logout_succeeded", "actor", actor.User.ID, "status", "success")
+	return nil
 }
 
 // invalidates all sessions after an account access change

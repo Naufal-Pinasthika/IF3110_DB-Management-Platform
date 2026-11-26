@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,8 +13,12 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/sqlguard"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 	"github.com/go-sql-driver/mysql"
 	pgquery "github.com/pganalyze/pg_query_go/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type Runner struct {
@@ -54,14 +59,28 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 	}
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
+	ctx, span := otel.Tracer("platform/migration").Start(ctx, "migration.sql")
+	span.SetAttributes(
+		attribute.String("database.id", databaseID),
+		attribute.String("db.system", config.TargetEngine()),
+	)
+	defer span.End()
+
 	if plan.DDL {
 		return executeMySQLDDL(ctx, db, statements[0])
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "begin transaction failed")
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 	if config.TargetEngine() == models.EngineMySQL {
 		// Nontransactional tables would silently violate the rollback guarantee.
 		for _, table := range plan.Tables {
@@ -73,16 +92,77 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 		}
 	}
 	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
+		stmtStarted := time.Now()
+		telemetry.Log(ctx, slog.LevelInfo, "sql.started",
+			"operation", "migration.execute",
+			"database_id", databaseID,
+			"query", statement,
+			"parameters", telemetry.RedactParams(),
+			"status", "started",
+		)
+		res, execErr := tx.ExecContext(ctx, statement)
+		durMS := float64(time.Since(stmtStarted)) / float64(time.Millisecond)
+		if execErr != nil {
+			span.RecordError(execErr)
+			span.SetStatus(codes.Error, "migration SQL failed")
+			telemetry.Log(ctx, slog.LevelError, "sql.finished",
+				"operation", "migration.execute",
+				"database_id", databaseID,
+				"query", statement,
+				"parameters", telemetry.RedactParams(),
+				"duration_ms", durMS,
+				"status", "failed",
+				"error", telemetry.SanitizeValue(execErr.Error()),
+				"sqlstate", telemetry.SQLState(execErr),
+			)
 			if rbErr := tx.Rollback(); rbErr != nil {
+				telemetry.Log(ctx, slog.LevelError, "sql.transaction_rollback",
+					"operation", "migration.execute",
+					"database_id", databaseID,
+					"status", "failed",
+					"error", telemetry.SanitizeValue(rbErr.Error()),
+					"sqlstate", telemetry.SQLState(rbErr),
+				)
 				return fmt.Errorf("%w: execution failed and rollback was not confirmed", apperror.ErrTransactionOutcomeUnknown)
 			}
-			return fmt.Errorf("%w: migration failed and safely rolled back: %v", apperror.ErrInvalidInput, err)
+			committed = true // already rolled back explicitly
+			telemetry.Log(ctx, slog.LevelInfo, "sql.transaction_rollback",
+				"operation", "migration.execute",
+				"database_id", databaseID,
+				"status", "success",
+			)
+			return fmt.Errorf("%w: migration failed and safely rolled back: %v", apperror.ErrInvalidInput, execErr)
 		}
+		rowsAffected, _ := res.RowsAffected()
+		span.SetAttributes(attribute.Int64("db.rows", rowsAffected))
+		telemetry.Log(ctx, slog.LevelInfo, "sql.finished",
+			"operation", "migration.execute",
+			"database_id", databaseID,
+			"query", statement,
+			"parameters", telemetry.RedactParams(),
+			"duration_ms", durMS,
+			"rows", rowsAffected,
+			"status", "success",
+		)
 	}
 	if err := tx.Commit(); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "migration commit unconfirmed")
+		telemetry.Log(ctx, slog.LevelError, "sql.transaction_commit",
+			"operation", "migration.execute",
+			"database_id", databaseID,
+			"status", "failed",
+			"error", telemetry.SanitizeValue(err.Error()),
+			"sqlstate", telemetry.SQLState(err),
+		)
 		return fmt.Errorf("%w: target commit was not confirmed", apperror.ErrTransactionOutcomeUnknown)
 	}
+	committed = true
+	telemetry.Log(ctx, slog.LevelInfo, "sql.transaction_commit",
+		"operation", "migration.execute",
+		"database_id", databaseID,
+		"status", "success",
+	)
 	return nil
 }
 func executeMySQLDDL(ctx context.Context, db *sql.DB, statement string) error {
@@ -95,13 +175,41 @@ func executeMySQLDDL(ctx context.Context, db *sql.DB, statement string) error {
 		return err
 	}
 	// One DDL statement, outside a transaction: MySQL implicitly commits schema changes.
+	started := time.Now()
+	telemetry.Log(ctx, slog.LevelInfo, "sql.started",
+		"operation", "migration.mysql_ddl",
+		"query", statement,
+		"parameters", telemetry.RedactParams(),
+		"status", "started",
+	)
 	if _, err := conn.ExecContext(ctx, statement); err != nil {
+		durMS := float64(time.Since(started)) / float64(time.Millisecond)
+		telemetry.Log(ctx, slog.LevelError, "sql.finished",
+			"operation", "migration.mysql_ddl",
+			"query", statement,
+			"parameters", telemetry.RedactParams(),
+			"duration_ms", durMS,
+			"status", "failed",
+			"error", telemetry.SanitizeValue(err.Error()),
+			"sqlstate", telemetry.SQLState(err),
+		)
 		var serverError *mysql.MySQLError
 		if errors.As(err, &serverError) {
 			return fmt.Errorf("%w: MySQL schema change failed; inspect the schema before retrying (DDL is not transactionally rolled back): %v", apperror.ErrInvalidInput, err)
 		}
 		return fmt.Errorf("%w: MySQL schema change was not confirmed; inspect the target before retrying", apperror.ErrTransactionOutcomeUnknown)
 	}
+	telemetry.Log(ctx, slog.LevelInfo, "sql.finished",
+		"operation", "migration.mysql_ddl",
+		"query", statement,
+		"parameters", telemetry.RedactParams(),
+		"duration_ms", float64(time.Since(started))/float64(time.Millisecond),
+		"status", "success",
+	)
+	telemetry.Log(ctx, slog.LevelInfo, "sql.transaction_commit",
+		"operation", "migration.mysql_ddl",
+		"status", "success",
+	)
 	return nil
 }
 
@@ -182,8 +290,22 @@ func (r *Runner) ExecuteBatch(
 		default:
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
+		batchNum := int(committedBatches + 1)
+		batchCtx := telemetry.WithBatch(ctx, batchNum)
+		batchCtx, batchSpan := otel.Tracer("platform/migration").Start(batchCtx, "migration.batch")
+		batchSpan.SetAttributes(
+			attribute.String("database.id", databaseID),
+			attribute.String("execution.id", execID),
+			attribute.Int("migration.batch_number", batchNum),
+		)
+		batchStarted := time.Now()
+
+		tx, err := db.BeginTx(batchCtx, nil)
 		if err != nil {
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "batch begin failed")
+			batchSpan.End()
+			telemetry.IncBatchProcessed("forward", "failed", 0)
 			return committedBatches, committedRows, lastCursor, err
 		}
 
@@ -199,6 +321,14 @@ func (r *Runner) ExecuteBatch(
 			batchSQL = strings.ReplaceAll(batchSQL, "{{ATTRIBUTE}}", attr)
 		}
 
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.started",
+			"operation", "migration.batch",
+			"database_id", databaseID,
+			"query", batchSQL,
+			"parameters", telemetry.RedactParams(cursorVal, batchSize),
+			"status", "started",
+		)
+
 		var rowsAffected int64
 		nextCursor := cursorVal
 
@@ -213,7 +343,7 @@ func (r *Runner) ExecuteBatch(
 			}
 		}
 
-		qRows, qErr := tx.QueryContext(ctx, querySQL)
+		qRows, qErr := tx.QueryContext(batchCtx, querySQL)
 		if qErr == nil {
 			for qRows.Next() {
 				rowsAffected++
@@ -225,9 +355,34 @@ func (r *Runner) ExecuteBatch(
 			_ = qRows.Close()
 		} else {
 			// Fallback to direct ExecContext if RETURNING is not supported by statement structure
-			res, err := tx.ExecContext(ctx, batchSQL)
+			res, err := tx.ExecContext(batchCtx, batchSQL)
 			if err != nil {
-				_ = tx.Rollback()
+				durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+				batchSpan.RecordError(err)
+				batchSpan.SetStatus(codes.Error, "batch SQL failed")
+				telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
+					"operation", "migration.batch",
+					"database_id", databaseID,
+					"query", batchSQL,
+					"parameters", telemetry.RedactParams(cursorVal, batchSize),
+					"duration_ms", durMS,
+					"rows", 0,
+					"status", "failed",
+					"error", telemetry.SanitizeValue(err.Error()),
+					"sqlstate", telemetry.SQLState(err),
+				)
+				rbErr := tx.Rollback()
+				rbStatus := "success"
+				if rbErr != nil {
+					rbStatus = "failed"
+				}
+				telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
+					"operation", "migration.batch",
+					"database_id", databaseID,
+					"status", rbStatus,
+				)
+				batchSpan.End()
+				telemetry.IncBatchProcessed("forward", "failed", 0)
 				return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", err)
 			}
 			rowsAffected, _ = res.RowsAffected()
@@ -240,8 +395,27 @@ func (r *Runner) ExecuteBatch(
 			}
 		}
 
+		durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+		batchSpan.SetAttributes(attribute.Int64("db.rows", rowsAffected))
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.finished",
+			"operation", "migration.batch",
+			"database_id", databaseID,
+			"query", batchSQL,
+			"parameters", telemetry.RedactParams(cursorVal, batchSize),
+			"duration_ms", durMS,
+			"rows", rowsAffected,
+			"status", "success",
+		)
+
 		if rowsAffected == 0 {
 			_ = tx.Rollback()
+			telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
+				"operation", "migration.batch",
+				"database_id", databaseID,
+				"status", "success",
+				"reason", "empty_batch",
+			)
+			batchSpan.End()
 			break
 		}
 
@@ -249,18 +423,49 @@ func (r *Runner) ExecuteBatch(
 		committedRows += rowsAffected
 		lastCursor = nextCursor
 
-		_, err = tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(batchCtx, `
 			INSERT INTO _platform_migration_checkpoints (execution_id, batch_number, last_cursor, rows_affected, status)
 			VALUES ($1::uuid, $2, $3, $4, 'COMMITTED')
 		`, execID, committedBatches, nextCursor, rowsAffected)
 		if err != nil {
 			_ = tx.Rollback()
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "checkpoint save failed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.transaction_rollback",
+				"operation", "migration.batch_checkpoint",
+				"database_id", databaseID,
+				"status", "success",
+				"error", telemetry.SanitizeValue(err.Error()),
+				"sqlstate", telemetry.SQLState(err),
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("forward", "failed", 0)
 			return committedBatches - 1, committedRows - rowsAffected, lastCursor, fmt.Errorf("checkpoint save failed: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "batch commit unconfirmed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.transaction_commit",
+				"operation", "migration.batch",
+				"database_id", databaseID,
+				"status", "failed",
+				"error", telemetry.SanitizeValue(err.Error()),
+				"sqlstate", telemetry.SQLState(err),
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("forward", "failed", 0)
 			return committedBatches - 1, committedRows - rowsAffected, lastCursor, fmt.Errorf("%w: batch commit unconfirmed", apperror.ErrTransactionOutcomeUnknown)
 		}
+
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_commit",
+			"operation", "migration.batch",
+			"database_id", databaseID,
+			"rows", rowsAffected,
+			"status", "success",
+		)
+		batchSpan.End()
+		telemetry.IncBatchProcessed("forward", "committed", rowsAffected)
 
 		if onProgress != nil {
 			onProgress(committedBatches, committedRows, nextCursor)
@@ -310,8 +515,21 @@ func (r *Runner) RevertBatch(
 
 	var revertedBatches, revertedRows int64
 	for _, b := range batches {
-		tx, err := db.BeginTx(ctx, nil)
+		batchCtx := telemetry.WithBatch(ctx, int(b.num))
+		batchCtx, batchSpan := otel.Tracer("platform/migration").Start(batchCtx, "migration.revert_batch")
+		batchSpan.SetAttributes(
+			attribute.String("database.id", databaseID),
+			attribute.String("execution.id", execID),
+			attribute.Int64("migration.batch_number", b.num),
+		)
+		batchStarted := time.Now()
+
+		tx, err := db.BeginTx(batchCtx, nil)
 		if err != nil {
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "revert begin failed")
+			batchSpan.End()
+			telemetry.IncBatchProcessed("rollback", "failed", 0)
 			return revertedBatches, revertedRows, err
 		}
 
@@ -321,24 +539,95 @@ func (r *Runner) RevertBatch(
 			downSQL = strings.ReplaceAll(downSQL, "{{ATTRIBUTE}}", attr)
 		}
 
-		if _, err := tx.ExecContext(ctx, downSQL); err != nil {
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.started",
+			"operation", "migration.revert_batch",
+			"database_id", databaseID,
+			"query", downSQL,
+			"parameters", telemetry.RedactParams(b.cursor),
+			"status", "started",
+		)
+
+		if _, err := tx.ExecContext(batchCtx, downSQL); err != nil {
+			durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "revert SQL failed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
+				"operation", "migration.revert_batch",
+				"database_id", databaseID,
+				"query", downSQL,
+				"parameters", telemetry.RedactParams(b.cursor),
+				"duration_ms", durMS,
+				"status", "failed",
+				"error", telemetry.SanitizeValue(err.Error()),
+				"sqlstate", telemetry.SQLState(err),
+			)
 			_ = tx.Rollback()
+			telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
+				"operation", "migration.revert_batch",
+				"database_id", databaseID,
+				"status", "success",
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("rollback", "failed", 0)
 			return revertedBatches, revertedRows, fmt.Errorf("revert batch %d failed: %w", b.num, err)
 		}
 
-		_, err = tx.ExecContext(ctx, `
+		durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+		batchSpan.SetAttributes(attribute.Int64("db.rows", b.rows))
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.finished",
+			"operation", "migration.revert_batch",
+			"database_id", databaseID,
+			"query", downSQL,
+			"parameters", telemetry.RedactParams(b.cursor),
+			"duration_ms", durMS,
+			"rows", b.rows,
+			"status", "success",
+		)
+
+		_, err = tx.ExecContext(batchCtx, `
 			UPDATE _platform_migration_checkpoints
 			SET status = 'REVERTED'
 			WHERE execution_id = $1::uuid AND batch_number = $2
 		`, execID, b.num)
 		if err != nil {
 			_ = tx.Rollback()
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "revert checkpoint update failed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.transaction_rollback",
+				"operation", "migration.revert_batch_checkpoint",
+				"database_id", databaseID,
+				"status", "success",
+				"error", telemetry.SanitizeValue(err.Error()),
+				"sqlstate", telemetry.SQLState(err),
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("rollback", "failed", 0)
 			return revertedBatches, revertedRows, fmt.Errorf("update checkpoint revert failed: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
+			batchSpan.RecordError(err)
+			batchSpan.SetStatus(codes.Error, "revert commit unconfirmed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.transaction_commit",
+				"operation", "migration.revert_batch",
+				"database_id", databaseID,
+				"status", "failed",
+				"error", telemetry.SanitizeValue(err.Error()),
+				"sqlstate", telemetry.SQLState(err),
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("rollback", "failed", 0)
 			return revertedBatches, revertedRows, fmt.Errorf("%w: revert commit unconfirmed", apperror.ErrTransactionOutcomeUnknown)
 		}
+
+		telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_commit",
+			"operation", "migration.revert_batch",
+			"database_id", databaseID,
+			"rows", b.rows,
+			"status", "success",
+		)
+		batchSpan.End()
+		telemetry.IncBatchProcessed("rollback", "committed", b.rows)
 
 		revertedBatches++
 		revertedRows += b.rows

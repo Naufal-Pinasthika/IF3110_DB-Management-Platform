@@ -108,6 +108,7 @@ func (s *Service) Enqueue(ctx context.Context, ref contracts.ExecutionRef) (rece
 		return receipt, err
 	}
 	span.SetAttributes(attribute.String("job.id", job.ID))
+	telemetry.IncJobEnqueued()
 	telemetry.Log(ctx, slog.LevelInfo, "job.enqueued", "job_id", job.ID, "execution_id", job.ExecutionID,
 		"database_id", job.DatabaseID, "status", job.Status)
 	return job.Receipt(), nil
