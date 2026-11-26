@@ -1,9 +1,10 @@
-# Build the SPA before embedding it into the Go binary.
-FROM node:24-alpine AS frontend-build
+# Build the SPA before embedding it into the Go binary
+FROM node:24-bookworm-slim AS frontend-build
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --include=optional --no-audit --no-fund
 COPY frontend ./
 RUN npm run build
 
