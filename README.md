@@ -214,14 +214,50 @@ IF3110_DB-Management-Platform
 ## Activity Logging, Tracing & Bonus Observability
 
 - Aplikasi mengeluarkan structured JSON logs (`log/slog`) ke `stdout` dengan redaction otomatis untuk credential/token/session dan korelasi `trace_id`/`span_id` OpenTelemetry lintas `API -> Queue -> Worker -> Lock -> Migration/Batch/SQL` serta query read-only Explorer.
-- Endpoint metrik Prometheus tersedia di `GET /metrics` (`http://localhost:28080/metrics`).
-- Untuk menjalankan stack observability terpusat (**OpenTelemetry Collector + Tempo + Loki + Prometheus + Grafana** dengan dashboard ter-provisioning otomatis):
+- Endpoint metrik Prometheus tersedia di `GET /metrics` (<http://localhost:6767/metrics>).
+
+### Cara Menjalankan
+
+Pastikan `.env` sudah siap (jalankan `./scripts/setup.sh` sekali jika belum). Untuk menjalankan stack lengkap dengan **OpenTelemetry Collector + Tempo + Loki + Prometheus + Grafana** (dashboard auto-provisioned):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --build
 ```
 
-Lihat detail konfigurasi, contoh output log/span/metrik, dan korelasi log-trace di [docs/observability.md](docs/observability.md).
+Untuk menyertakan container `worker` terpisah (profile `jobs`, mengekspor metrik worker di internal `worker:9091/metrics`):
+
+```bash
+docker compose --profile jobs -f docker-compose.yml -f docker-compose.observability.yml up -d --build
+```
+
+Untuk melihat structured JSON logs secara langsung:
+
+```bash
+docker compose logs -f backend
+# jika menjalankan worker terpisah:
+docker compose --profile jobs logs -f worker
+```
+
+Untuk menghentikan seluruh stack observability:
+
+```bash
+docker compose --profile jobs -f docker-compose.yml -f docker-compose.observability.yml down
+```
+
+### Link & Path Layanan Observability
+
+| Layanan | URL / Path | Keterangan |
+|---|---|---|
+| **Web & API** | <http://localhost:6767> | Aplikasi utama (health check: <http://localhost:6767/health>) |
+| **Prometheus Metrics (Backend)** | <http://localhost:6767/metrics> | Endpoint metrik format Prometheus (`platform-api`) |
+| **Prometheus UI** | <http://localhost:9090> | Query & graph: <http://localhost:9090/graph> · Status scrape targets: <http://localhost:9090/targets> |
+| **Grafana** | <http://localhost:3000> | Anonymous Admin aktif, atau login `admin` / `admin` |
+| **Grafana Dashboard (Auto-provisioned)** | <http://localhost:3000/d/db-platform-observability> | *DB Management Platform — Queue, Migration & DB Pool* |
+| **Grafana Explore (Loki & Tempo)** | <http://localhost:3000/explore> | Korelasi log ↔ trace via `TraceID` (Loki → Tempo & Tempo → Loki) |
+| **OpenTelemetry Collector (OTLP)** | `http://localhost:4318` (HTTP) · `localhost:4317` (gRPC) | Penerima OTLP traces & logs |
+| **Tempo / Loki API** | <http://localhost:3200> (Tempo) · <http://localhost:3100> (Loki) | Backend storage traces & logs |
+
+Lihat detail arsitektur, contoh output log/span/metrik, dan cara korelasi log-trace di [docs/observability.md](docs/observability.md).
 
 ## Stress Testing dengan k6
 

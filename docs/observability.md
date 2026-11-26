@@ -151,8 +151,8 @@ docker compose --profile jobs -f docker-compose.yml -f docker-compose.observabil
 ```
 
 Akses layanan observability:
-- **Grafana:** <http://localhost:3000> (auto-provisioned dashboard: *DB Management Platform — Queue, Migration & DB Pool*, default login `admin` / `admin` atau anonymous Admin).
+- **Grafana:** <http://localhost:3000> (auto-provisioned dashboard: [DB Management Platform — Queue, Migration & DB Pool](http://localhost:3000/d/db-platform-observability), Explore: <http://localhost:3000/explore>, default login `admin` / `admin` atau anonymous Admin).
   - Korelasi **Log <-> Trace**: di **Explore -> Loki**, klik link **TraceID** pada baris log untuk langsung melompat ke waterfall trace di **Tempo**; dari **Tempo**, klik **Logs for this span** untuk melihat log yang berkorelasi.
-- **Prometheus:** <http://localhost:9090>
-- **Metrics Backend:** <http://localhost:28080/metrics>
-- **OTel Collector OTLP HTTP:** `http://localhost:4318`
+- **Prometheus:** <http://localhost:9090> (targets: <http://localhost:9090/targets>, graph: <http://localhost:9090/graph>)
+- **Metrics Backend:** <http://localhost:6767/metrics>
+- **OTel Collector OTLP HTTP:** `http://localhost:4318` (gRPC: `localhost:4317`)
