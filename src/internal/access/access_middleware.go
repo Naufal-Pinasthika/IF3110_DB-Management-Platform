@@ -1,10 +1,12 @@
 package access
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
 
 // checks platform management permission after session validation.
@@ -12,11 +14,13 @@ func (s *Service) PlatformAdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := auth.PrincipalFromContext(r.Context())
 		if !ok {
+			telemetry.Log(r.Context(), slog.LevelWarn, "access.denied", "path", r.URL.Path, "required", "PLATFORM_ADMIN", "status", "unauthenticated")
 			api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Missing authenticated principal")
 			return
 		}
 
 		if err := s.RequirePlatformAdmin(r.Context(), principal); err != nil {
+			telemetry.Log(r.Context(), slog.LevelWarn, "access.denied", "actor", principal.User.ID, "path", r.URL.Path, "required", "PLATFORM_ADMIN", "status", "forbidden")
 			api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Platform admin access required")
 			return
 		}
@@ -31,6 +35,7 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			principal, ok := auth.PrincipalFromContext(r.Context())
 			if !ok {
+				telemetry.Log(r.Context(), slog.LevelWarn, "access.denied", "path", r.URL.Path, "required", string(required), "status", "unauthenticated")
 				api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED", "Missing authenticated principal")
 				return
 			}
@@ -42,12 +47,14 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 				return
 			}
 
-			if err := s.RequireDatabase(r.Context(), principal, dbID, required); err != nil {
+			ctx := telemetry.WithDatabase(r.Context(), dbID)
+			if err := s.RequireDatabase(ctx, principal, dbID, required); err != nil {
+				telemetry.Log(ctx, slog.LevelWarn, "access.denied", "actor", principal.User.ID, "database_id", dbID, "path", r.URL.Path, "required", string(required), "status", "forbidden")
 				api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Insufficient database access")
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

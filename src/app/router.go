@@ -36,11 +36,13 @@ func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration Jobs
 	}
 	authHandler := &auth.Handler{Service: service, PublicOrigin: cfg.PublicOrigin}
 
-	// Session middleware wrapper that injects Principal into access context
+	// Session middleware wrapper that injects Principal into access and telemetry contexts
 	sessionMiddleware := func(next http.Handler) http.Handler {
 		return authHandler.SessionMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if principal, ok := auth.PrincipalFromContext(r.Context()); ok {
-				r = r.WithContext(auth.SetPrincipalContext(r.Context(), principal))
+				ctx := auth.SetPrincipalContext(r.Context(), principal)
+				ctx = telemetry.WithActor(ctx, principal.User.ID)
+				r = r.WithContext(ctx)
 			}
 			next.ServeHTTP(w, r)
 		}))
@@ -77,6 +79,11 @@ func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration Jobs
 			Databases: adminRepo,
 			Cipher:    cipher,
 		}
+		if sqlDB, err := db.DB(); err == nil {
+			telemetry.RegisterDBPool("platform", sqlDB)
+		}
+		telemetry.RegisterDBPoolProvider("targets", targetStore.PoolStats)
+		telemetry.RegisterJobStatusCounter((&jobs.PostgresRepository{DB: db}).CountByStatus)
 
 		accessRepo := &access.PostgresRepository{DB: db}
 		accessService := &access.Service{Repository: accessRepo}
@@ -189,6 +196,7 @@ func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration Jobs
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiRouter)
 	mux.Handle("/health", apiRouter)
+	mux.Handle("GET /metrics", telemetry.MetricsHandler())
 	mux.Handle("/", pages)
 	return telemetry.HTTP(mux), nil
 }
