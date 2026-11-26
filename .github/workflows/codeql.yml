@@ -1,0 +1,142 @@
+name: CodeQL SAST
+
+on:
+  push:
+    branches:
+      - main
+      - feat/sast
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '30 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+
+      - name: Build Go packages
+        if: matrix.language == 'go'
+        env:
+          CGO_ENABLED: '1'
+        run: go build ./src/... ./web/...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+          output: sarif-results
+          upload: always
+
+      - name: Summarize SARIF findings
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import glob, json, os
+
+          files = sorted(glob.glob("sarif-results/*.sarif"))
+          rows = []
+          for path in files:
+              with open(path, encoding="utf-8") as fh:
+                  data = json.load(fh)
+              for run in data.get("runs", []):
+                  rules = {}
+                  driver = run.get("tool", {}).get("driver", {})
+                  for r in driver.get("rules", []):
+                      rules[r.get("id", "")] = r
+                  for ext in run.get("tool", {}).get("extensions", []):
+                      for r in ext.get("rules", []):
+                          rules[r.get("id", "")] = r
+                  for res in run.get("results", []):
+                      rule_id = res.get("ruleId", "unknown")
+                      rule_meta = rules.get(rule_id, {})
+                      props = rule_meta.get("properties", {})
+                      severity = props.get("security-severity", "")
+                      level = res.get("level") or rule_meta.get("defaultConfiguration", {}).get("level", "warning")
+                      locs = res.get("locations", [])
+                      uri, line = "-", "-"
+                      if locs:
+                          phys = locs[0].get("physicalLocation", {})
+                          uri = phys.get("artifactLocation", {}).get("uri", "-")
+                          line = phys.get("region", {}).get("startLine", "-")
+                      msg = (res.get("message", {}).get("text", "") or "").replace("\n", " ").replace("|", "\\|")
+                      rows.append((rule_id, level, str(severity), f"{uri}:{line}", msg))
+
+          lines = [
+              f"### CodeQL SARIF Summary ({len(rows)} finding(s))",
+              "",
+          ]
+          if not files:
+              lines.append("No SARIF files found (analysis did not produce output).")
+          elif rows:
+              lines.append("| Rule | Level | Security Severity | Location | Message |")
+              lines.append("|---|---|---|---|---|")
+              for row in rows:
+                  lines.append(f"| `{row[0]}` | `{row[1]}` | `{row[2] or '-'}` | `{row[3]}` | {row[4]} |")
+          else:
+              lines.append("No findings reported in generated SARIF files.")
+
+          summary = "\n".join(lines) + "\n"
+          print(summary)
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary_path:
+              with open(summary_path, "a", encoding="utf-8") as out:
+                  out.write(summary)
+          PY
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: sarif-results/*.sarif
+          if-no-files-found: warn
+          retention-days: 30
