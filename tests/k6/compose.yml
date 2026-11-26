@@ -1,0 +1,82 @@
+x-app: &app
+  image: if3110-stress-app
+  build:
+    context: ../..
+    dockerfile: src/Dockerfile
+  environment: &app-env
+    APP_ADDR: ':8080'
+    PUBLIC_ORIGIN: http://backend:8080
+    PLATFORM_DATABASE_URL: postgres://admin:root@postgres:5432/platform_db?sslmode=disable
+    DB_CREDENTIAL_ENCRYPTION_KEY: ${STRESS_DB_KEY:?Run scripts/stress.sh}
+    JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-4}
+    SESSION_ROTATION_INTERVAL: 1h
+    SESSION_ABSOLUTE_TIMEOUT: 24h
+  depends_on:
+    postgres:
+      condition: service_healthy
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: platform_db
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U admin -d platform_db']
+      interval: 2s
+      retries: 60
+    volumes:
+      - platform:/var/lib/postgresql/data
+      - ../../db/platform/000001_create_platform_schema.sql:/docker-entrypoint-initdb.d/01.sql:ro
+      - ../../db/platform/000002_dev_admin.sql:/docker-entrypoint-initdb.d/02.sql:ro
+      - ../../db/platform/000005_add_database_engine.sql:/docker-entrypoint-initdb.d/05.sql:ro
+      - ../../db/platform/000006_add_group_leader.sql:/docker-entrypoint-initdb.d/06.sql:ro
+      - ../../db/platform/000007_add_migration_jobs.sql:/docker-entrypoint-initdb.d/07.sql:ro
+      - ../../db/platform/000008_migration_workflow_and_batches.sql:/docker-entrypoint-initdb.d/08.sql:ro
+  target-a: &target
+    image: postgres:17
+    environment:
+      POSTGRES_USER: stress
+      POSTGRES_PASSWORD: stress
+      POSTGRES_DB: stress
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U stress -d stress']
+      interval: 2s
+      retries: 60
+  target-b:
+    <<: *target
+  backend:
+    <<: *app
+  worker:
+    <<: *app
+    command: ['./worker']
+  tools:
+    image: python:3.13-alpine
+    working_dir: /scripts
+    volumes:
+      - .:/scripts:ro
+      - ${STRESS_OUTPUT:?Run scripts/stress.sh}:/results
+    environment: &test-env
+      BASE_URL: http://backend:8080
+      ORIGIN: http://backend:8080
+      MODE: ${MODE:-same}
+      API_RATE: ${API_RATE:-10}
+      JOB_RATE: ${JOB_RATE:-12}
+      HOLD_SECONDS: ${HOLD_SECONDS:-60}
+      RAMP_SECONDS: ${RAMP_SECONDS:-15}
+      DRAIN_SECONDS: ${DRAIN_SECONDS:-300}
+      JOB_ROWS: ${JOB_ROWS:-1000}
+      JOB_DELAY: ${JOB_DELAY:-2}
+      API_P95_MS: ${API_P95_MS:-500}
+      ERROR_RATE: ${ERROR_RATE:-0.01}
+      MAX_VUS: ${MAX_VUS:-20}
+      JOBS_CONCURRENCY: ${JOBS_CONCURRENCY:-4}
+  k6:
+    image: grafana/k6:1.4.2
+    user: '${STRESS_UID:-1000}:${STRESS_GID:-1000}'
+    volumes:
+      - .:/scripts:ro
+      - ${STRESS_OUTPUT:?Run scripts/stress.sh}:/results
+    environment: *test-env
+volumes:
+  platform:
