@@ -34,7 +34,8 @@ migrate-platform:
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000006_add_group_leader.sql
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000007_add_migration_jobs.sql
 
-test-integration:
+# Integration auth checks serve the embedded SPA, so build assets before Go compiles it.
+test-integration: frontend-build
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
 	mkdir -p tests/artifacts
 	REQUIRE_INTEGRATION_TESTS=1 go -C tests test -race -count=1 -timeout=3m -coverpkg=$(MODULE)/src/app,$(MODULE)/src/api,$(MODULE)/src/internal/auth,$(MODULE)/src/internal/store,$(MODULE)/src/internal/admin,$(MODULE)/src/internal/access -coverprofile=artifacts/integration-coverage.out ./integration/auth ./integration/admin
@@ -43,7 +44,7 @@ browser-install:
 	npm --prefix tests ci
 	npm --prefix tests run browser:install
 
-test-browser:
+test-browser: frontend-build
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
 	REQUIRE_INTEGRATION_TESTS=1 REQUIRE_BROWSER_TESTS=1 go -C tests test -race -count=1 -timeout=5m ./integration/... -run 'TestAuthBrowserIntegration|TestFrontendBrowserFixtures' -v
 
