@@ -5,15 +5,84 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 	"github.com/lib/pq"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
+
+func startQueryTrace(ctx context.Context, databaseID, operation, query string, params ...any) (context.Context, func(rows int64, err error)) {
+	ctx = telemetry.WithDatabase(ctx, databaseID)
+	ctx, span := otel.Tracer("platform/explorer").Start(ctx, "db.query")
+	span.SetAttributes(
+		attribute.String("database.id", databaseID),
+		attribute.String("db.operation.name", operation),
+		attribute.Bool("db.read_only", true),
+	)
+	redactedParams := telemetry.RedactParams(params...)
+	started := time.Now()
+	telemetry.Log(ctx, slog.LevelInfo, "sql.started",
+		"operation", operation,
+		"read_only", true,
+		"query", query,
+		"parameters", redactedParams,
+		"status", "started",
+	)
+	return ctx, func(rows int64, err error) {
+		durMS := float64(time.Since(started)) / float64(time.Millisecond)
+		status := "success"
+		level := slog.LevelInfo
+		errMsg := ""
+		sqlState := ""
+		if err != nil {
+			status = "failed"
+			level = slog.LevelError
+			errMsg = telemetry.SanitizeValue(err.Error())
+			sqlState = telemetry.SQLState(err)
+			span.RecordError(err)
+			span.SetStatus(codes.Error, "read-only query failed")
+		}
+		span.SetAttributes(attribute.Int64("db.rows", rows))
+		span.End()
+		telemetry.Log(ctx, level, "sql.finished",
+			"operation", operation,
+			"read_only", true,
+			"query", query,
+			"parameters", redactedParams,
+			"duration_ms", durMS,
+			"rows", rows,
+			"status", status,
+			"error", errMsg,
+			"sqlstate", sqlState,
+		)
+	}
+}
+
+func rollbackReadOnlyTx(ctx context.Context, tx *sql.Tx, operation string) {
+	err := tx.Rollback()
+	if err != nil && err != sql.ErrTxDone {
+		telemetry.Log(ctx, slog.LevelWarn, "sql.transaction_rollback",
+			"operation", operation,
+			"status", "failed",
+			"error", telemetry.SanitizeValue(err.Error()),
+			"sqlstate", telemetry.SQLState(err),
+		)
+		return
+	}
+	telemetry.Log(ctx, slog.LevelInfo, "sql.transaction_rollback",
+		"operation", operation,
+		"status", "success",
+	)
+}
 
 type TargetRepository struct {
 	Targets      *store.TargetStore
@@ -43,8 +112,10 @@ func (r *TargetRepository) ListSchemas(ctx context.Context, databaseID string) (
 		  AND schema_name NOT LIKE 'pg_toast%'
 		ORDER BY schema_name;
 	`
-	rows, err := db.QueryContext(ctx, query)
+	qCtx, finish := startQueryTrace(ctx, databaseID, "explorer.list_schemas", strings.TrimSpace(query))
+	rows, err := db.QueryContext(qCtx, query)
 	if err != nil {
+		finish(0, err)
 		return nil, fmt.Errorf("%w: failed to fetch schemas: %v", apperror.ErrInternal, err)
 	}
 	defer rows.Close()
@@ -53,11 +124,14 @@ func (r *TargetRepository) ListSchemas(ctx context.Context, databaseID string) (
 	for rows.Next() {
 		var s api.SchemaSummary
 		if err := rows.Scan(&s.Name); err != nil {
+			finish(int64(len(schemas)), err)
 			return nil, err
 		}
 		schemas = append(schemas, s)
 	}
-	return schemas, rows.Err()
+	err = rows.Err()
+	finish(int64(len(schemas)), err)
+	return schemas, err
 }
 
 // ListTables reads tables in a selected schema.
@@ -80,8 +154,10 @@ func (r *TargetRepository) ListTables(ctx context.Context, databaseID, schema st
 		WHERE table_schema = $1 AND table_type = 'BASE TABLE'
 		ORDER BY table_name;
 	`
-	rows, err := db.QueryContext(ctx, query, schema)
+	qCtx, finish := startQueryTrace(ctx, databaseID, "explorer.list_tables", strings.TrimSpace(query), schema)
+	rows, err := db.QueryContext(qCtx, query, schema)
 	if err != nil {
+		finish(0, err)
 		return nil, fmt.Errorf("%w: failed to fetch tables: %v", apperror.ErrInternal, err)
 	}
 	defer rows.Close()
@@ -90,11 +166,14 @@ func (r *TargetRepository) ListTables(ctx context.Context, databaseID, schema st
 	for rows.Next() {
 		var t api.TableSummary
 		if err := rows.Scan(&t.Name); err != nil {
+			finish(int64(len(tables)), err)
 			return nil, err
 		}
 		tables = append(tables, t)
 	}
-	return tables, rows.Err()
+	err = rows.Err()
+	finish(int64(len(tables)), err)
+	return tables, err
 }
 
 // GetTableDetail reads columns and constraints and indexes.
@@ -126,8 +205,10 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 		WHERE table_schema = $1 AND table_name = $2
 		ORDER BY ordinal_position;
 	`
-	cRows, err := db.QueryContext(ctx, colQuery, schema, table)
+	colCtx, finishCols := startQueryTrace(ctx, databaseID, "explorer.table_columns", strings.TrimSpace(colQuery), schema, table)
+	cRows, err := db.QueryContext(colCtx, colQuery, schema, table)
 	if err != nil {
+		finishCols(0, err)
 		return detail, fmt.Errorf("%w: failed to fetch columns: %v", apperror.ErrInternal, err)
 	}
 	defer cRows.Close()
@@ -136,11 +217,13 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 		var col api.TableColumn
 		var isNullableStr string
 		if err := cRows.Scan(&col.Name, &col.DataType, &isNullableStr); err != nil {
+			finishCols(int64(len(detail.Columns)), err)
 			return detail, err
 		}
 		col.Nullable = (isNullableStr == "YES")
 		detail.Columns = append(detail.Columns, col)
 	}
+	finishCols(int64(len(detail.Columns)), cRows.Err())
 	if len(detail.Columns) == 0 {
 		return detail, apperror.ErrNotFound // Table doesn't exist
 	}
@@ -154,7 +237,8 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 		WHERE tc.table_schema = $1 AND tc.table_name = $2
 		GROUP BY tc.constraint_name, tc.constraint_type;
 	`
-	conRows, err := db.QueryContext(ctx, conQuery, schema, table)
+	conCtx, finishCons := startQueryTrace(ctx, databaseID, "explorer.table_constraints", strings.TrimSpace(conQuery), schema, table)
+	conRows, err := db.QueryContext(conCtx, conQuery, schema, table)
 	if err == nil {
 		defer conRows.Close()
 		for conRows.Next() {
@@ -163,6 +247,9 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 				detail.Constraints = append(detail.Constraints, con)
 			}
 		}
+		finishCons(int64(len(detail.Constraints)), conRows.Err())
+	} else {
+		finishCons(0, err)
 	}
 
 	// 3. Indexes (simplified query)
@@ -176,7 +263,8 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 		WHERE n.nspname = $1 AND t.relname = $2
 		GROUP BY i.relname, ix.indisunique;
 	`
-	idxRows, err := db.QueryContext(ctx, idxQuery, schema, table)
+	idxCtx, finishIdx := startQueryTrace(ctx, databaseID, "explorer.table_indexes", strings.TrimSpace(idxQuery), schema, table)
+	idxRows, err := db.QueryContext(idxCtx, idxQuery, schema, table)
 	if err == nil {
 		defer idxRows.Close()
 		for idxRows.Next() {
@@ -185,6 +273,9 @@ func (r *TargetRepository) GetTableDetail(ctx context.Context, databaseID, schem
 				detail.Indexes = append(detail.Indexes, idx)
 			}
 		}
+		finishIdx(int64(len(detail.Indexes)), idxRows.Err())
+	} else {
+		finishIdx(0, err)
 	}
 
 	return detail, nil
@@ -212,7 +303,7 @@ func (r *TargetRepository) GetTableRows(ctx context.Context, databaseID, schema,
 	if err != nil {
 		return api.TableRows{}, fmt.Errorf("%w: failed to start transaction: %v", apperror.ErrInternal, err)
 	}
-	defer tx.Rollback()
+	defer rollbackReadOnlyTx(ctx, tx, "explorer.get_table_rows")
 
 	// Quote identifiers and fetch limit+1 to determine HasMore
 	quote, placeholders := `"`, "$1 OFFSET $2"
@@ -221,14 +312,17 @@ func (r *TargetRepository) GetTableRows(ctx context.Context, databaseID, schema,
 	}
 	identifier := func(name string) string { return quote + strings.ReplaceAll(name, quote, quote+quote) + quote }
 	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %s", identifier(schema), identifier(table), placeholders)
-	rows, err := tx.QueryContext(txCtx, query, limit+1, offset)
+	qCtx, finish := startQueryTrace(txCtx, databaseID, "explorer.get_table_rows", query, limit+1, offset)
+	rows, err := tx.QueryContext(qCtx, query, limit+1, offset)
 	if err != nil {
+		finish(0, err)
 		return api.TableRows{}, fmt.Errorf("%w: query failed: %v", apperror.ErrInvalidInput, err)
 	}
 	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
+		finish(0, err)
 		return api.TableRows{}, err
 	}
 
@@ -255,6 +349,7 @@ func (r *TargetRepository) GetTableRows(ctx context.Context, databaseID, schema,
 		}
 
 		if err := rows.Scan(valPtrs...); err != nil {
+			finish(int64(len(result.Rows)), err)
 			return api.TableRows{}, err
 		}
 
@@ -267,7 +362,9 @@ func (r *TargetRepository) GetTableRows(ctx context.Context, databaseID, schema,
 		result.Rows = append(result.Rows, vals)
 	}
 
-	return result, rows.Err()
+	err = rows.Err()
+	finish(int64(len(result.Rows)), err)
+	return result, err
 }
 
 // RunQuery executes an approved query with database enforced restrictions.
@@ -285,17 +382,20 @@ func (r *TargetRepository) RunQuery(ctx context.Context, databaseID string, inpu
 	if err != nil {
 		return api.QueryResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
 	}
-	defer tx.Rollback()
+	defer rollbackReadOnlyTx(ctx, tx, "explorer.run_query")
 
 	// Execute user query
-	rows, err := tx.QueryContext(txCtx, input.SQL)
+	qCtx, finish := startQueryTrace(txCtx, databaseID, "explorer.run_query", input.SQL)
+	rows, err := tx.QueryContext(qCtx, input.SQL)
 	if err != nil {
+		finish(0, err)
 		return api.QueryResult{}, fmt.Errorf("%w: %v", apperror.ErrInvalidInput, err)
 	}
 	defer rows.Close()
 
 	cols, err := rows.Columns()
 	if err != nil {
+		finish(0, err)
 		return api.QueryResult{}, err
 	}
 
@@ -319,6 +419,7 @@ func (r *TargetRepository) RunQuery(ctx context.Context, databaseID string, inpu
 		}
 
 		if err := rows.Scan(valPtrs...); err != nil {
+			finish(int64(result.RowCount), err)
 			return api.QueryResult{}, err
 		}
 
@@ -331,7 +432,9 @@ func (r *TargetRepository) RunQuery(ctx context.Context, databaseID string, inpu
 		result.RowCount++
 	}
 
-	return result, rows.Err()
+	err = rows.Err()
+	finish(int64(result.RowCount), err)
+	return result, err
 }
 
 // ExplainQuery runs EXPLAIN (FORMAT JSON [, ANALYZE]) on the given SQL within a ReadOnly transaction.
@@ -351,7 +454,7 @@ func (r *TargetRepository) ExplainQuery(ctx context.Context, databaseID string, 
 	if err != nil {
 		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
 	}
-	defer tx.Rollback() // always rollback – we never commit an EXPLAIN
+	defer rollbackReadOnlyTx(ctx, tx, "explorer.explain_query") // always rollback – we never commit an EXPLAIN
 
 	var explainSQL string
 	if input.Analyze {
@@ -360,8 +463,10 @@ func (r *TargetRepository) ExplainQuery(ctx context.Context, databaseID string, 
 		explainSQL = "EXPLAIN (FORMAT JSON) " + input.SQL
 	}
 
-	rows, err := tx.QueryContext(txCtx, explainSQL)
+	qCtx, finish := startQueryTrace(txCtx, databaseID, "explorer.explain_query", explainSQL)
+	rows, err := tx.QueryContext(qCtx, explainSQL)
 	if err != nil {
+		finish(0, err)
 		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInvalidInput, err)
 	}
 	defer rows.Close()
@@ -370,12 +475,15 @@ func (r *TargetRepository) ExplainQuery(ctx context.Context, databaseID string, 
 	var rawJSON string
 	if rows.Next() {
 		if err := rows.Scan(&rawJSON); err != nil {
+			finish(0, err)
 			return api.ExplainResult{}, fmt.Errorf("%w: failed to scan explain output: %v", apperror.ErrInternal, err)
 		}
 	}
 	if err := rows.Err(); err != nil {
+		finish(0, err)
 		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
 	}
+	finish(1, nil)
 
 	// rawJSON is an array of plan objects: [{"Plan": {...}, "Planning Time": 1.2, ...}]
 	var rawPlans []map[string]json.RawMessage
@@ -422,7 +530,7 @@ func (r *TargetRepository) ExplainQuery(ctx context.Context, databaseID string, 
 
 // ExplainSQL runs EXPLAIN on migration DML after syntax-aware validation.
 // The outer transaction is always rolled back after the preview.
-func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sqlText string, analyze bool) (api.ExplainResult, error) {
+func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sqlText string, analyze bool) (res api.ExplainResult, retErr error) {
 	db, err := r.Targets.Migrator(ctx, databaseID)
 	if err != nil {
 		return api.ExplainResult{}, err
@@ -436,13 +544,17 @@ func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sq
 	if err != nil {
 		return api.ExplainResult{}, fmt.Errorf("%w: %v", apperror.ErrInternal, err)
 	}
-	defer tx.Rollback()
+	defer rollbackReadOnlyTx(ctx, tx, "explorer.explain_migration")
 
 	// Build each statement's EXPLAIN individually (migration may have multiple statements)
 	statements := splitStatements(sqlText)
 	if len(statements) == 0 {
 		return api.ExplainResult{}, fmt.Errorf("%w: no SQL statements found", apperror.ErrInvalidInput)
 	}
+
+	qCtx, finishExplain := startQueryTrace(txCtx, databaseID, "explorer.explain_migration", sqlText)
+	defer func() { finishExplain(int64(len(statements)), retErr) }()
+	txCtx = qCtx
 
 	var allPlans []api.ExplainPlan
 
@@ -456,6 +568,33 @@ func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sq
 			return api.ExplainResult{}, fmt.Errorf("%w: could not isolate statement plan: %v", apperror.ErrInternal, err)
 		}
 
+		if !isExplainableStmt(stmt) {
+			start := time.Now()
+			_, execErr := tx.ExecContext(txCtx, stmt)
+			dur := float64(time.Since(start).Microseconds()) / 1000.0 // ms
+			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT "+savepoint)
+			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint)
+
+			if execErr != nil {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					Error:          execErr.Error(),
+				})
+			} else {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					ExecutionTime:  &dur,
+					Plan: api.ExplainNode{
+						NodeType:     "DDL Execution (previewed & rolled back)",
+						RelationName: summarizeDDL(stmt),
+					},
+				})
+			}
+			continue
+		}
+
 		var explainSQL string
 		if analyze {
 			explainSQL = "EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) " + stmt
@@ -465,10 +604,26 @@ func (r *TargetRepository) ExplainSQL(ctx context.Context, databaseID string, sq
 
 		rows, err := tx.QueryContext(txCtx, explainSQL)
 		if err != nil {
-			// Some PostgreSQL commands do not have a plan (for example CREATE TABLE).
-			allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: err.Error()})
+			// Fallback: try executing directly in savepoint in case EXPLAIN failed on DDL/utility command
+			start := time.Now()
+			_, execErr := tx.ExecContext(txCtx, stmt)
+			dur := float64(time.Since(start).Microseconds()) / 1000.0
 			_, _ = tx.ExecContext(txCtx, "ROLLBACK TO SAVEPOINT "+savepoint)
 			_, _ = tx.ExecContext(txCtx, "RELEASE SAVEPOINT "+savepoint)
+
+			if execErr == nil {
+				allPlans = append(allPlans, api.ExplainPlan{
+					Analyzed:       analyze,
+					StatementIndex: i + 1,
+					ExecutionTime:  &dur,
+					Plan: api.ExplainNode{
+						NodeType:     "DDL Execution (previewed & rolled back)",
+						RelationName: summarizeDDL(stmt),
+					},
+				})
+			} else {
+				allPlans = append(allPlans, api.ExplainPlan{Analyzed: analyze, StatementIndex: i + 1, Error: execErr.Error()})
+			}
 			continue
 		}
 
@@ -536,6 +691,58 @@ func splitStatements(sql string) []string {
 		}
 	}
 	return out
+}
+
+func isExplainableStmt(stmt string) bool {
+	s := strings.TrimSpace(stmt)
+	for {
+		if strings.HasPrefix(s, "--") {
+			idx := strings.Index(s, "\n")
+			if idx == -1 {
+				return false
+			}
+			s = strings.TrimSpace(s[idx+1:])
+			continue
+		}
+		if strings.HasPrefix(s, "/*") {
+			idx := strings.Index(s, "*/")
+			if idx == -1 {
+				return false
+			}
+			s = strings.TrimSpace(s[idx+2:])
+			continue
+		}
+		break
+	}
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return false
+	}
+	firstWord := strings.ToUpper(fields[0])
+	switch firstWord {
+	case "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE", "VALUES", "WITH", "DECLARE", "EXECUTE":
+		return true
+	default:
+		return false
+	}
+}
+
+func summarizeDDL(stmt string) string {
+	s := strings.TrimSpace(stmt)
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 {
+		firstLine := strings.TrimSpace(lines[0])
+		firstLine = strings.TrimSuffix(firstLine, "(")
+		firstLine = strings.TrimSpace(firstLine)
+		if len(firstLine) > 60 {
+			return firstLine[:57] + "..."
+		}
+		return firstLine
+	}
+	if len(s) > 60 {
+		return s[:57] + "..."
+	}
+	return s
 }
 
 // buildPlanText produces a simple text summary from parsed plan objects.

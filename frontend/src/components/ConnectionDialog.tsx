@@ -6,6 +6,24 @@ import type { ConnectionDetail, ConnectionTest } from '../types'
 import { ErrorState, Loading, Modal } from './ui'
 import { useFormAction } from '../form-hooks'
 
+const composeTargets = [
+  { host: 'target-db-1', engine: 'postgres', port: 5432 },
+  { host: 'target-db-2', engine: 'postgres', port: 5432 },
+  { host: 'target-db-3', engine: 'postgres', port: 5432 },
+  { host: 'target-mysql', engine: 'mysql', port: 3306 },
+] as const
+
+const isComposeTarget = (host: string) => composeTargets.some(target => target.host === host)
+
+const composeTarget = (host: string) => composeTargets.find(target => target.host === host)
+
+const composeEngine = (port: string) => port === '3306' ? 'mysql' : 'postgres'
+
+const composeTargetPort = (host: string) => {
+  const target = composeTarget(host)
+  return target ? String(target.port) : ''
+}
+
 export default function ConnectionDialog({ id, onClose }: { id?: string; onClose: () => void }) {
   const connection = useQuery({ queryKey: ['admin-connection', id], queryFn: ({ signal }) => api<ConnectionDetail>(`/api/v1/admin/databases/${encode(id!)}`, { signal }), enabled: Boolean(id), staleTime: 0 })
   if (id && !connection.data) return <Modal title="Edit connection" onClose={onClose}>
@@ -23,6 +41,7 @@ function ConnectionForm({ connection, onClose }: { connection?: ConnectionDetail
     edit_reader: !connection, edit_migrator: !connection,
   }
   const [values, setValues] = useState(initial)
+  const [composeHost, setComposeHost] = useState(connection ? 'custom' : '')
   const [saved] = useState(() => JSON.stringify(initial))
   const [test, setTest] = useState<ConnectionTest | null>(null)
   const [showReader, setShowReader] = useState(false)
@@ -71,13 +90,40 @@ function ConnectionForm({ connection, onClose }: { connection?: ConnectionDetail
     }}>
       <fieldset className="form-fields dialog-body" disabled={action.busy}>
         <section><h3>Connection details</h3>
-          <label htmlFor="connection-engine">Database engine</label><select id="connection-engine" value={values.engine} onChange={event => {
-            const engine = event.target.value
-            setValues(previous => ({ ...previous, engine, port: ['5432', '3306'].includes(previous.port) ? (engine === 'mysql' ? '3306' : '5432') : previous.port, ssl_mode: engine === 'mysql' && previous.ssl_mode === 'verify-ca' ? 'verify-full' : previous.ssl_mode })); setTest(null)
-          }}><option value="postgres">PostgreSQL</option><option value="mysql">MySQL</option></select>
+          {connection || composeHost === 'custom' ? <>
+            <label htmlFor="connection-engine">Database engine</label><select id="connection-engine" value={values.engine} onChange={event => {
+              const engine = event.target.value
+              setValues(previous => ({ ...previous, engine, port: ['5432', '3306'].includes(previous.port) ? (engine === 'mysql' ? '3306' : '5432') : previous.port, ssl_mode: engine === 'mysql' && previous.ssl_mode === 'verify-ca' ? 'verify-full' : previous.ssl_mode })); setTest(null)
+            }}><option value="postgres">PostgreSQL</option><option value="mysql">MySQL</option></select>
+          </> : null}
           <label htmlFor="connection-label">Connection label</label><input id="connection-label" required autoFocus placeholder="e.g. Inventory" value={values.label} onChange={event => update('label', event.target.value)} />
-          <div className="form-columns host-port"><div><label htmlFor="connection-host">Host</label><input id="connection-host" required placeholder="db.example.com" value={values.host} onChange={event => update('host', event.target.value)} /></div><div><label htmlFor="connection-port">Port</label><input id="connection-port" required type="number" min={1} max={65535} value={values.port} onChange={event => update('port', event.target.value)} /></div></div>
-          <label htmlFor="connection-database">Database name</label><input id="connection-database" required placeholder="inventory" value={values.database_name} onChange={event => update('database_name', event.target.value)} />
+          {!connection && <>
+            <label htmlFor="connection-compose-host">Host</label>
+            <select id="connection-compose-host" required value={composeHost} onChange={event => {
+              const host = event.target.value
+              const target = composeTarget(host)
+              setComposeHost(host)
+              setValues(previous => ({
+                ...previous,
+                host: target?.host || '',
+                database_name: target ? 'target_db' : '',
+                ...(target ? { engine: target.engine, port: String(target.port) } : {}),
+              }))
+              setTest(null)
+            }}>
+              <option value="" disabled hidden>Choose a Compose target…</option>
+              {composeTargets.map(target => <option key={target.host} value={target.host}>{target.host}</option>)}
+              <option value="custom">Custom host…</option>
+            </select>
+            {composeHost === 'custom' && <><label htmlFor="connection-custom-host">Custom host</label><input id="connection-custom-host" required placeholder="db.example.com" value={values.host} onChange={event => update('host', event.target.value)} /></>}
+          </>}
+          {connection && <div><label htmlFor="connection-host">Host</label><input id="connection-host" required placeholder="db.example.com" value={values.host} onChange={event => update('host', event.target.value)} /></div>}
+          {(connection || composeHost === 'custom' || isComposeTarget(composeHost)) && <div><label htmlFor="connection-port">Port</label>{!connection && isComposeTarget(composeHost) ? <select id="connection-port" value={values.port} onChange={event => {
+            const port = event.target.value
+            setValues(previous => ({ ...previous, port, engine: composeEngine(port) }))
+            setTest(null)
+          }}><option value={composeTargetPort(composeHost)}>{composeTargetPort(composeHost)}</option></select> : <input id="connection-port" required type="number" min={1} max={65535} value={values.port} onChange={event => update('port', event.target.value)} />}</div>}
+          {(connection || composeHost === 'custom' || isComposeTarget(composeHost)) && <><label htmlFor="connection-database">Database name</label>{!connection && isComposeTarget(composeHost) ? <select id="connection-database" value={values.database_name} onChange={event => update('database_name', event.target.value)}><option value="target_db">target_db</option></select> : <input id="connection-database" required placeholder="inventory" value={values.database_name} onChange={event => update('database_name', event.target.value)} />}</>}
         </section>
         <section className="connection-section"><h3>Credentials</h3><p className="helper-text">Platform permissions control allowed actions. Database privileges control what those credentials can do; use an account with only the permissions it needs.</p>
           <h4>Reader</h4><div className="form-columns"><div><label htmlFor="reader-username">Username</label><input id="reader-username" autoComplete="off" required value={values.reader_username} onChange={event => update('reader_username', event.target.value)} /></div>{secretField('reader')}</div>

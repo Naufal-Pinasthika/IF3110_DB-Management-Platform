@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/app"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/config"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/jobs"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/store"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
@@ -44,6 +46,30 @@ func run() int {
 	if err != nil {
 		slog.Error("worker.pool_unavailable")
 		return 1
+	}
+
+	telemetry.RegisterDBPool("platform", pool)
+	telemetry.RegisterJobStatusCounter((&jobs.PostgresRepository{DB: db}).CountByStatus)
+
+	if metricsAddr := os.Getenv("WORKER_METRICS_ADDR"); metricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", telemetry.MetricsHandler())
+		metricsServer := &http.Server{
+			Addr:              metricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			slog.Info("worker.metrics_listening", "address", metricsAddr)
+			if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("worker.metrics_failed", "error", err.Error())
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = metricsServer.Shutdown(shutdownCtx)
+		}()
 	}
 
 	worker, err := app.NewMigrationWorker(db, cfg)

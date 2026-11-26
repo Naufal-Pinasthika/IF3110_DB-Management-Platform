@@ -104,6 +104,102 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
+// SubmitReview handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/submit-review.
+func (h *Handler) SubmitReview(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	detail, err := h.Service.SubmitReview(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, detail)
+}
+
+// Approve handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/approve.
+func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	var req api.DecideApprovalRequest
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req)
+
+	detail, err := h.Service.ApproveMigration(r.Context(), principal, dbID, migrationID, req, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, detail)
+}
+
+// Reject handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/reject.
+func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	var req api.DecideApprovalRequest
+	_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&req)
+
+	detail, err := h.Service.RejectMigration(r.Context(), principal, dbID, migrationID, req, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, detail)
+}
+
+// Rollback handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/rollback.
+func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	executed, err := h.Service.RollbackMigration(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, executed)
+}
+
+// Forward handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/forward.
+func (h *Handler) Forward(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	executed, err := h.Service.ForwardMigration(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, executed)
+}
+
+// ListHistory handles GET /api/v1/databases/{dbId}/migration-history.
+func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+	hideRollback := r.URL.Query().Get("hide_rollback") == "true" || r.URL.Query().Get("hide_rollback") == "1"
+
+	history, err := h.Service.ListMigrationHistory(r.Context(), principal, dbID, hideRollback)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, history)
+}
+
 // ExplainMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/explain.
 func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	dbID, migrationID := r.PathValue("dbId"), r.PathValue("migrationId")
@@ -147,12 +243,15 @@ func writeError(w http.ResponseWriter, err error) {
 		api.WriteAPIError(w, http.StatusNotFound, "NOT_FOUND", "Resource not found")
 
 	case errors.Is(err, apperror.ErrConflict):
-		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", "State conflict or already running")
+		api.WriteAPIError(w, http.StatusConflict, "CONFLICT", err.Error())
 
 	case errors.Is(err, apperror.ErrInvalidInput):
 		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 
-	case errors.Is(err, apperror.ErrForbidden), errors.Is(err, access.ErrForbidden):
+	case errors.Is(err, apperror.ErrForbidden):
+		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+
+	case errors.Is(err, access.ErrForbidden):
 		api.WriteAPIError(w, http.StatusForbidden, "FORBIDDEN", "Insufficient database access")
 
 	case errors.Is(err, access.ErrUnauthenticated), errors.Is(err, auth.ErrUnauthenticated):

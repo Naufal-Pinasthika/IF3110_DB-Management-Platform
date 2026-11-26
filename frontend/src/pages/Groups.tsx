@@ -13,7 +13,6 @@ type Editor = { kind: 'group'; group?: Group } | { kind: 'member'; group: Group 
 function userAccess(data: GroupData, user: AdminUser, database: Connection, excludedGroup = '') {
   if (!user.is_active) return { level: 'DISABLED', sources: ['Inactive account'] }
   if (!database.is_enabled) return { level: 'DISABLED', sources: ['Disabled connection'] }
-  if (user.is_platform_admin) return { level: 'VIEW_EDIT', sources: ['Platform administrator'] }
   const memberships = data.members.filter(member => member.user_id === user.id && member.group_id !== excludedGroup).map(member => member.group_id)
   const grants = data.grants.filter(grant => memberships.includes(grant.group_id) && grant.database_id === database.id)
   return {
@@ -50,20 +49,26 @@ export default function Groups() {
         <div className="panel-toolbar"><div><h2 id="selected-group-name">{group.name}</h2><p>{members.length} member{members.length === 1 ? '' : 's'} - {grants.length} database{grants.length === 1 ? '' : 's'}</p></div><div className="toolbar-actions">
           <button type="button" className="button small" onClick={() => setEditor({ kind: 'group', group })}>Rename</button>
           <ActionButton className="button small danger" onAction={async () => {
-            if (!await confirm({ title: `Delete ${group.name}?`, description: 'This removes the group, its memberships, and database grants. Access provided by other groups or administrator roles remains. Affected sessions will refresh.', label: 'Delete group' })) return
+            if (!await confirm({ title: `Delete ${group.name}?`, description: 'This removes the group, its memberships, and database grants. Access provided by other groups remains. Affected sessions will refresh.', label: 'Delete group' })) return
             await api(`/api/v1/admin/groups/${encode(group.id)}`, { method: 'DELETE' })
             await changed(`${group.name} deleted.`)
           }}>Delete group</ActionButton>
         </div></div>
         <Tabs selected={tab} onSelect={setTab} label="Group configuration" tabs={[{ id: 'members', label: 'Members' }, { id: 'grants', label: 'Database access' }, { id: 'effective', label: 'Effective access' }]} />
         <section role="tabpanel" aria-label="Members" hidden={tab !== 'members'}>
-          <div className="section-toolbar"><p className="muted">Members can also inherit access from other groups.</p><button className="button primary small" onClick={() => setEditor({ kind: 'member', group })}>Add member</button></div>
-          <div className="table-scroll"><table><thead><tr><th>Username</th><th>Platform role</th><th>Actions</th></tr></thead><tbody>{members.map(user => <tr key={user.id}><td><strong>{user.username}</strong></td><td>{user.is_active ? user.is_platform_admin ? 'Administrator' : 'User' : 'Inactive account'}</td><td><ActionButton className="button small danger" onAction={async () => {
+          <div className="section-toolbar"><p className="muted">Members can also inherit access from other groups. Every group must have a leader for migration approvals.</p><button className="button primary small" onClick={() => setEditor({ kind: 'member', group })}>Add member</button></div>
+          <div className="table-scroll"><table><thead><tr><th>Username</th><th>Platform role</th><th>Actions</th></tr></thead><tbody>{members.map(user => {
+            const isLeader = group.leader_id === user.id
+            return <tr key={user.id}><td><strong>{user.username}</strong>{isLeader && <span className="badge green" style={{ marginLeft: '.5rem' }}>Leader</span>}</td><td>{user.is_active ? user.is_platform_admin ? 'Administrator' : 'User' : 'Inactive account'}</td><td><div className="toolbar-actions">{!isLeader && user.is_active && <ActionButton className="button small" onAction={async () => {
+              await api(`/api/v1/admin/groups/${encode(group.id)}`, { method: 'PATCH', data: { leader_id: user.id } })
+              await changed(`${user.username} is now the leader of ${group.name}.`)
+            }}>Make leader</ActionButton>}<ActionButton className="button small danger" onAction={async () => {
             const retained = data.databases.filter(database => database.is_enabled).map(database => `${database.label}: ${accessLabel(userAccess(data, user, database, group.id).level)}`).join('; ')
-            if (!await confirm({ title: `Remove ${user.username} from ${group.name}?`, description: `Access from other groups or administrator roles remains. After removal: ${retained || 'No enabled databases'}. The user's sessions will refresh.`, label: 'Remove member' })) return
+            if (!await confirm({ title: `Remove ${user.username} from ${group.name}?`, description: `Access from other groups remains. After removal: ${retained || 'No enabled databases'}. The user's sessions will refresh.`, label: 'Remove member' })) return
             await api(`/api/v1/admin/groups/${encode(group.id)}/members/${encode(user.id)}`, { method: 'DELETE' })
             await changed(`${user.username} removed from ${group.name}.`)
-          }}>Remove</ActionButton></td></tr>)}{!members.length && <EmptyRow columns={3}>No members yet. Add a user to this group.</EmptyRow>}</tbody></table></div>
+          }}>Remove</ActionButton></div></td></tr>
+          })}{!members.length && <EmptyRow columns={3}>No members yet. Add a user to this group.</EmptyRow>}</tbody></table></div>
         </section>
         <section role="tabpanel" aria-label="Database access" hidden={tab !== 'grants'}>
           <div className="section-toolbar"><p className="muted">Permissions assigned through this group.</p><button className="button primary small" onClick={() => setEditor({ kind: 'grant', group })}>Add database access</button></div>
@@ -71,7 +76,7 @@ export default function Groups() {
             const database = data.databases.find(item => item.id === grant.database_id)
             return <tr key={grant.database_id}><td>{database ? `${database.label}${database.is_enabled ? '' : ' (disabled)'}` : grant.database_id}</td><td><Badge value={grant.access_level} /></td><td><div className="toolbar-actions"><button className="button small" onClick={() => setEditor({ kind: 'grant', group, grant })}>Edit</button><ActionButton className="button small danger" onAction={async () => {
               const retained = database ? members.map(user => { const access = userAccess(data, user, database, group.id); return `${user.username}: ${accessLabel(access.level)}${access.sources.length ? ` via ${access.sources.join(', ')}` : ''}` }).join('; ') : ''
-              if (!await confirm({ title: `Revoke ${group.name} access to ${database?.label || grant.database_id}?`, description: `Members may retain access through other groups or administrator roles. After revoking: ${retained || 'No current members or enabled connection'}. Affected sessions will refresh.`, label: 'Revoke access' })) return
+              if (!await confirm({ title: `Revoke ${group.name} access to ${database?.label || grant.database_id}?`, description: `Members may retain access through other groups. After revoking: ${retained || 'No current members or enabled connection'}. Affected sessions will refresh.`, label: 'Revoke access' })) return
               await api(`/api/v1/admin/groups/${encode(group.id)}/databases/${encode(grant.database_id)}/access`, { method: 'DELETE' })
               await changed(`Access to ${database?.label || grant.database_id} revoked for ${group.name}.`)
             }}>Revoke</ActionButton></div></td></tr>
@@ -79,7 +84,7 @@ export default function Groups() {
           <p className="helper-text">Read only: inspect schemas, browse rows, and run read-only queries. Read + migrations also permits creating, editing, and executing migrations, including schema and data changes. The SQL query editor remains read only.</p>
         </section>
         <section role="tabpanel" aria-label="Effective access" hidden={tab !== 'effective'}>
-          <p className="helper-text">Effective access for this group's members across enabled databases. The strongest group permission applies. Platform administrators retain read and migration access. Inactive accounts cannot sign in.</p>
+          <p className="helper-text">Effective access for this group's members across enabled databases. The strongest group permission applies. Platform administrators also require group grants to access databases. Inactive accounts cannot sign in.</p>
           <div className="table-scroll"><table><thead><tr><th>User</th><th>Database</th><th>Effective access</th><th>Provided by</th></tr></thead><tbody>{members.flatMap(user => data.databases.filter(database => database.is_enabled).map(database => {
             const access = userAccess(data, user, database)
             return <tr key={`${user.id}-${database.id}`}><td>{user.username}</td><td>{database.label}</td><td>{accessLabel(access.level)}</td><td>{access.sources.length ? access.sources.map(source => <span className="access-source" key={source}>{source}</span>) : 'No group grant'}</td></tr>
@@ -98,19 +103,31 @@ export default function Groups() {
 
 function GroupEditor({ editor, data, onClose, onSaved }: { editor: Editor; data?: GroupData; onClose: () => void; onSaved: (message: string, id?: string) => Promise<void> }) {
   const grant = editor.kind === 'grant' ? editor.grant : undefined
-  const initial = { name: editor.kind === 'group' ? editor.group?.name || '' : '', user_id: '', database_id: grant?.database_id || '', access_level: grant?.access_level || 'VIEW_ONLY' as AccessLevel }
+  const initial = {
+    name: editor.kind === 'group' ? editor.group?.name || '' : '',
+    leader_id: editor.kind === 'group' ? editor.group?.leader_id || '' : '',
+    user_id: '',
+    database_id: grant?.database_id || '',
+    access_level: grant?.access_level || 'VIEW_ONLY' as AccessLevel,
+  }
   const [values, setValues] = useState(initial)
   const [saved] = useState(() => JSON.stringify(initial))
   const action = useFormAction()
   const availableUsers = (data?.users || []).filter(user => user.is_active && !data?.members.some(member => member.group_id === editor.group?.id && member.user_id === user.id))
+  const activeUsers = (data?.users || []).filter(user => user.is_active)
+  const activeGroupMembers = (data?.users || []).filter(user => user.is_active && data?.members.some(member => member.group_id === editor.group?.id && member.user_id === user.id))
+  const leaderOptions = editor.group ? activeGroupMembers : activeUsers
   const availableDatabases = (data?.databases || []).filter(database => grant ? database.id === grant.database_id : database.is_enabled && !data?.grants.some(item => item.group_id === editor.group?.id && item.database_id === database.id))
-  const title = editor.kind === 'group' ? editor.group ? 'Rename group' : 'New group' : editor.kind === 'member' ? 'Add member' : grant ? 'Edit database access' : 'Add database access'
+  const title = editor.kind === 'group' ? editor.group ? 'Edit group' : 'New group' : editor.kind === 'member' ? 'Add member' : grant ? 'Edit database access' : 'Add database access'
   return <Modal title={title} onClose={onClose} busy={action.busy} dirty={saved !== JSON.stringify(values)}>
     {close => <form aria-busy={action.busy} onSubmit={event => {
       event.preventDefault()
       void action.run(async () => {
         if (editor.kind === 'group') {
-          const result = await api<Group>(`/api/v1/admin/groups${editor.group ? `/${encode(editor.group.id)}` : ''}`, { method: editor.group ? 'PATCH' : 'POST', data: { name: values.name.trim() } })
+          if (!editor.group && !values.leader_id) throw new Error('Select an active group leader.')
+          const payload: { name: string; leader_id?: string } = { name: values.name.trim() }
+          if (values.leader_id) payload.leader_id = values.leader_id
+          const result = await api<Group>(`/api/v1/admin/groups${editor.group ? `/${encode(editor.group.id)}` : ''}`, { method: editor.group ? 'PATCH' : 'POST', data: payload })
           await onSaved(`${result.name} saved.`, result.id)
         } else if (editor.kind === 'member') {
           if (!values.user_id) throw new Error('Select a user to add.')
@@ -124,7 +141,18 @@ function GroupEditor({ editor, data, onClose, onSaved }: { editor: Editor; data?
       })
     }}>
       <fieldset className="form-fields" disabled={action.busy}>
-        {editor.kind === 'group' ? <><label htmlFor="group-name">Group name</label><input id="group-name" required maxLength={100} autoFocus placeholder="e.g. Developers" value={values.name} onChange={event => setValues({ ...values, name: event.target.value })} /></> : editor.kind === 'member' ? <>
+        {editor.kind === 'group' ? <>
+          <label htmlFor="group-name">Group name</label>
+          <input id="group-name" required maxLength={100} autoFocus placeholder="e.g. Developers" value={values.name} onChange={event => setValues({ ...values, name: event.target.value })} />
+          {(!editor.group || leaderOptions.length > 0) && <>
+            <label htmlFor="group-leader" style={{ marginTop: '0.8rem' }}>Group leader</label>
+            <select id="group-leader" required={!editor.group} value={values.leader_id} onChange={event => setValues({ ...values, leader_id: event.target.value })}>
+              <option value="" disabled={!editor.group || Boolean(editor.group?.leader_id)}>{leaderOptions.length ? 'Select an active leader…' : 'No active users available'}</option>
+              {leaderOptions.map(user => <option key={user.id} value={user.id}>{user.username}</option>)}
+            </select>
+            <p className="helper-text">{editor.group ? 'Replacement leader must be an active member of this group.' : 'Every group requires an active leader for migration approvals. The leader is added as a member automatically.'}</p>
+          </>}
+        </> : editor.kind === 'member' ? <>
           <p className="muted">Add a user to {editor.group.name}.</p><label htmlFor="member-user">Platform user</label><select id="member-user" required value={values.user_id} onChange={event => setValues({ ...values, user_id: event.target.value })}><option value="" disabled>{availableUsers.length ? 'Select a user…' : 'No users available'}</option>{availableUsers.map(user => <option value={user.id} key={user.id}>{user.username}</option>)}</select>
           <p className="helper-text">Changing membership signs the affected user out so their permissions refresh.</p>
         </> : <>

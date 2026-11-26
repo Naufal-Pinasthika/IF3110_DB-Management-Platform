@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,7 +21,7 @@ import (
 func main() {
 	shutdown := telemetry.Init("platform-api")
 	if err := run(); err != nil {
-		slog.Error("server.stopped", "error", "startup or serving failed")
+		slog.Error("server.stopped", "error", err.Error())
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = shutdown(ctx)
@@ -36,20 +37,29 @@ func run() error {
 	defer stop()
 	cfg, err := config.Load()
 	if err != nil {
-		return err
+		return fmt.Errorf("config.Load failed: %w", err)
 	}
 	db, err := store.OpenPlatform(ctx, cfg.PlatformDatabaseURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("store.OpenPlatform failed: %w", err)
 	}
 	pool, err := db.DB()
 	if err != nil {
-		return err
+		return fmt.Errorf("db.DB pool failed: %w", err)
 	}
 	defer pool.Close()
 	router, err := app.NewRouter(&auth.PostgresRepository{DB: db}, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("app.NewRouter failed: %w", err)
+	}
+	worker, err := app.NewMigrationWorker(db, cfg)
+	if err != nil {
+		slog.Warn("warning: migration worker initialization", "error", err)
+	} else if worker != nil {
+		workerCtx, cancelWorker := context.WithCancel(context.Background())
+		defer cancelWorker()
+		worker.Start(workerCtx)
+		defer worker.Stop(context.Background())
 	}
 	server := &http.Server{
 		Addr:              cfg.AppAddr,

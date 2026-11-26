@@ -157,13 +157,14 @@ func TestAdminAndAccessHTTPIntegration(t *testing.T) {
 	status(request("PUT", "/api/v1/admin/groups/"+groupID+"/members/"+bob.ID, "", adminCSRF, adminCookies), 200)
 	status(request("PUT", "/api/v1/admin/groups/"+groupID+"/databases/"+dbID+"/access", `{"access_level":"VIEW_ONLY"}`, adminCSRF, adminCookies), 200)
 
-	// Platform admins can see enabled databases in the explorer even without
-	// a group grant; this keeps their database list aligned with admin management.
+	// Platform admin without a group grant must not automatically see or modify databases.
 	w = request("GET", "/api/v1/databases", "", "", adminCookies)
 	status(w, 200)
-	if !strings.Contains(w.Body.String(), "analytics") || !strings.Contains(w.Body.String(), "VIEW_EDIT") {
-		t.Fatalf("platform admin should see enabled analytics with VIEW_EDIT: %s", w.Body.String())
+	if strings.Contains(w.Body.String(), "analytics") {
+		t.Fatalf("platform admin without group grant should not see analytics: %s", w.Body.String())
 	}
+	status(request("GET", "/api/v1/databases/"+dbID+"/schemas", "", "", adminCookies), 403)
+	status(request("POST", "/api/v1/databases/"+dbID+"/migrations", `{"name":"m0","sql_text":"SELECT 1"}`, adminCSRF, adminCookies), 403)
 
 	// The granted user sees the database with VIEW_ONLY effective access.
 	bobCookies, bobCSRF := login("bob", "user-pass-123")

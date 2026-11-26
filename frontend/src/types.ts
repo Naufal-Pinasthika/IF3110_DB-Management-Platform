@@ -1,7 +1,7 @@
 export type AccessLevel = 'VIEW_ONLY' | 'VIEW_EDIT'
 export interface User { id: string; username: string; is_platform_admin: boolean }
 export interface AdminUser extends User { is_active: boolean }
-export interface Group { id: string; name: string }
+export interface Group { id: string; name: string; leader_id?: string | null }
 export interface Member { group_id: string; user_id: string }
 export interface Grant { group_id: string; database_id: string; access_level: AccessLevel }
 export interface AccessSnapshot { members: Member[]; grants: Grant[] }
@@ -33,11 +33,82 @@ export interface ExplainResult {
   plans: { plan: ExplainNode; statement_index?: number; error?: string; planning_time?: number; execution_time?: number }[]
   raw_text: string; analyzed: boolean
 }
-export interface MigrationSummary {
-  id: string; name: string; version: number | null; status: string; executed_by: string | null; executed_at: string | null
+export interface MigrationApprovalItem {
+  id: string
+  group_id: string
+  group_name: string
+  leader_id: string
+  leader_username: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  comment?: string | null
+  decided_at?: string | null
 }
+
+export interface MigrationSummary {
+  id: string
+  name: string
+  version: number | null
+  status: string
+  migration_type?: string
+  is_irreversible?: boolean
+  has_down?: boolean
+  executed_by: string | null
+  executed_at: string | null
+}
+
 export interface Migration extends MigrationSummary {
-  database_id: string; sql_text: string; created_by: string; created_at: string; updated_at: string; error_summary: string | null
+  database_id: string
+  sql_text: string
+  sql_down?: string | null
+  is_irreversible: boolean
+  irreversible_reason?: string | null
+  migration_type: string
+  batch_attribute?: string | null
+  batch_size?: number | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  error_summary: string | null
+  approvals?: MigrationApprovalItem[]
+  can_rollback: boolean
+  can_forward: boolean
+}
+
+export interface MigrationExecutionSummary {
+  id: string
+  migration_id: string
+  migration_name: string
+  database_id: string
+  action_type: 'FORWARD' | 'ROLLBACK' | 'REVERT_BATCH' | 'RETRY'
+  rolled_back_execution_id?: string | null
+  status: string
+  executed_sql: string
+  executed_by: string
+  executed_by_username?: string
+  started_at: string
+  finished_at?: string | null
+  version?: number | null
+  error_summary?: string | null
+  committed_batches: number
+  committed_rows: number
+}
+
+export interface Job {
+  id: string
+  execution_id: string
+  database_id: string
+  actor_id: string
+  status: string
+  attempt_count: number
+  max_attempts: number
+  needs_inspection: boolean
+  committed_batches: number
+  committed_rows: number
+  error_code?: string
+  created_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  database_blocked: boolean
 }
 export interface SchemaDiff {
   has_changes: boolean; generated_sql: string; excluded_object_count: number

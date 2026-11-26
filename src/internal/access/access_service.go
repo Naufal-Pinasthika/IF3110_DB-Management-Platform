@@ -16,13 +16,6 @@ type Repository interface {
 	GetDatabaseSummary(ctx context.Context, databaseID string) (models.ManagedDatabase, error)
 }
 
-// enabledDatabaseLister is implemented by repositories that can list every
-// enabled target, independently of group grants. Platform administrators use
-// it because their platform role grants access to all enabled targets.
-type enabledDatabaseLister interface {
-	ListEnabledDatabases(ctx context.Context) ([]models.ManagedDatabase, error)
-}
-
 type Service struct {
 	Repository Repository
 }
@@ -53,15 +46,6 @@ func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal
 func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, databaseID string) (api.AccessLevel, error) {
 	if actor.User.ID == "" {
 		return "", ErrUnauthenticated
-	}
-	if actor.User.IsPlatformAdmin {
-		db, err := s.Repository.GetDatabaseSummary(ctx, databaseID)
-		if err == nil && db.IsEnabled {
-			return api.AccessViewEdit, nil
-		}
-		if err != nil && !errors.Is(err, apperror.ErrNotImplemented) {
-			return "", err
-		}
 	}
 
 	grants, err := s.Repository.ListUserGrants(ctx, actor.User.ID, databaseID)
@@ -112,33 +96,13 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 		return nil, ErrUnauthenticated
 	}
 
-	var databases []models.ManagedDatabase
-	var err error
-	if actor.User.IsPlatformAdmin {
-		if lister, ok := s.Repository.(enabledDatabaseLister); ok {
-			databases, err = lister.ListEnabledDatabases(ctx)
-		} else {
-			databases, err = s.Repository.ListGrantedDatabases(ctx, actor.User.ID)
-		}
-	} else {
-		databases, err = s.Repository.ListGrantedDatabases(ctx, actor.User.ID)
-	}
+	databases, err := s.Repository.ListGrantedDatabases(ctx, actor.User.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]api.UserDatabase, 0, len(databases))
 	for _, db := range databases {
-		if actor.User.IsPlatformAdmin && db.IsEnabled {
-			result = append(result, api.UserDatabase{
-				ID:              db.ID,
-				Label:           db.Label,
-				DatabaseName:    db.DatabaseName,
-				Engine:          db.TargetEngine(),
-				EffectiveAccess: api.AccessViewEdit,
-			})
-			continue
-		}
 		effective, err := s.EffectiveAccess(ctx, actor, db.ID)
 		if err != nil {
 			if errors.Is(err, ErrForbidden) {

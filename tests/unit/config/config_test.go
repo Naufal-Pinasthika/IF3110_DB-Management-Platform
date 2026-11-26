@@ -22,7 +22,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AppAddr != ":8080" || cfg.PublicOrigin != "http://localhost:28080" {
+	if cfg.AppAddr != ":8080" || cfg.PublicOrigin != "http://localhost:6767" {
 		t.Fatalf("invalid HTTP defaults: %+v", cfg)
 	}
 	if cfg.Session.CookieName != "sid" || cfg.Session.CookieSecure {

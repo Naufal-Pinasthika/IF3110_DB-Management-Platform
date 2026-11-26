@@ -63,3 +63,16 @@ worker:
 	go run ./src/cmd/worker
 
 test-all: check test test-integration test-browser build
+
+.PHONY: stress stress-smoke stress-down test-k6
+stress:
+	./scripts/stress.sh run
+
+stress-smoke:
+	./scripts/stress.sh smoke
+
+stress-down:
+	./scripts/stress.sh down
+
+test-k6:
+	python3 -m unittest discover -s tests/k6 -p 'test_*.py'

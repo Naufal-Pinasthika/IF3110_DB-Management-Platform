@@ -154,6 +154,36 @@ func (s *TargetStore) InvalidateTargetPools(databaseID string) {
 	}
 }
 
+// PoolStats aggregates active target pool stats into bounded role keys ("target_reader", "target_migrator").
+func (s *TargetStore) PoolStats() map[string]sql.DBStats {
+	stats := map[string]sql.DBStats{
+		"target_reader":   {},
+		"target_migrator": {},
+	}
+	s.pools.Range(func(k, v any) bool {
+		key, ok1 := k.(string)
+		pool, ok2 := v.(*sql.DB)
+		if !ok1 || !ok2 {
+			return true
+		}
+		roleKey := "target_reader"
+		if len(key) >= 9 && key[len(key)-9:] == "-migrator" {
+			roleKey = "target_migrator"
+		}
+		st := pool.Stats()
+		cur := stats[roleKey]
+		cur.MaxOpenConnections += st.MaxOpenConnections
+		cur.OpenConnections += st.OpenConnections
+		cur.InUse += st.InUse
+		cur.Idle += st.Idle
+		cur.WaitCount += st.WaitCount
+		cur.WaitDuration += st.WaitDuration
+		stats[roleKey] = cur
+		return true
+	})
+	return stats
+}
+
 // getOrOpenPool manages the thread-safe connection cache and invalidates dead connections.
 func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDatabase, role, username, encryptedPass string) (*sql.DB, error) {
 	if !db.IsEnabled {

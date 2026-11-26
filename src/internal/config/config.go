@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
@@ -66,7 +67,7 @@ func Load() (Config, error) {
 		}
 	}
 	// Database credential encryption key (base64-encoded 32-byte key for AES-256-GCM)
-	encKeyB64 := os.Getenv("DB_CREDENTIAL_ENCRYPTION_KEY")
+	encKeyB64 := strings.Trim(os.Getenv("DB_CREDENTIAL_ENCRYPTION_KEY"), "\"'")
 	if encKeyB64 == "" {
 		return Config{}, apperror.New("DB_CREDENTIAL_ENCRYPTION_KEY is required")
 	}

@@ -219,3 +219,25 @@ func (r *PostgresRepository) lockGate(ctx context.Context, databaseID string) (D
 
 	return gate, result.Error
 }
+
+// CountByStatus returns current migration_jobs row counts grouped by status for Prometheus gauges.
+func (r *PostgresRepository) CountByStatus(ctx context.Context) (map[string]int64, error) {
+	type row struct {
+		Status string
+		Count  int64
+	}
+	var rows []row
+	err := r.DB.WithContext(ctx).
+		Table("migration_jobs").
+		Select("status, COUNT(*) AS count").
+		Group("status").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		counts[r.Status] = r.Count
+	}
+	return counts, nil
+}

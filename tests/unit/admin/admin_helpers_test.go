@@ -21,6 +21,8 @@ type mockRepository struct {
 	updateUserFn             func(context.Context, models.User, bool, time.Time) (models.User, error)
 	listGroupsFn             func(context.Context) ([]models.Group, error)
 	createGroupFn            func(context.Context, string, string) (models.Group, error)
+	updateGroupFn            func(context.Context, string, *string, *string) (models.Group, error)
+	removeGroupMemberFn      func(context.Context, string, string, time.Time) error
 	deleteGroupFn            func(context.Context, string, time.Time) error
 	addGroupMemberFn         func(context.Context, string, string, time.Time) (models.UserGroup, error)
 	listDatabasesFn          func(context.Context) ([]models.ManagedDatabase, error)
@@ -56,6 +58,14 @@ func (m *mockRepository) ListGroups(ctx context.Context) ([]models.Group, error)
 
 func (m *mockRepository) CreateGroup(ctx context.Context, name, leaderID string) (models.Group, error) {
 	return m.createGroupFn(ctx, name, leaderID)
+}
+
+func (m *mockRepository) UpdateGroup(ctx context.Context, groupID string, name, leaderID *string) (models.Group, error) {
+	return m.updateGroupFn(ctx, groupID, name, leaderID)
+}
+
+func (m *mockRepository) RemoveGroupMember(ctx context.Context, groupID, userID string, now time.Time) error {
+	return m.removeGroupMemberFn(ctx, groupID, userID, now)
 }
 
 func (m *mockRepository) DeleteGroup(ctx context.Context, groupID string, now time.Time) error {

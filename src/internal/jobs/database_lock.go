@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"hash/crc32"
+
 	"log/slog"
 	"time"
 
@@ -22,6 +23,7 @@ type databaseLock struct {
 
 // Share the legacy session lock across batches until release or worker connection failure
 func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*databaseLock, error) {
+	started := time.Now()
 	ctx, span := otel.Tracer("platform/jobs").Start(ctx, "database.lock")
 
 	defer span.End()
@@ -29,6 +31,7 @@ func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*dat
 	span.SetAttributes(attribute.String("database.id", databaseID))
 	conn, err := pool.Conn(ctx)
 	if err != nil {
+		telemetry.ObserveLockWait(time.Since(started), "error")
 		return nil, err
 	}
 
@@ -40,15 +43,18 @@ func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*dat
 		// Discard the connection when lock ownership cannot be confirmed
 		lock.discard()
 		span.SetStatus(codes.Error, "database lock unavailable")
+		telemetry.ObserveLockWait(time.Since(started), "error")
 		return nil, err
 	}
 
 	if !acquired {
 		conn.Close()
+		telemetry.ObserveLockWait(time.Since(started), "busy")
 		return nil, nil
 	}
 
-	telemetry.Log(ctx, slog.LevelInfo, "job.lock_acquired", "database_id", databaseID)
+	telemetry.ObserveLockWait(time.Since(started), "acquired")
+	telemetry.Log(ctx, slog.LevelInfo, "job.lock_acquired", "database_id", databaseID, "status", "success", "duration_ms", float64(time.Since(started))/float64(time.Millisecond))
 	return lock, nil
 }
 
