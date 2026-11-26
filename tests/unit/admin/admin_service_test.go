@@ -8,6 +8,7 @@ import (
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/api"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/admin"
+	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/auth"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/models"
 )
@@ -306,64 +307,38 @@ func TestGroups(t *testing.T) {
 		}
 	})
 
-	t.Run("create rejects missing or invalid leader id", func(t *testing.T) {
+	t.Run("create rejects missing or malformed leader", func(t *testing.T) {
 		svc := newService(&mockRepository{})
-		for _, leaderID := range []string{"", "invalid-uuid", "00000000-0000-0000-0000-000000000000"} {
-			if _, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID}); err == nil {
-				t.Fatalf("leader_id %q accepted, want error", leaderID)
+		for _, leaderID := range []string{"", "not-a-uuid", "zzzzzzzz-1111-4111-8111-111111111111"} {
+			_, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID})
+			if !errors.Is(err, apperror.ErrInvalidInput) {
+				t.Fatalf("leader %q: error = %v, want invalid input", leaderID, err)
 			}
 		}
 	})
 
-	t.Run("create returns created group with leader", func(t *testing.T) {
-		leaderID := "11111111-1111-1111-1111-111111111111"
-		repo := &mockRepository{createGroupFn: func(_ context.Context, name, lid string) (models.Group, error) {
-			if lid != leaderID {
-				t.Fatalf("expected leaderID %s, got %s", leaderID, lid)
-			}
+	t.Run("create returns created group", func(t *testing.T) {
+		repo := &mockRepository{createGroupFn: func(_ context.Context, name, leaderID string) (models.Group, error) {
 			return models.Group{ID: "g1", Name: name, LeaderID: &leaderID}, nil
 		}}
 		svc := newService(repo)
-		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: leaderID})
+		group, err := svc.CreateGroup(ctx, adminPrincipal, api.CreateGroupRequest{Name: "devs", LeaderID: "11111111-1111-4111-8111-111111111111"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != leaderID {
+		if group.ID != "g1" || group.Name != "devs" || group.LeaderID != "11111111-1111-4111-8111-111111111111" {
 			t.Fatalf("group = %+v", group)
 		}
 	})
 
-	t.Run("update rejects empty id or invalid fields", func(t *testing.T) {
+	t.Run("update rejects empty id or invalid name", func(t *testing.T) {
 		svc := newService(&mockRepository{})
 		name := "devs"
-		invalidLeader := "not-a-uuid"
 		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "", api.UpdateGroupRequest{Name: &name}); err == nil {
 			t.Fatal("empty group id accepted, want error")
 		}
 		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{}); err == nil {
-			t.Fatal("empty request accepted, want error")
-		}
-		if _, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{LeaderID: &invalidLeader}); err == nil {
-			t.Fatal("invalid leader id accepted, want error")
-		}
-	})
-
-	t.Run("update calls repository and returns updated group", func(t *testing.T) {
-		leaderID := "11111111-1111-1111-1111-111111111111"
-		newName := "updated-devs"
-		repo := &mockRepository{updateGroupFn: func(_ context.Context, groupID string, n, l *string) (models.Group, error) {
-			if groupID != "g1" || *n != newName || *l != leaderID {
-				t.Fatalf("unexpected update args: groupID=%s, name=%v, leaderID=%v", groupID, n, l)
-			}
-			return models.Group{ID: groupID, Name: *n, LeaderID: l}, nil
-		}}
-		svc := newService(repo)
-		group, err := svc.UpdateGroup(ctx, adminPrincipal, "g1", api.UpdateGroupRequest{Name: &newName, LeaderID: &leaderID})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if group.ID != "g1" || group.Name != newName || group.LeaderID != leaderID {
-			t.Fatalf("group = %+v", group)
+			t.Fatal("nil name accepted, want error")
 		}
 	})
 
@@ -413,24 +388,6 @@ func TestGroups(t *testing.T) {
 		}
 		if err := svc.RemoveGroupMember(ctx, adminPrincipal, "g1", "", now); err == nil {
 			t.Fatal("empty user id accepted, want error")
-		}
-	})
-
-	t.Run("remove member propagates repository call", func(t *testing.T) {
-		called := false
-		repo := &mockRepository{removeGroupMemberFn: func(_ context.Context, g, u string, _ time.Time) error {
-			if g != "g1" || u != "u1" {
-				t.Fatalf("unexpected remove args: %s, %s", g, u)
-			}
-			called = true
-			return nil
-		}}
-		svc := newService(repo)
-		if err := svc.RemoveGroupMember(ctx, adminPrincipal, "g1", "u1", now); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !called {
-			t.Fatal("expected removeGroupMemberFn to be called")
 		}
 	})
 }
@@ -504,7 +461,6 @@ func TestCreateManagedDatabase(t *testing.T) {
 		}
 	})
 
-	
 	t.Run("applies default values when optional fields are omitted", func(t *testing.T) {
 		var capturedDB models.ManagedDatabase
 

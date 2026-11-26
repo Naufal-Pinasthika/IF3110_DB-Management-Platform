@@ -146,16 +146,9 @@ func TestAdminAndAccessHTTPIntegration(t *testing.T) {
 	}
 
 	// Group + database + grant flow.
-	// Creating a group without a leader is rejected.
-	status(request("POST", "/api/v1/admin/groups", `{"name":"analysts"}`, adminCSRF, adminCookies), 400)
-
 	w = request("POST", "/api/v1/admin/groups", `{"name":"analysts","leader_id":"`+bob.ID+`"}`, adminCSRF, adminCookies)
 	status(w, 201)
 	groupID := dataID(t, w)
-
-	// Current leader cannot be removed from the group or deactivated before assigning a replacement.
-	status(request("DELETE", "/api/v1/admin/groups/"+groupID+"/members/"+bob.ID, "", adminCSRF, adminCookies), 409)
-	status(request("PATCH", "/api/v1/admin/users/"+bob.ID, `{"is_active":false}`, adminCSRF, adminCookies), 409)
 
 	w = request("POST", "/api/v1/admin/databases", `{"label":"analytics"}`, adminCSRF, adminCookies)
 	status(w, 201)

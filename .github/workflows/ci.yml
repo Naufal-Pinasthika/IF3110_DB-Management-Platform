@@ -48,7 +48,7 @@ jobs:
           retention-days: 7
 
   integration:
-    name: PostgreSQL and browser integration
+    name: PostgreSQL integration
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -81,17 +81,12 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: tests/package-lock.json
-      - name: Install pinned browser test dependencies
-        run: npm --prefix tests ci
-      - name: Install Chromium and system dependencies
-        working-directory: tests
-        run: npx --no-install playwright install --with-deps chromium
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies for the embedded SPA build
+        run: npm --prefix frontend ci
       - name: Run real PostgreSQL HTTP integration tests
-        run: make test-integration
-      # Browser test disabled until explorer/migration features are implemented
-      # - name: Run real auth E2E and UI fixture browser tests
-      #   run: make test-browser
+        run: make check-deps test-integration
+      # Legacy browser fixtures need updating for the current SPA before enabling test-browser.
       - name: Upload integration coverage, screenshots, and traces
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

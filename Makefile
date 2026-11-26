@@ -1,21 +1,25 @@
 MODULE := github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform
 
-.PHONY: check test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build frontend-build frontend-dev worker
+.PHONY: check check-deps test test-unit test-web test-db-up migrate-platform test-integration test-browser test-all browser-install build frontend-build frontend-dev worker
 
-check:
+check: check-deps
 	go vet ./...
-	go -C tests mod verify
-	go -C tests vet -mod=readonly ./...
+	go -C tests vet ./...
 	npm --prefix tests run test:syntax
 	node --check tests/browser/auth_test.mjs
 	node --check tests/browser/fixtures_test.mjs
+
+# Fail on module drift instead of repairing dependencies implicitly in CI.
+check-deps:
+	go mod tidy -diff
+	go -C tests mod tidy -diff
 
 # Local tests need frontend dependencies installed, but no PostgreSQL or Chromium.
 test: test-unit test-web
 
 test-unit:
 	mkdir -p tests/artifacts
-	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config,$(MODULE)/src/internal/migration -coverprofile=artifacts/unit-coverage.out ./unit/...
+	go -C tests test -race -count=1 -coverpkg=$(MODULE)/src/internal/auth,$(MODULE)/src/internal/config,$(MODULE)/src/internal/admin,$(MODULE)/src/internal/access -coverprofile=artifacts/unit-coverage.out ./unit/...
 	npm --prefix tests test
 
 test-web: frontend-build
@@ -30,7 +34,8 @@ migrate-platform:
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000006_add_group_leader.sql
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000007_add_migration_jobs.sql
 
-test-integration:
+# Integration auth checks serve the embedded SPA, so build assets before Go compiles it.
+test-integration: frontend-build
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
 	mkdir -p tests/artifacts
 	REQUIRE_INTEGRATION_TESTS=1 go -C tests test -race -count=1 -timeout=3m -coverpkg=$(MODULE)/src/app,$(MODULE)/src/api,$(MODULE)/src/internal/auth,$(MODULE)/src/internal/store,$(MODULE)/src/internal/admin,$(MODULE)/src/internal/access -coverprofile=artifacts/integration-coverage.out ./integration/auth ./integration/admin
@@ -39,7 +44,7 @@ browser-install:
 	npm --prefix tests ci
 	npm --prefix tests run browser:install
 
-test-browser:
+test-browser: frontend-build
 	@test -n "$$TEST_DATABASE_URL" || { echo 'Set TEST_DATABASE_URL to a dedicated PostgreSQL database ending in _test (local test service: postgres://platform_test:platform_test@127.0.0.1:15433/platform_ci_test?sslmode=disable; start it with make test-db-up)'; exit 1; }
 	REQUIRE_INTEGRATION_TESTS=1 REQUIRE_BROWSER_TESTS=1 go -C tests test -race -count=1 -timeout=5m ./integration/... -run 'TestAuthBrowserIntegration|TestFrontendBrowserFixtures' -v
 
