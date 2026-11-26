@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: Platform Observability
+    orgId: 1
+    folder: DB Management Platform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 15
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
