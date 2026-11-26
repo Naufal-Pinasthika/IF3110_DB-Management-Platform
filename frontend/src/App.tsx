@@ -10,6 +10,7 @@ import { MigrationRoute, Migrations } from './pages/Migrations'
 import Users from './pages/Users'
 import Groups from './pages/Groups'
 import Connections from './pages/Connections'
+import { DatabaseMigrationWorkspace, MigrationWorkspacePreview } from './pages/MigrationWorkspace'
 
 function NotFound() {
   return <><PageHeading title="Page not found" /><p className="helper-text">This page is not available.</p><Link className="button" to="/databases">Back to databases</Link></>
@@ -20,7 +21,9 @@ function RouteError() {
   return <main className="content"><PageHeading title="Unable to display this page" /><ErrorState error={error} /><Link to="/databases" className="button">Back to databases</Link></main>
 }
 
-const router = createBrowserRouter([{
+const router = createBrowserRouter([
+  { path: '/preview/milestone-2', element: <MigrationWorkspacePreview />, errorElement: <RouteError /> },
+  {
   element: <SessionBoundary />,
   errorElement: <RouteError />,
   children: [
@@ -34,6 +37,7 @@ const router = createBrowserRouter([{
         { path: 'query', element: <Query /> },
         { path: 'migrations', element: <Migrations /> },
         { path: 'migrations/new', element: <MigrationRoute /> },
+        { path: 'migrations/workflow', element: <DatabaseMigrationWorkspace /> },
         { path: 'migrations/:migrationId', element: <MigrationRoute /> },
       ] },
       { element: <RequireAdmin />, children: [

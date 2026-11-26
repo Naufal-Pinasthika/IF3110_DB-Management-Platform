@@ -23,8 +23,8 @@ export function PageHeading({ title, children }: { title: string; children?: Rea
 }
 
 export function Badge({ value }: { value: string }) {
-  const labels: Record<string, string> = { VIEW_ONLY: 'Read only', VIEW_EDIT: 'Read + migrations', DRAFT: 'Draft', RUNNING: 'Running', APPLIED: 'Applied', FAILED: 'Failed', ACTIVE: 'Active', DISABLED: 'Disabled', ENABLED: 'Enabled' }
-  const colors: Record<string, string> = { APPLIED: 'green', ACTIVE: 'green', ENABLED: 'green', FAILED: 'red', DISABLED: 'red', RUNNING: 'amber', VIEW_EDIT: 'blue', VIEW_ONLY: 'purple' }
+  const labels: Record<string, string> = { VIEW_ONLY: 'Read only', VIEW_EDIT: 'Read + migrations', DRAFT: 'Draft', RUNNING: 'Running', APPLIED: 'Applied', FAILED: 'Failed', ACTIVE: 'Active', DISABLED: 'Disabled', ENABLED: 'Enabled', PENDING_REVIEW: 'Pending review', APPROVED: 'Approved', REJECTED: 'Changes requested', PENDING: 'Queued', SUCCEEDED: 'Success', PARTIAL: 'Partial', PARTIALLY_REVERTED: 'Partially reverted', UNKNOWN: 'Needs inspection' }
+  const colors: Record<string, string> = { APPLIED: 'green', ACTIVE: 'green', ENABLED: 'green', FAILED: 'red', DISABLED: 'red', RUNNING: 'amber', VIEW_EDIT: 'blue', VIEW_ONLY: 'purple', PENDING_REVIEW: 'amber', APPROVED: 'green', REJECTED: 'red', PENDING: 'blue', SUCCEEDED: 'green', PARTIAL: 'amber', PARTIALLY_REVERTED: 'amber', UNKNOWN: 'red' }
   return <span className={`badge ${colors[value] || ''}`}>{labels[value] || value}</span>
 }
 
