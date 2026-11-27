@@ -349,3 +349,27 @@ func TestOTLPExportsTracesAndLogsToCollector(t *testing.T) {
 	}
 }
 
+func TestLogSanitizesNewlinesAgainstLogInjection(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(telemetry.NewJSONHandler(&buf)).With("service", "platform-api"))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	ctx := telemetry.WithDatabase(context.Background(), "db-1\r\nforged")
+	telemetry.Log(ctx, slog.LevelWarn, "auth.login_failed\r\nfake",
+		"username", "alice\n{\"event\":\"auth.login_succeeded\"}",
+		"path", "/api/v1/databases/db-1\r\n/evil",
+	)
+
+	var entry map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
+		t.Fatalf("decode sanitized log: %v", err)
+	}
+	for _, field := range []string{"event", "username", "path", "database_id"} {
+		val, _ := entry[field].(string)
+		if strings.ContainsAny(val, "\r\n") {
+			t.Fatalf("field %q still contains CR/LF: %q", field, val)
+		}
+	}
+}
+
