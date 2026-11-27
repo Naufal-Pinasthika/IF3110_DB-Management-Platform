@@ -180,7 +180,6 @@ function TableInspector({ schema, table }: { schema: string; table: string }) {
         />
         <section hidden={tab !== 'data'} role="tabpanel" aria-label="Data">
           <div className="grid-guidance">
-            <span>Read-only data</span>
             <span>Scroll horizontally for more columns</span>
           </div>
           <div
@@ -196,11 +195,9 @@ function TableInspector({ schema, table }: { schema: string; table: string }) {
             )}
           </div>
           <div className="pagination">
-            <span>
-              {rows.data?.rows?.length
-                ? `Rows ${offset + 1}–${offset + rows.data.rows.length}`
-                : 'No rows'}
-            </span>
+            {rows.data?.rows?.length ? (
+              <span>Rows {offset + 1}–{offset + rows.data.rows.length}</span>
+            ) : null}
             <div className="toolbar-actions">
               <label htmlFor="page-size">Rows</label>
               <select

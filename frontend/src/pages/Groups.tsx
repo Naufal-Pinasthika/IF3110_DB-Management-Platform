@@ -169,10 +169,6 @@ export default function Groups() {
             />
             <section role="tabpanel" aria-label="Members" hidden={tab !== 'members'}>
               <div className="section-toolbar">
-                <p className="muted">
-                  Members can also inherit access from other groups. Every group must have a leader
-                  for migration approvals.
-                </p>
                 <button
                   className="button primary small"
                   onClick={() => setEditor({ kind: 'member', group })}
@@ -269,7 +265,6 @@ export default function Groups() {
             </section>
             <section role="tabpanel" aria-label="Database access" hidden={tab !== 'grants'}>
               <div className="section-toolbar">
-                <p className="muted">Permissions assigned through this group.</p>
                 <button
                   className="button primary small"
                   onClick={() => setEditor({ kind: 'grant', group })}
@@ -351,18 +346,8 @@ export default function Groups() {
                   </tbody>
                 </table>
               </div>
-              <p className="helper-text">
-                Read only: inspect schemas, browse rows, and run read-only queries. Read + migrations
-                also permits creating, editing, and executing migrations, including schema and data
-                changes. The SQL query editor remains read only.
-              </p>
             </section>
             <section role="tabpanel" aria-label="Effective access" hidden={tab !== 'effective'}>
-              <p className="helper-text">
-                Effective access for this group's members across enabled databases. The strongest
-                group permission applies. Platform administrators also require group grants to
-                access databases. Inactive accounts cannot sign in.
-              </p>
               <div className="table-scroll">
                 <table>
                   <thead>

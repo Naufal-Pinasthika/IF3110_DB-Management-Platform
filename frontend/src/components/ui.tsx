@@ -131,9 +131,7 @@ export function DataTable({ columns, rows }: { columns: string[]; rows: unknown[
         </tr>
       </thead>
       <tbody>
-        {!rows?.length ? (
-          <EmptyRow columns={columns.length}>No rows returned.</EmptyRow>
-        ) : (
+        {rows?.length ? (
           rows.map((row, index) => (
             <tr key={index}>
               {columns.map((_, column) => (
@@ -145,7 +143,7 @@ export function DataTable({ columns, rows }: { columns: string[]; rows: unknown[
               ))}
             </tr>
           ))
-        )}
+        ) : null}
       </tbody>
     </table>
   )
