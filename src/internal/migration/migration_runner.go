@@ -348,7 +348,30 @@ func (r *Runner) ExecuteBatch(
 					nextCursor = fmt.Sprintf("%v", val)
 				}
 			}
-			_ = qRows.Close()
+			queryErr := qRows.Err()
+			if closeErr := qRows.Close(); queryErr == nil {
+				queryErr = closeErr
+			}
+			if queryErr != nil {
+				durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+				batchSpan.RecordError(queryErr)
+				batchSpan.SetStatus(codes.Error, "batch SQL failed")
+				telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
+					"operation", "migration.batch", "database_id", databaseID,
+					"query", batchSQL, "parameters", telemetry.RedactParams(cursorVal, batchSize),
+					"duration_ms", durMS, "rows", 0, "status", "failed",
+					"error", telemetry.SanitizeValue(queryErr.Error()), "sqlstate", telemetry.SQLState(queryErr))
+				rbErr := tx.Rollback()
+				rbStatus := "success"
+				if rbErr != nil {
+					rbStatus = "failed"
+				}
+				telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
+					"operation", "migration.batch", "database_id", databaseID, "status", rbStatus)
+				batchSpan.End()
+				telemetry.IncBatchProcessed("forward", "failed", 0)
+				return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", queryErr)
+			}
 		} else {
 			res, err := tx.ExecContext(batchCtx, batchSQL)
 			if err != nil {

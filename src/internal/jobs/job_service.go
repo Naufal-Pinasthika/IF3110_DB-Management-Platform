@@ -134,6 +134,26 @@ func (s *Service) Get(ctx context.Context, actor auth.Principal, databaseID, job
 	return s.Repository.Get(ctx, databaseID, jobID)
 }
 
+// ReconcileExecution records an explicit decision after an authorized user
+// inspects the target database and confirms whether the execution took effect.
+func (s *Service) ReconcileExecution(ctx context.Context, actor auth.Principal, databaseID, executionID string, outcome ReconcileOutcome) (Job, error) {
+	ctx = telemetry.Correlate(ctx, actor.User.ID, databaseID, "", executionID)
+	if err := s.require(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return Job{}, err
+	}
+	if !validID(executionID) {
+		return Job{}, apperror.ErrInvalidInput
+	}
+	job, err := s.Repository.ReconcileExecution(ctx, databaseID, strings.ToLower(executionID), outcome)
+	if err != nil {
+		return Job{}, err
+	}
+	telemetry.Log(ctx, slog.LevelWarn, "migration.execution_reconciled",
+		"actor", actor.User.ID, "database_id", databaseID, "execution_id", executionID,
+		"job_id", job.ID, "outcome", string(outcome))
+	return job, nil
+}
+
 func (s *Service) List(ctx context.Context, actor auth.Principal, databaseID string, options ListOptions) (Page, error) {
 	ctx = telemetry.Correlate(ctx, actor.User.ID, databaseID, "", "")
 	if err := s.require(ctx, actor, databaseID, api.AccessViewOnly); err != nil {

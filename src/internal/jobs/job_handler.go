@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -45,6 +46,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	actor, _ := auth.PrincipalFromContext(r.Context())
 	job, err := h.Service.Get(r.Context(), actor, r.PathValue("dbId"), r.PathValue("jobId"))
+	if err != nil {
+		writeJobError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	api.WriteDataResponse(w, http.StatusOK, job)
+}
+
+func (h *Handler) ReconcileExecution(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Outcome ReconcileOutcome `json:"outcome"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&input); err != nil {
+		writeJobError(w, apperror.ErrInvalidInput)
+		return
+	}
+	actor, _ := auth.PrincipalFromContext(r.Context())
+	job, err := h.Service.ReconcileExecution(r.Context(), actor, r.PathValue("dbId"), r.PathValue("executionId"), input.Outcome)
 	if err != nil {
 		writeJobError(w, err)
 		return

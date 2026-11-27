@@ -2,7 +2,6 @@ package migration
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"hash/crc32"
 	"time"
@@ -180,33 +179,58 @@ func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrat
 }
 
 func (r *PostgresRepository) MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
-	var maxVersion sql.NullInt64
-	r.DB.WithContext(ctx).Model(&models.Migration{}).
-		Where("database_id = ? AND version IS NOT NULL", databaseID).
-		Select("MAX(version)").Scan(&maxVersion)
+	return r.MarkAppliedExecution(ctx, databaseID, migrationID, "", executorID, now)
+}
 
-	nextVersion := int64(1)
-	if maxVersion.Valid {
-		nextVersion = maxVersion.Int64 + 1
+// MarkAppliedExecution allocates a monotonic version and records it on both
+// the migration and its execution history row in one platform transaction.
+func (r *PostgresRepository) MarkAppliedExecution(ctx context.Context, databaseID, migrationID, executionID, executorID string, now time.Time) (models.Migration, error) {
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		initialize := tx.Exec(`INSERT INTO migration_version_sequences(database_id,last_version)
+			SELECT ?, GREATEST(
+				COALESCE((SELECT MAX(version) FROM migrations WHERE database_id = ?), 0),
+				(SELECT COUNT(*) FROM migrations WHERE database_id = ? AND status = 'APPLIED') +
+				(SELECT COUNT(*) FROM migration_executions WHERE database_id = ? AND action_type = 'ROLLBACK' AND status = 'SUCCEEDED')
+			) ON CONFLICT (database_id) DO NOTHING`, databaseID, databaseID, databaseID, databaseID)
+		if initialize.Error != nil {
+			return initialize.Error
+		}
+
+		var nextVersion int64
+		if err := tx.Raw(`UPDATE migration_version_sequences SET last_version = last_version + 1
+			WHERE database_id = ? RETURNING last_version`, databaseID).Scan(&nextVersion).Error; err != nil {
+			return err
+		}
+
+		result := tx.Model(&models.Migration{}).
+			Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationRunning).
+			Updates(map[string]any{
+				"status": models.MigrationApplied, "version": nextVersion,
+				"executed_by": executorID, "executed_at": now, "updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperror.ErrConflict
+		}
+
+		if executionID != "" {
+			result = tx.Table("migration_executions").Where("id = ? AND migration_id = ? AND database_id = ? AND status IN ?",
+				executionID, migrationID, databaseID, []string{"RUNNING", "SUCCEEDED"}).
+				Updates(map[string]any{"version": nextVersion, "finished_at": now})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return apperror.ErrConflict
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return models.Migration{}, err
 	}
-
-	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
-		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationRunning).
-		Updates(map[string]interface{}{
-			"status":      models.MigrationApplied,
-			"version":     nextVersion,
-			"executed_by": executorID,
-			"executed_at": now,
-			"updated_at":  now,
-		})
-
-	if result.Error != nil {
-		return models.Migration{}, result.Error
-	}
-	if result.RowsAffected == 0 {
-		return models.Migration{}, apperror.ErrConflict
-	}
-
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
@@ -486,4 +510,12 @@ func (r *PostgresRepository) ListExecutions(ctx context.Context, databaseID stri
 	var executions []models.MigrationExecution
 	err := query.Order("started_at ASC").Find(&executions).Error
 	return executions, err
+}
+
+// GetExecutionJobStatus is kept outside Repository so history-only test doubles
+// and alternate repository implementations do not need to expose job internals.
+func (r *PostgresRepository) GetExecutionJobStatus(ctx context.Context, executionID string) (string, error) {
+	var status string
+	err := r.DB.WithContext(ctx).Table("migration_jobs").Select("status").Where("execution_id = ?", executionID).Scan(&status).Error
+	return status, err
 }

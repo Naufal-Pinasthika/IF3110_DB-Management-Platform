@@ -330,12 +330,19 @@ func (w *Worker) decide(job Job, result contracts.ExecutionResult, err error, in
 	default:
 		valid = false
 	}
-	if err != nil || !valid {
+	// A non-nil error may accompany a fully classified SQL failure or partial
+	// batch result. Preserve that explicit state; only turn successful-looking
+	// results with an error, or invalid results, into UNKNOWN.
+	if !valid || (err != nil && result.State == contracts.ExecutionSucceeded) {
 		result = contracts.ExecutionResult{State: contracts.ExecutionUnknown, RetryAdvice: contracts.RetryReconcile,
 			BlocksDatabase: true, CommittedBatches: job.CommittedBatches, CommittedRows: job.CommittedRows, ErrorCode: "OUTCOME_UNCONFIRMED"}
 	}
 	if result.State == contracts.ExecutionPartial || result.State == contracts.ExecutionPartiallyReverted {
 		result.BlocksDatabase = true
+		// A committed checkpoint makes blind automatic retries unsafe and
+		// retrying the same known failing batch cannot make progress. Leave the
+		// database blocked for an explicit resume or compensation action.
+		return completion{Result: result, Status: contracts.JobBlocked}
 	}
 	if result.State == contracts.ExecutionUnknown {
 		result.BlocksDatabase = true

@@ -46,7 +46,7 @@ type Job struct {
 	NeedsInspection  bool                       `gorm:"not null;default:false" json:"needs_inspection"`
 	ClaimToken       *string                    `gorm:"type:uuid" json:"-"`
 	WorkerID         *string                    `gorm:"type:text" json:"-"`
-	LeaseExpiresAt   *time.Time                 `gorm:"type:timestamptz" json:"-"`
+	LeaseExpiresAt   *time.Time                 `gorm:"type:timestamptz" json:"lease_expires_at,omitempty"`
 	HeartbeatAt      *time.Time                 `gorm:"type:timestamptz" json:"heartbeat_at,omitempty"`
 	NextAttemptAt    time.Time                  `gorm:"type:timestamptz;not null;default:clock_timestamp()" json:"next_attempt_at"`
 	CommittedBatches int64                      `gorm:"type:bigint;not null;default:0" json:"committed_batches"`

@@ -128,6 +128,7 @@ func NewRouterWithJobs(repo auth.Repository, cfg config.Config, integration Jobs
 		migrationHandler := &migration.Handler{Service: migrationService}
 		routeHandlers.ListJobs = http.HandlerFunc(jobHandler.List)
 		routeHandlers.GetJob = http.HandlerFunc(jobHandler.Get)
+		routeHandlers.ReconcileExecution = http.HandlerFunc(jobHandler.ReconcileExecution)
 
 		// Admin users
 		routeHandlers.ListUsers = http.HandlerFunc(adminHandler.ListUsers)

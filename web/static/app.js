@@ -667,6 +667,21 @@ async function migrationsPage() {
   rows("migration-execution-list", executions, execution => {
     const details = node("div", undefined, "execution-history-details");
     if (execution.error_summary) details.append(node("p", execution.error_summary, "migration-history-error"));
+    if (execution.status === "UNKNOWN" && execution.job_status === "BLOCKED" && canEdit) {
+      details.append(node("p", "Inspect the target before reconciling. Leave this blocked if only some changes were applied.", "helper-text"));
+      details.append(action("Confirm applied", async () => {
+        if (!await confirmAction("Confirm execution applied?", "Only choose this if you inspected the target and confirmed this execution's intended changes are fully applied. This will mark the migration applied and release the database gate.", "Confirm applied")) return;
+        await api(databaseAPI + "/executions/" + encode(execution.id) + "/reconcile", { method: "POST", data: { outcome: "APPLIED" } });
+        await migrationsPage();
+        notice("Execution reconciled as applied.", "success");
+      }, "primary"));
+      details.append(action("Confirm not applied", async () => {
+        if (!await confirmAction("Confirm execution not applied?", "Only choose this if you inspected the target and confirmed none of this execution's changes took effect. The execution will be marked failed and the database gate released.", "Confirm not applied")) return;
+        await api(databaseAPI + "/executions/" + encode(execution.id) + "/reconcile", { method: "POST", data: { outcome: "NOT_APPLIED" } });
+        await migrationsPage();
+        notice("Execution reconciled as not applied.", "success");
+      }, "danger"));
+    }
     const sqlDetails = node("details");
     sqlDetails.append(node("summary", "SQL"));
     const sql = node("pre", undefined, "migration-error-code");

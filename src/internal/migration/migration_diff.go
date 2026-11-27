@@ -90,6 +90,9 @@ func parseDesiredDDL(sqlText string) (*pg_query.ParseResult, map[string]string, 
 			if stmt.IfNotExists {
 				return nil, nil, fmt.Errorf("%w: omit IF NOT EXISTS from desired schema DDL", apperror.ErrInvalidInput)
 			}
+			if stmt.Relation.Relname == "_platform_migration_checkpoints" {
+				return nil, nil, fmt.Errorf("%w: _platform_migration_checkpoints is platform-managed and cannot be part of desired schema DDL", apperror.ErrInvalidInput)
+			}
 			if err := addName(stmt.Relation.Schemaname); err != nil {
 				return nil, nil, err
 			}
@@ -101,6 +104,12 @@ func parseDesiredDDL(sqlText string) (*pg_query.ParseResult, map[string]string, 
 					}
 					for _, cn := range col.Constraints {
 						constraint := cn.GetConstraint()
+						// Identity and generated-column clauses are column attributes,
+						// not table constraints. The scratch schema materialization
+						// validates their PostgreSQL syntax and semantics.
+						if constraint != nil && (constraint.Contype == pg_query.ConstrType_CONSTR_IDENTITY || constraint.Contype == pg_query.ConstrType_CONSTR_GENERATED) {
+							continue
+						}
 						if err := validateDesiredConstraint(constraint); err != nil {
 							return nil, nil, err
 						}
@@ -373,7 +382,7 @@ func readSchemaShape(ctx context.Context, tx *sql.Tx, aliases map[string]string)
 	}
 	rows.Close()
 
-	tableRows, err := tx.QueryContext(ctx, `SELECT n.nspname,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND NOT c.relispartition AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%' ORDER BY n.nspname,c.relname`)
+	tableRows, err := tx.QueryContext(ctx, `SELECT n.nspname,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p') AND NOT c.relispartition AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp_%' AND ($1::boolean OR c.relname <> '_platform_migration_checkpoints') ORDER BY n.nspname,c.relname`, aliases != nil)
 	if err != nil {
 		return shape, fmt.Errorf("%w: could not inspect tables: %v", apperror.ErrInternal, err)
 	}

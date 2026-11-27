@@ -456,15 +456,15 @@ type RollbackRequest struct {
 
 // GET /api/v1/databases/{dbId}/migrations response body ([]MigrationSummary)
 type MigrationSummary struct {
-	ID                 string          `json:"id"`
-	Name               string          `json:"name"`
-	Version            *int64          `json:"version"`
-	Status             MigrationStatus `json:"status"`
-	MigrationType      string          `json:"migration_type,omitempty"`
-	IsIrreversible     bool            `json:"is_irreversible,omitempty"`
-	ExecutedBy         *string         `json:"executed_by"`
-	ExecutedAt         *time.Time      `json:"executed_at"`
-	HasDown            bool            `json:"has_down,omitempty"`
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Version        *int64          `json:"version"`
+	Status         MigrationStatus `json:"status"`
+	MigrationType  string          `json:"migration_type,omitempty"`
+	IsIrreversible bool            `json:"is_irreversible,omitempty"`
+	ExecutedBy     *string         `json:"executed_by"`
+	ExecutedAt     *time.Time      `json:"executed_at"`
+	HasDown        bool            `json:"has_down,omitempty"`
 }
 
 // GET /api/v1/databases/{dbId}/migrations/{migrationId} response body
@@ -503,6 +503,7 @@ type MigrationExecutionSummary struct {
 	ActionType            string     `json:"action_type"`
 	RolledBackExecutionID *string    `json:"rolled_back_execution_id,omitempty"`
 	Status                string     `json:"status"`
+	JobStatus             string     `json:"job_status,omitempty"`
 	ExecutedSQL           string     `json:"executed_sql"`
 	ExecutedBy            string     `json:"executed_by"`
 	ExecutedByUsername    string     `json:"executed_by_username,omitempty"`

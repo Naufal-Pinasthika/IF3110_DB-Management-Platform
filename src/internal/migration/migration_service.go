@@ -735,6 +735,7 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 		ExecutedSQL:           *m.SQLDown,
 		ExecutedBy:            actor.User.ID,
 		StartedAt:             now,
+		Version:               m.Version,
 	}
 	if err := s.Repository.CreateExecution(ctx, &exec); err != nil {
 		return api.MigrationExecuted{}, err
@@ -983,7 +984,7 @@ func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal
 
 	result := make([]api.MigrationExecutionSummary, 0, len(executions))
 	for _, e := range executions {
-		result = append(result, api.MigrationExecutionSummary{
+		summary := api.MigrationExecutionSummary{
 			ID:                    e.ID,
 			MigrationID:           e.MigrationID,
 			MigrationName:         e.Migration.Name,
@@ -1001,7 +1002,16 @@ func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal
 			CommittedBatches:      e.CommittedBatches,
 			CommittedRows:         e.CommittedRows,
 			LastCursorValue:       e.LastCursorValue,
-		})
+		}
+		if jobStatusReader, ok := s.Repository.(interface {
+			GetExecutionJobStatus(context.Context, string) (string, error)
+		}); ok {
+			summary.JobStatus, err = jobStatusReader.GetExecutionJobStatus(ctx, e.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result = append(result, summary)
 	}
 	return result, nil
 }
@@ -1042,6 +1052,19 @@ func (s *Service) resolveCheckpointExecutionID(ctx context.Context, exec *models
 		cur = prev
 	}
 	return cur.ID
+}
+
+func (s *Service) markApplied(ctx context.Context, databaseID, migrationID, executionID, actorID string, now time.Time) error {
+	if executionID != "" {
+		if repository, ok := s.Repository.(interface {
+			MarkAppliedExecution(context.Context, string, string, string, string, time.Time) (models.Migration, error)
+		}); ok {
+			_, err := repository.MarkAppliedExecution(ctx, databaseID, migrationID, executionID, actorID, now)
+			return err
+		}
+	}
+	_, err := s.Repository.MarkApplied(ctx, databaseID, migrationID, actorID, now)
+	return err
 }
 
 func (s *Service) ReadProgress(ctx context.Context, ref contracts.ExecutionRef) (jobs.Progress, error) {
@@ -1302,7 +1325,13 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			_ = s.Repository.UpdateExecution(ctx, exec)
 		}
 
-		_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, actorID, now)
+		executionID := ""
+		if exec != nil {
+			executionID = exec.ID
+		}
+		if err := s.markApplied(ctx, ref.DatabaseID, m.ID, executionID, actorID, now); err != nil {
+			return contracts.ExecutionResult{State: contracts.ExecutionUnknown, RetryAdvice: contracts.RetryReconcile, BlocksDatabase: true, ErrorCode: "METADATA_FINALIZATION_FAILED"}, err
+		}
 		return contracts.ExecutionResult{
 			State:            contracts.ExecutionSucceeded,
 			RetryAdvice:      contracts.RetryStop,
@@ -1351,7 +1380,13 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 		exec.Status = "SUCCEEDED"
 		_ = s.Repository.UpdateExecution(ctx, exec)
 	}
-	_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, actorID, now)
+	executionID := ""
+	if exec != nil {
+		executionID = exec.ID
+	}
+	if err := s.markApplied(ctx, ref.DatabaseID, m.ID, executionID, actorID, now); err != nil {
+		return contracts.ExecutionResult{State: contracts.ExecutionUnknown, RetryAdvice: contracts.RetryReconcile, BlocksDatabase: true, ErrorCode: "METADATA_FINALIZATION_FAILED"}, err
+	}
 
 	return contracts.ExecutionResult{
 		State:       contracts.ExecutionSucceeded,
