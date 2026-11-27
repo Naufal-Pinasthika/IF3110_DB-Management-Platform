@@ -10,24 +10,42 @@ import { useFormAction, useUnsavedChanges } from '../form-hooks'
 import { useSession } from '../session'
 import Plans from '../components/Plans'
 
+// List migration definitions and execution records for the selected database
 export function Migrations() {
   const database = useDatabase()
   const [search, setSearch] = useSearchParams()
   const filter = search.get('status') || ''
   const [hideRollback, setHideRollback] = useState(false)
 
+  // Refresh definition status only while queued work is active
   const migrationsQuery = useQuery({
     queryKey: ['migrations', database.id, filter],
-    queryFn: ({ signal }) => api<MigrationSummary[]>(`${databaseAPI(database.id)}/migrations${filter ? `?status=${encode(filter)}` : ''}`, { signal }),
-    refetchInterval: query => query.state.data?.some(item => item.status === 'RUNNING' || item.status === 'QUEUED') ? 3000 : false,
+    queryFn: ({ signal }) =>
+      api<MigrationSummary[]>(
+        `${databaseAPI(database.id)}/migrations${filter ? `?status=${encode(filter)}` : ''}`,
+        { signal },
+      ),
+    refetchInterval: query =>
+      query.state.data?.some(
+        item => item.status === 'RUNNING' || item.status === 'QUEUED',
+      )
+        ? 3000
+        : false,
   })
 
+  // Refresh history while an execution is still running
   const historyQuery = useQuery({
     queryKey: ['migration-history', database.id, hideRollback],
-    queryFn: ({ signal }) => api<MigrationExecutionSummary[]>(`${databaseAPI(database.id)}/migration-history${hideRollback ? '?hide_rollback=true' : ''}`, { signal }),
-    refetchInterval: query => query.state.data?.some(item => item.status === 'RUNNING') ? 3000 : false,
+    queryFn: ({ signal }) =>
+      api<MigrationExecutionSummary[]>(
+        `${databaseAPI(database.id)}/migration-history${hideRollback ? '?hide_rollback=true' : ''}`,
+        { signal },
+      ),
+    refetchInterval: query =>
+      query.state.data?.some(item => item.status === 'RUNNING') ? 3000 : false,
   })
 
+  // Refresh both lists after a user requests a manual update
   const refreshAll = () => {
     void migrationsQuery.refetch()
     void historyQuery.refetch()
@@ -53,7 +71,13 @@ export function Migrations() {
         </div>
         <label className="toolbar-actions" htmlFor="migration-filter">
           Status
-          <select id="migration-filter" value={filter} onChange={event => setSearch(event.target.value ? { status: event.target.value } : {})}>
+          <select
+            id="migration-filter"
+            value={filter}
+            onChange={event =>
+              setSearch(event.target.value ? { status: event.target.value } : {})
+            }
+          >
             <option value="">All statuses</option>
             <option value="DRAFT">Draft</option>
             <option value="PENDING_REVIEW">Pending review</option>
@@ -93,7 +117,9 @@ export function Migrations() {
             ))}
             {!migrationsQuery.data?.length && (
               <EmptyRow columns={6}>
-                {migrationsQuery.isPending ? 'Loading migration history…' : 'No migrations found. Users with edit access can create a draft.'}
+                {migrationsQuery.isPending
+                  ? 'Loading migration history…'
+                  : 'No migrations found. Users with edit access can create a draft.'}
               </EmptyRow>
             )}
           </tbody>
@@ -105,10 +131,23 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Execution history</h2>
-          <p>Immutable audit trail of all execution attempts (forward, rollback, and failures).</p>
+          <p>
+            Immutable audit trail of all execution attempts (forward, rollback, and failures).
+          </p>
         </div>
-        <div className="toolbar-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', margin: 0 }}>
+        <div
+          className="toolbar-actions"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+        >
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              cursor: 'pointer',
+              margin: 0,
+            }}
+          >
             <input
               type="checkbox"
               id="hide-rollback"
@@ -154,7 +193,9 @@ export function Migrations() {
             ))}
             {!historyQuery.data?.length && (
               <EmptyRow columns={7}>
-                {historyQuery.isPending ? 'Loading execution records…' : 'No execution history recorded.'}
+                {historyQuery.isPending
+                  ? 'Loading execution records…'
+                  : 'No execution history recorded.'}
               </EmptyRow>
             )}
           </tbody>
@@ -164,12 +205,17 @@ export function Migrations() {
   </>
 }
 
+// Load one migration when the route includes its id
 export function MigrationRoute() {
   const { migrationId } = useParams()
   const database = useDatabase()
   const migration = useQuery({
     queryKey: ['migration', database.id, migrationId],
-    queryFn: ({ signal }) => api<Migration>(`${databaseAPI(database.id)}/migrations/${encode(migrationId!)}`, { signal }),
+    queryFn: ({ signal }) =>
+      api<Migration>(
+        `${databaseAPI(database.id)}/migrations/${encode(migrationId!)}`,
+        { signal },
+      ),
     enabled: Boolean(migrationId),
     refetchInterval: query =>
       query.state.data?.status === 'RUNNING' || query.state.data?.status === 'QUEUED' ? 3000 : false,
@@ -179,7 +225,11 @@ export function MigrationRoute() {
     return (
       <>
         <PageHeading title="Migration details" />
-        {migration.isPending ? <Loading>Loading migration…</Loading> : <ErrorState error={migration.error} retry={() => migration.refetch()} />}
+        {migration.isPending ? (
+          <Loading>Loading migration…</Loading>
+        ) : (
+          <ErrorState error={migration.error} retry={() => migration.refetch()} />
+        )}
       </>
     )
   }
@@ -192,10 +242,12 @@ export function MigrationRoute() {
   )
 }
 
+// Edit drafts and show actions allowed by the current migration state
 function MigrationEditor({ migration }: { migration?: Migration }) {
   const database = useDatabase()
   const creating = !migration
   const location = useLocation()
+  // Read clone data from the route state only when creating a new draft
   const clone = (location.state as { clone?: { name: string; sql: string } } | null)?.clone
 
   const [name, setName] = useState(creating ? clone?.name || '' : migration.name)
@@ -207,8 +259,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const [batchAttribute, setBatchAttribute] = useState(migration?.batch_attribute || 'id')
   const [batchSize, setBatchSize] = useState(migration?.batch_size || 1000)
 
+  // Keep saved values separate from fields the user is still editing
   const [savedSQL, setSavedSQL] = useState(migration?.sql_text || '')
   const [savedName, setSavedName] = useState('')
+  // Treat changed SQL and a changed draft name as unsaved work
   const dirty = sql !== savedSQL || (creating && name !== savedName)
   const matchesSaved = creating || sql === migration.sql_text
   const allowLeave = useUnsavedChanges(dirty)
@@ -225,8 +279,9 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const { confirm, notify } = useUI()
   const session = useSession()
   const currentUser = session.data
+  // Only the assigned leader can decide this pending approval
   const pendingApproval = migration?.approvals?.find(
-    app => app.leader_id === currentUser?.id && app.status === 'PENDING'
+    app => app.leader_id === currentUser?.id && app.status === 'PENDING',
   )
   const canDecide = Boolean(pendingApproval)
   const [decisionDialog, setDecisionDialog] = useState<'approve' | 'reject' | null>(null)
@@ -236,10 +291,12 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const draft = creating || migration.status === 'DRAFT' || migration.status === 'REJECTED'
   const editable = canEdit && draft
   const endpoint = `${databaseAPI(database.id)}/migrations${migration ? `/${encode(migration.id)}` : ''}`
-  const policy = database.engine === 'mysql'
-    ? 'MySQL: one schema statement per migration (DDL auto-commits), or transactional INSERT/UPDATE/DELETE on InnoDB tables.'
-    : 'All statements execute together in a transaction, or step-by-step for batch migrations.'
+  const policy =
+    database.engine === 'mysql'
+      ? 'MySQL: one schema statement per migration (DDL auto-commits), or transactional INSERT/UPDATE/DELETE on InnoDB tables.'
+      : 'All statements execute together in a transaction, or step-by-step for batch migrations.'
 
+  // Track the active action and always clear its label after it settles
   const run = (kind: string, work: () => Promise<unknown>) => {
     void action.run(async () => {
       setOperation(kind)
@@ -251,6 +308,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
     })
   }
 
+  // Refresh every database view that can change after migration work
   const changed = async () => {
     await Promise.all([
       client.invalidateQueries({ queryKey: ['migrations', database.id] }),
@@ -263,6 +321,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
     ])
   }
 
+  // Render state notices first then the editor and allowed actions
   return (
     <>
       <PageHeading title={creating ? 'New migration' : migration.name}>
@@ -271,11 +330,26 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
 
       {!creating && (
         <div className="metadata-strip">
-          <div><span>Status</span><strong><Badge value={migration.status} /></strong></div>
-          <div><span>Version</span><strong>{migration.version ?? '--'}</strong></div>
-          <div><span>Type</span><strong><Badge value={migration.migration_type} /></strong></div>
-          <div><span>Reversible</span><strong>{migration.is_irreversible ? 'Irreversible' : 'Reversible'}</strong></div>
-          <div><span>Executed at</span><strong>{formatDate(migration.executed_at)}</strong></div>
+          <div>
+            <span>Status</span>
+            <strong><Badge value={migration.status} /></strong>
+          </div>
+          <div>
+            <span>Version</span>
+            <strong>{migration.version ?? '--'}</strong>
+          </div>
+          <div>
+            <span>Type</span>
+            <strong><Badge value={migration.migration_type} /></strong>
+          </div>
+          <div>
+            <span>Reversible</span>
+            <strong>{migration.is_irreversible ? 'Irreversible' : 'Reversible'}</strong>
+          </div>
+          <div>
+            <span>Executed at</span>
+            <strong>{formatDate(migration.executed_at)}</strong>
+          </div>
         </div>
       )}
 
@@ -348,28 +422,50 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           />
           <div className="editor-footer">
             <span className="muted" role="status">
-              {operation === 'compare' ? 'Comparing schemas…' : diff ? diff.has_changes ? `${diff.changes.length} changes detected` : 'No supported changes found' : 'No comparison run'}
+              {operation === 'compare'
+                ? 'Comparing schemas…'
+                : diff
+                  ? diff.has_changes
+                    ? `${diff.changes.length} changes detected`
+                    : 'No supported changes found'
+                  : 'No comparison run'}
             </span>
             <button
               className="button primary"
               type="button"
               disabled={action.busy || !ddl.trim()}
-              onClick={() => run('compare', async () => {
-                const result = await api<SchemaDiff>(`${databaseAPI(database.id)}/migrations/schema-diff`, {
-                  method: 'POST',
-                  data: { desired_ddl: ddl },
+              onClick={() =>
+                run('compare', async () => {
+                  // Keep the generated diff visible even when no SQL is produced
+                  const result = await api<SchemaDiff>(
+                    `${databaseAPI(database.id)}/migrations/schema-diff`,
+                    {
+                      method: 'POST',
+                      data: { desired_ddl: ddl },
+                    },
+                  )
+                  setDiff(result)
+                  if (!result.has_changes) return
+
+                  // Ask before replacing SQL already entered by the user
+                  if (
+                    sql.trim() &&
+                    sql !== result.generated_sql &&
+                    !(await confirm({
+                      title: 'Replace migration SQL?',
+                      description:
+                        'The generated candidate will replace the SQL currently in the editor.',
+                      label: 'Replace SQL',
+                    }))
+                  ) {
+                    return
+                  }
+
+                  setSQL(result.generated_sql)
+                  setPlan(null)
+                  if (!name.trim()) setName('Generated schema migration')
                 })
-                setDiff(result)
-                if (!result.has_changes) return
-                if (sql.trim() && sql !== result.generated_sql && !await confirm({
-                  title: 'Replace migration SQL?',
-                  description: 'The generated candidate will replace the SQL currently in the editor.',
-                  label: 'Replace SQL',
-                })) return
-                setSQL(result.generated_sql)
-                setPlan(null)
-                if (!name.trim()) setName('Generated schema migration')
-              })}
+              }
             >
               Compare schemas
             </button>
@@ -385,6 +481,8 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         onSubmit={event => {
           event.preventDefault()
           if (!editable || action.busy) return
+
+          // Send only fields supported by the selected migration mode
           run('save', async () => {
             const data: Record<string, unknown> = {
               sql_text: sql,
@@ -406,7 +504,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
             setPlan(null)
             if (creating) {
               allowLeave()
-              await navigate(`${databaseURL(database.id)}/migrations/${encode(result.id)}`, { replace: true })
+              await navigate(
+                `${databaseURL(database.id)}/migrations/${encode(result.id)}`,
+                { replace: true },
+              )
             }
             notify('Migration draft saved.')
             await changed()
@@ -444,13 +545,23 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               readOnly={!editable}
               disabled={action.busy}
               value={name}
-              onChange={event => { setName(event.target.value); setNote('') }}
+              onChange={event => {
+                setName(event.target.value)
+                setNote('')
+              }}
               placeholder="e.g. Backfill user analytics"
             />
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gap: '1rem',
+            marginBottom: '1rem',
+          }}
+        >
           <div>
             <label htmlFor="migration-type">Mode Eksekusi</label>
             <select
@@ -493,7 +604,14 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         </div>
 
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', cursor: editable ? 'pointer' : 'default' }}>
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              cursor: editable ? 'pointer' : 'default',
+            }}
+          >
             <input
               type="checkbox"
               disabled={!editable || action.busy}
@@ -575,12 +693,26 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                 className="button small"
                 type="button"
                 disabled={action.busy || dirty || !matchesSaved}
-                onClick={() => run('explain', async () => {
-                  if (dirty || !matchesSaved) throw new Error('Save or refresh the draft before analyzing its plan.')
-                  const started = performance.now()
-                  setPlan(await api<ExplainResult>(`${endpoint}/explain`, { method: 'POST', data: { analyze: true } }))
-                  setPlanSummary(`Rolled back preview - ${((performance.now() - started) / 1000).toFixed(2)}s - actual timings are estimates for this run`)
-                })}
+                onClick={() =>
+                  run('explain', async () => {
+                    // Plan analysis runs against the saved migration on the server
+                    if (dirty || !matchesSaved) {
+                      throw new Error(
+                        'Save or refresh the draft before analyzing its plan.',
+                      )
+                    }
+                    const started = performance.now()
+                    setPlan(
+                      await api<ExplainResult>(`${endpoint}/explain`, {
+                        method: 'POST',
+                        data: { analyze: true },
+                      }),
+                    )
+                    setPlanSummary(
+                      `Rolled back preview - ${((performance.now() - started) / 1000).toFixed(2)}s - actual timings are estimates for this run`,
+                    )
+                  })
+                }
               >
                 {operation === 'explain' ? 'Analyzing…' : 'Analyze plan'}
               </button>
@@ -591,12 +723,17 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                 className="button secondary"
                 type="button"
                 disabled={action.busy || dirty || !matchesSaved}
-                onClick={() => run('submit-review', async () => {
-                  if (dirty || !matchesSaved) throw new Error('Save changes before submitting for review.')
-                  await api(`${endpoint}/submit-review`, { method: 'POST' })
-                  notify('Submitted for review. Awaiting group leader approvals.')
-                  await changed()
-                })}
+                onClick={() =>
+                  run('submit-review', async () => {
+                    // Review requests must use the saved SQL version
+                    if (dirty || !matchesSaved) {
+                      throw new Error('Save changes before submitting for review.')
+                    }
+                    await api(`${endpoint}/submit-review`, { method: 'POST' })
+                    notify('Submitted for review. Awaiting group leader approvals.')
+                    await changed()
+                  })
+                }
               >
                 {operation === 'submit-review' ? 'Submitting…' : 'Submit for review'}
               </button>
@@ -608,7 +745,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   className="button primary"
                   type="button"
                   disabled={action.busy}
-                  onClick={() => { setReviewComment(''); setDecisionDialog('approve') }}
+                  onClick={() => {
+                    setReviewComment('')
+                    setDecisionDialog('approve')
+                  }}
                 >
                   Approve
                 </button>
@@ -616,7 +756,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   className="button danger"
                   type="button"
                   disabled={action.busy}
-                  onClick={() => { setReviewComment(''); setDecisionDialog('reject') }}
+                  onClick={() => {
+                    setReviewComment('')
+                    setDecisionDialog('reject')
+                  }}
                 >
                   Reject
                 </button>
@@ -629,16 +772,21 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                 id="execute-migration"
                 type="button"
                 disabled={action.busy || dirty}
-                onClick={() => run('execute', async () => {
-                  if (!await confirm({
-                    title: 'Execute migration?',
-                    description: `Queue this migration to run against ${database.database_name}? Execution is asynchronous.`,
-                    label: 'Execute migration',
-                  })) return
-                  await api(`${endpoint}/execute`, { method: 'POST' })
-                  notify('Migration queued for asynchronous execution.')
-                  await changed()
-                })}
+                onClick={() =>
+                  run('execute', async () => {
+                    // Execution is queued only after the user confirms the target
+                    if (!(await confirm({
+                      title: 'Execute migration?',
+                      description: `Queue this migration to run against ${database.database_name}? Execution is asynchronous.`,
+                      label: 'Execute migration',
+                    }))) {
+                      return
+                    }
+                    await api(`${endpoint}/execute`, { method: 'POST' })
+                    notify('Migration queued for asynchronous execution.')
+                    await changed()
+                  })
+                }
               >
                 {operation === 'execute' ? 'Queuing…' : 'Execute migration'}
               </button>
@@ -649,16 +797,21 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                 className="button danger"
                 type="button"
                 disabled={action.busy}
-                onClick={() => run('rollback', async () => {
-                  if (!await confirm({
-                    title: 'Rollback migration?',
-                    description: `Roll back ${migration.name} using its approved SQL down?`,
-                    label: 'Rollback',
-                  })) return
-                  await api(`${endpoint}/rollback`, { method: 'POST' })
-                  notify('Rollback job queued.')
-                  await changed()
-                })}
+                onClick={() =>
+                  run('rollback', async () => {
+                    // Roll back only after confirming the approved down SQL
+                    if (!(await confirm({
+                      title: 'Rollback migration?',
+                      description: `Roll back ${migration.name} using its approved SQL down?`,
+                      label: 'Rollback',
+                    }))) {
+                      return
+                    }
+                    await api(`${endpoint}/rollback`, { method: 'POST' })
+                    notify('Rollback job queued.')
+                    await changed()
+                  })
+                }
               >
                 {operation === 'rollback' ? 'Rolling back…' : 'Rollback migration'}
               </button>
@@ -669,16 +822,21 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                 className="button secondary"
                 type="button"
                 disabled={action.busy}
-                onClick={() => run('forward', async () => {
-                  if (!await confirm({
-                    title: 'Forward migration?',
-                    description: `Re-apply ${migration.name} forward?`,
-                    label: 'Forward',
-                  })) return
-                  await api(`${endpoint}/forward`, { method: 'POST' })
-                  notify('Forward execution queued.')
-                  await changed()
-                })}
+                onClick={() =>
+                  run('forward', async () => {
+                    // Forward execution reapplies the migration after confirmation
+                    if (!(await confirm({
+                      title: 'Forward migration?',
+                      description: `Re-apply ${migration.name} forward?`,
+                      label: 'Forward',
+                    }))) {
+                      return
+                    }
+                    await api(`${endpoint}/forward`, { method: 'POST' })
+                    notify('Forward execution queued.')
+                    await changed()
+                  })
+                }
               >
                 {operation === 'forward' ? 'Forwarding…' : 'Forward migration'}
               </button>
@@ -745,6 +903,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               onSubmit={event => {
                 event.preventDefault()
                 void action.run(async () => {
+                  // Send the selected decision with an optional trimmed comment
                   const endpointPath = `${endpoint}/${decisionDialog}`
                   const payload: { comment?: string } = {}
                   if (reviewComment.trim()) {
@@ -809,6 +968,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   )
 }
 
+// Group generated schema changes so each action is easy to scan
 function SchemaChanges({ result }: { result: SchemaDiff }) {
   return (
     <div className="schema-diff-results" aria-live="polite">
@@ -817,20 +977,32 @@ function SchemaChanges({ result }: { result: SchemaDiff }) {
           {result.excluded_object_count} existing objects are outside this diff and will not be changed.
         </p>
       )}
-      {!result.has_changes && <p className="inline-state">Supported schema objects match. No migration is needed.</p>}
+      {!result.has_changes && (
+        <p className="inline-state">
+          Supported schema objects match. No migration is needed.
+        </p>
+      )}
       {['added', 'modified', 'removed'].map(action => {
         const changes = (result.changes || []).filter(change => change.action === action)
         if (!changes.length) return null
         return (
           <section className="schema-diff-group" key={action}>
-            <h3>{action} - {changes.length}</h3>
+            <h3>
+              {action} - {changes.length}
+            </h3>
             {changes.map((change, index) => (
               <div className={`schema-diff-item ${action}`} key={index}>
                 <strong>
                   {change.kind || 'object'} -{' '}
                   {change.kind === 'schema'
                     ? change.schema
-                    : [change.schema, change.table, change.name !== change.table ? change.name : ''].filter(Boolean).join('.')}
+                    : [
+                        change.schema,
+                        change.table,
+                        change.name !== change.table ? change.name : '',
+                      ]
+                        .filter(Boolean)
+                        .join('.')}
                 </strong>
                 {change.before && <code>Current: {change.before}</code>}
                 {change.after && <code>Desired: {change.after}</code>}

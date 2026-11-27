@@ -1,4 +1,4 @@
-// UI models are intentionally separate from the API types until M2 integration.
+// Keep preview models separate until the migration API is connected
 export type MigrationDraft = {
   name: string
   sqlUp: string
@@ -10,8 +10,17 @@ export type MigrationDraft = {
   batchSize: number
 }
 
-export type ExecutionStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'PARTIAL' | 'PARTIALLY_REVERTED' | 'UNKNOWN'
+// Status values shown in the queue and execution history
+export type ExecutionStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'PARTIAL'
+  | 'PARTIALLY_REVERTED'
+  | 'UNKNOWN'
 
+// Approval rows displayed in the review preview
 export type Approval = {
   id: string
   group: string
@@ -21,6 +30,7 @@ export type Approval = {
   comment: string
 }
 
+// Execution data shown by the queue and history preview
 export type Execution = {
   id: string
   jobId?: string
@@ -39,7 +49,14 @@ export type Execution = {
   attempt: number
 }
 
+// Start new preview drafts with stable defaults for batch mode
 export const emptyDraft: MigrationDraft = {
-  name: '', sqlUp: '', sqlDown: '', irreversible: false, irreversibleReason: '',
-  mode: 'regular', batchAttribute: 'id', batchSize: 1000,
+  name: '',
+  sqlUp: '',
+  sqlDown: '',
+  irreversible: false,
+  irreversibleReason: '',
+  mode: 'regular',
+  batchAttribute: 'id',
+  batchSize: 1000,
 }

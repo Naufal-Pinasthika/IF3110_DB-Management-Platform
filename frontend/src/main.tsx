@@ -5,8 +5,24 @@ import App from './App'
 import { UIProvider } from './providers'
 import './styles.css'
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 10_000, refetchOnWindowFocus: true }, mutations: { retry: false } } })
+// Keep short lived data fresh while avoiding automatic retries for failed writes
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+      staleTime: 10_000,
+      refetchOnWindowFocus: true,
+    },
+    mutations: { retry: false },
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><QueryClientProvider client={queryClient}><UIProvider><App /></UIProvider></QueryClientProvider></StrictMode>,
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <UIProvider>
+        <App />
+      </UIProvider>
+    </QueryClientProvider>
+  </StrictMode>,
 )
