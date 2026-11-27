@@ -35,6 +35,7 @@ migrate-platform:
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000007_add_migration_jobs.sql
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000008_migration_workflow_and_batches.sql
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000009_rollback_approval.sql
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U admin -d platform_db < db/platform/000010_rollback_version_constraint.sql
 
 # Integration auth checks serve the embedded SPA, so build assets before Go compiles it.
 test-integration: frontend-build

@@ -285,12 +285,14 @@ func waitForJobBlocked(t *testing.T, c *testClient, sess *userSession, dbID, exe
 	for time.Now().Before(deadline) {
 		w := c.req("GET", "/api/v1/databases/"+dbID+"/jobs", nil, sess)
 		c.mustStatus(w, http.StatusOK)
-		jobs := decodeData[[]struct {
-			ExecutionID     string `json:"execution_id"`
-			Status          string `json:"status"`
-			DatabaseBlocked bool   `json:"database_blocked"`
+		page := decodeData[struct {
+			Jobs []struct {
+				ExecutionID     string `json:"execution_id"`
+				Status          string `json:"status"`
+				DatabaseBlocked bool   `json:"database_blocked"`
+			} `json:"jobs"`
 		}](t, w)
-		for _, j := range jobs {
+		for _, j := range page.Jobs {
 			if strings.EqualFold(j.ExecutionID, execID) {
 				lastStatus = j.Status
 				if j.Status == "BLOCKED" && j.DatabaseBlocked {
