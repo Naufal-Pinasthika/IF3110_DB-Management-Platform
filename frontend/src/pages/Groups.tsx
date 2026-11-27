@@ -131,7 +131,7 @@ export default function Groups() {
                   {grants.length === 1 ? '' : 's'}
                 </p>
               </div>
-              <div className="toolbar-actions">
+              <div className="toolbar-actions group-header-actions">
                 <button
                   type="button"
                   className="button small"
@@ -168,7 +168,7 @@ export default function Groups() {
               ]}
             />
             <section role="tabpanel" aria-label="Members" hidden={tab !== 'members'}>
-              <div className="section-toolbar">
+              <div className="section-toolbar group-add-toolbar">
                 <button
                   className="button primary small"
                   onClick={() => setEditor({ kind: 'member', group })}
@@ -264,7 +264,7 @@ export default function Groups() {
               </div>
             </section>
             <section role="tabpanel" aria-label="Database access" hidden={tab !== 'grants'}>
-              <div className="section-toolbar">
+              <div className="section-toolbar group-add-toolbar">
                 <button
                   className="button primary small"
                   onClick={() => setEditor({ kind: 'grant', group })}

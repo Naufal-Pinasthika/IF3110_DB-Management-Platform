@@ -1811,6 +1811,19 @@ select[data-empty] {
   min-width: 0;
 }
 
+.group-add-toolbar {
+  justify-content: flex-end;
+  padding-inline: .75rem;
+}
+
+.group-header-actions {
+  gap: .5rem;
+}
+
+.group-header-actions .button.danger {
+  margin-left: 0;
+}
+
 .group-detail .tab-bar {
   gap: 1.2rem;
 }
