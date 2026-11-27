@@ -140,12 +140,19 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 		if action == "" {
 			action = "MIGRATE"
 		}
+		var leaderID, leaderUsername string
+		if app.LeaderID != nil {
+			leaderID = *app.LeaderID
+		}
+		if app.Leader != nil {
+			leaderUsername = app.Leader.Username
+		}
 		approvalItems = append(approvalItems, api.MigrationApprovalItem{
 			ID:             app.ID,
 			GroupID:        app.GroupID,
 			GroupName:      app.Group.Name,
-			LeaderID:       app.LeaderID,
-			LeaderUsername: app.Leader.Username,
+			LeaderID:       leaderID,
+			LeaderUsername: leaderUsername,
 			Status:         string(app.Status),
 			Action:         action,
 			Comment:        app.Comment,
@@ -305,13 +312,15 @@ func (s *Service) buildPendingApprovals(ctx context.Context, databaseID, migrati
 
 	approvals := make([]models.MigrationApproval, 0, len(groups))
 	for _, g := range groups {
-		if g.LeaderID == nil || *g.LeaderID == "" {
-			return nil, fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
+		var leaderID *string
+		if g.LeaderID != nil && *g.LeaderID != "" {
+			id := *g.LeaderID
+			leaderID = &id
 		}
 		approvals = append(approvals, models.MigrationApproval{
 			MigrationID: migrationID,
 			GroupID:     g.ID,
-			LeaderID:    *g.LeaderID,
+			LeaderID:    leaderID,
 			Status:      models.ApprovalPending,
 			Action:      action,
 			CreatedAt:   now,
@@ -328,9 +337,9 @@ func (s *Service) validateApprovedByCurrentGroups(ctx context.Context, databaseI
 	if len(groups) == 0 {
 		return fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
 	}
-	approvedGroups := make(map[string]bool, len(approvals))
+	approvedLeaders := make(map[string]string, len(approvals))
 	for _, a := range approvals {
-		if a.Status != models.ApprovalApproved {
+		if a.Status != models.ApprovalApproved || a.LeaderID == nil {
 			continue
 		}
 		if requiredAction != "" {
@@ -340,14 +349,15 @@ func (s *Service) validateApprovedByCurrentGroups(ctx context.Context, databaseI
 		} else if a.Action == "ROLLBACK" {
 			continue
 		}
-		approvedGroups[a.GroupID] = true
+		approvedLeaders[a.GroupID] = *a.LeaderID
 	}
 	for _, g := range groups {
 		if g.LeaderID == nil || *g.LeaderID == "" {
 			return fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
 		}
-		if !approvedGroups[g.ID] {
-			return fmt.Errorf("%w: missing approval from leader of group %q", apperror.ErrConflict, g.Name)
+		approvedLeader, ok := approvedLeaders[g.ID]
+		if !ok || approvedLeader != *g.LeaderID {
+			return fmt.Errorf("%w: missing approval from current leader of group %q", apperror.ErrConflict, g.Name)
 		}
 	}
 	return nil

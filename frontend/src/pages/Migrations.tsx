@@ -1129,7 +1129,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   <tr key={app.id}>
                     <td><Badge value={app.action || 'MIGRATE'} /></td>
                     <td><strong>{app.group_name}</strong></td>
-                    <td>{app.leader_username}</td>
+                    <td>{app.leader_username || 'Unassigned (awaiting leader)'}</td>
                     <td><Badge value={app.status} /></td>
                     <td>{formatDate(app.decided_at)}</td>
                     <td>{app.comment || '--'}</td>

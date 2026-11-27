@@ -84,7 +84,7 @@ func (r *PostgresRepository) GetMigrationWithApprovals(ctx context.Context, data
 		return m, nil, err
 	}
 
-	// Sync pending approvals if the group leader changed
+	// Sync pending approvals if the group leader changed or was newly assigned
 	_ = r.DB.WithContext(ctx).Exec(`
 		UPDATE migration_approvals ma
 		SET leader_id = g.leader_id
@@ -93,7 +93,7 @@ func (r *PostgresRepository) GetMigrationWithApprovals(ctx context.Context, data
 		  AND ma.group_id = g.id 
 		  AND ma.status = 'PENDING' 
 		  AND g.leader_id IS NOT NULL 
-		  AND ma.leader_id != g.leader_id
+		  AND ma.leader_id IS DISTINCT FROM g.leader_id
 	`, migrationID).Error
 
 	var approvals []models.MigrationApproval
@@ -316,7 +316,7 @@ func (r *PostgresRepository) SubmitForwardReview(ctx context.Context, databaseID
 }
 
 func (r *PostgresRepository) GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error) {
-	// Sync pending approvals if the group leader changed
+	// Sync pending approvals if the group leader changed or was newly assigned
 	_ = r.DB.WithContext(ctx).Exec(`
 		UPDATE migration_approvals ma
 		SET leader_id = g.leader_id
@@ -325,7 +325,7 @@ func (r *PostgresRepository) GetPendingApprovalForLeader(ctx context.Context, mi
 		  AND ma.group_id = g.id 
 		  AND ma.status = 'PENDING' 
 		  AND g.leader_id IS NOT NULL 
-		  AND ma.leader_id != g.leader_id
+		  AND ma.leader_id IS DISTINCT FROM g.leader_id
 	`, migrationID).Error
 
 	var approvals []models.MigrationApproval

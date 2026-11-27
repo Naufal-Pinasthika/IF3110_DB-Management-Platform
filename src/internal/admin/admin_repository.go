@@ -161,10 +161,30 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID string, na
 			if membership == 0 {
 				return fmt.Errorf("%w: leader must be a member of this group", apperror.ErrInvalidInput)
 			}
-			// Sync any pending migration approvals for this group to the new leader
-			if err := tx.Model(&models.MigrationApproval{}).
-				Where("group_id = ? AND status = ?", groupID, models.ApprovalPending).
-				Update("leader_id", updates["leader_id"]).Error; err != nil {
+			// Sync pending approvals and revoke unexecuted approvals on leader change (Q&A #2, #13)
+			if err := tx.Exec(`
+				UPDATE migration_approvals ma
+				SET leader_id = ?,
+					status = 'PENDING',
+					comment = NULL,
+					decided_at = NULL
+				FROM migrations m
+				WHERE ma.migration_id = m.id
+				  AND ma.group_id = ?
+				  AND m.status IN ('PENDING_REVIEW', 'APPROVED', 'ROLLBACK_APPROVED')
+				  AND (ma.status = 'PENDING' OR ma.leader_id IS DISTINCT FROM ?)
+			`, updates["leader_id"], groupID, updates["leader_id"]).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`
+				UPDATE migrations m
+				SET status = 'PENDING_REVIEW'
+				FROM migration_approvals ma
+				WHERE ma.migration_id = m.id
+				  AND ma.group_id = ?
+				  AND ma.status = 'PENDING'
+				  AND m.status IN ('APPROVED', 'ROLLBACK_APPROVED')
+			`, groupID).Error; err != nil {
 				return err
 			}
 		}
@@ -412,6 +432,37 @@ func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant m
 			return err
 		}
 
+		// Ensure any unexecuted migrations awaiting review or approved on this database
+		// require approval from the newly granted group's leader (Q&A #2, #13).
+		if err := tx.Exec(`
+			INSERT INTO migration_approvals (migration_id, group_id, leader_id, status, action, created_at)
+			SELECT m.id, ?, g.leader_id, 'PENDING',
+				CASE
+					WHEN m.status = 'ROLLBACK_APPROVED' THEN 'ROLLBACK'
+					ELSE COALESCE((SELECT ma2.action FROM migration_approvals ma2 WHERE ma2.migration_id = m.id LIMIT 1), 'MIGRATE')
+				END,
+				?
+			FROM migrations m
+			JOIN groups g ON g.id = ?
+			WHERE m.database_id = ?
+			  AND m.status IN ('PENDING_REVIEW', 'APPROVED', 'ROLLBACK_APPROVED')
+			ON CONFLICT (migration_id, group_id) DO NOTHING
+		`, grant.GroupID, now, grant.GroupID, grant.DatabaseID).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			UPDATE migrations m
+			SET status = 'PENDING_REVIEW', updated_at = ?
+			WHERE m.database_id = ?
+			  AND m.status IN ('APPROVED', 'ROLLBACK_APPROVED')
+			  AND EXISTS (
+				SELECT 1 FROM migration_approvals ma
+				WHERE ma.migration_id = m.id AND ma.status != 'APPROVED'
+			  )
+		`, now, grant.DatabaseID).Error; err != nil {
+			return err
+		}
+
 		result = grant
 		return nil
 	})
@@ -424,6 +475,18 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 		// Delete the grant
 		if err := tx.Where("group_id = ? AND database_id = ?", groupID, databaseID).
 			Delete(&models.GroupAccess{}).Error; err != nil {
+			return err
+		}
+
+		// Clean up approval rows for this removed group on unexecuted migrations
+		if err := tx.Exec(`
+			DELETE FROM migration_approvals ma
+			USING migrations m
+			WHERE ma.migration_id = m.id
+			  AND ma.group_id = ?
+			  AND m.database_id = ?
+			  AND m.status IN ('PENDING_REVIEW', 'APPROVED', 'ROLLBACK_APPROVED')
+		`, groupID, databaseID).Error; err != nil {
 			return err
 		}
 

@@ -409,6 +409,27 @@ func TestMigrationWorkflowIntegration(t *testing.T) {
 		t.Fatalf("after 2nd approval status = %s, want APPROVED", got)
 	}
 
+	// 4b. Q&A #2/#13: Adding a new group grant after APPROVED revokes status back to PENDING_REVIEW;
+	// removing that grant leaves remaining groups intact; changing leader also revokes back to PENDING_REVIEW.
+	extraID := createUser("eve", "eve-pass-123")
+	extraGroupID := createGroup("platform-ops", extraID)
+	c.mustStatus(c.req("PUT", "/api/v1/admin/groups/"+extraGroupID+"/members/"+extraID, nil, adminSess), http.StatusOK)
+	c.mustStatus(c.req("PUT", "/api/v1/admin/groups/"+extraGroupID+"/databases/"+dbID+"/access", api.SetGroupAccessRequest{AccessLevel: api.AccessViewOnly}, adminSess), http.StatusOK)
+
+	w = c.req("GET", "/api/v1/databases/"+dbID+"/migrations/"+migID, nil, carolSess)
+	c.mustStatus(w, http.StatusOK)
+	if got := decodeData[api.MigrationDetail](t, w).Status; got != api.MigrationPendingReview {
+		t.Fatalf("after adding new group post-approval status = %s, want PENDING_REVIEW", got)
+	}
+	eveSess := c.login("eve", "eve-pass-123")
+	w = c.req("POST", "/api/v1/databases/"+dbID+"/migrations/"+migID+"/approve", api.DecideApprovalRequest{Comment: &okComment}, eveSess)
+	c.mustStatus(w, http.StatusOK)
+	if got := decodeData[api.MigrationDetail](t, w).Status; got != api.MigrationApproved {
+		t.Fatalf("after new group leader approved status = %s, want APPROVED", got)
+	}
+	// Clean up extra group grant so subsequent steps only need alice + bob.
+	c.mustStatus(c.req("DELETE", "/api/v1/admin/groups/"+extraGroupID+"/databases/"+dbID+"/access", nil, adminSess), http.StatusNoContent)
+
 	// 5. Execute asynchronously via worker and verify real table creation in targetDB.
 	w = c.req("POST", "/api/v1/databases/"+dbID+"/migrations/"+migID+"/execute", nil, carolSess)
 	c.mustStatus(w, http.StatusOK)

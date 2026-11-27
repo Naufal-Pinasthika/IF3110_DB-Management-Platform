@@ -160,7 +160,7 @@ type MigrationApproval struct {
 	ID          string         `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
 	MigrationID string         `gorm:"type:uuid;not null;index:migration_approvals_migration_idx"`
 	GroupID     string         `gorm:"type:uuid;not null"`
-	LeaderID    string         `gorm:"type:uuid;not null;index:migration_approvals_leader_idx"`
+	LeaderID    *string        `gorm:"type:uuid;index:migration_approvals_leader_idx"`
 	Status      ApprovalStatus `gorm:"type:varchar(20);not null;default:'PENDING'"`
 	// Action distinguishes approval rounds: "MIGRATE", "ROLLBACK", or "FORWARD"
 	Action    string     `gorm:"type:varchar(20);not null;default:'MIGRATE'"`
@@ -170,7 +170,7 @@ type MigrationApproval struct {
 
 	Migration Migration `gorm:"foreignKey:MigrationID;references:ID;constraint:migration_approvals_migration_id_fkey,OnDelete:CASCADE" json:"-"`
 	Group     Group     `gorm:"foreignKey:GroupID;references:ID;constraint:migration_approvals_group_id_fkey,OnDelete:CASCADE" json:"-"`
-	Leader    User      `gorm:"foreignKey:LeaderID;references:ID;constraint:migration_approvals_leader_id_fkey,OnDelete:RESTRICT" json:"-"`
+	Leader    *User     `gorm:"foreignKey:LeaderID;references:ID;constraint:migration_approvals_leader_id_fkey,OnDelete:RESTRICT" json:"-"`
 }
 
 func (MigrationApproval) TableName() string { return "migration_approvals" }

@@ -189,7 +189,7 @@ func (r *mockRepo) SubmitForwardReview(ctx context.Context, databaseID, migratio
 func (r *mockRepo) GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error) {
 	var res []models.MigrationApproval
 	for _, a := range r.approvals[migrationID] {
-		if a.LeaderID == leaderID && a.Status == models.ApprovalPending {
+		if a.LeaderID != nil && *a.LeaderID == leaderID && a.Status == models.ApprovalPending {
 			res = append(res, a)
 		}
 	}
@@ -353,13 +353,35 @@ func TestMigrationWorkflowApprovals(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("Submit review requires all groups to have leader", func(t *testing.T) {
-		repo.groups[1].LeaderID = nil
-		_, err := svc.SubmitReview(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
-		if err == nil {
-			t.Fatal("expected error when a group has no leader")
+	t.Run("Submit review stays PENDING_REVIEW when a group has no leader yet", func(t *testing.T) {
+		noLeadRepo := newMockRepo()
+		noLeadSvc := &migration.Service{Repository: noLeadRepo, Access: &mockAccess{}, Dispatcher: dispatcher}
+		noLeadRepo.groups = []models.Group{
+			{ID: "g-1", Name: "Engineering", LeaderID: &leader1},
+			{ID: "g-2", Name: "Data", LeaderID: nil},
 		}
-		repo.groups[1].LeaderID = &leader2
+		mn, _ := noLeadRepo.CreateMigration(ctx, models.Migration{
+			DatabaseID: dbID, Name: "pending_no_leader", SQLText: "SELECT 1;", CreatedBy: leader1, Status: models.MigrationDraft,
+		})
+		detail, err := noLeadSvc.SubmitReview(ctx, makePrincipal(leader1), dbID, mn.ID, time.Now())
+		if err != nil {
+			t.Fatalf("expected submission to stay PENDING_REVIEW, got error: %v", err)
+		}
+		if detail.Status != models.MigrationPendingReview {
+			t.Fatalf("expected PENDING_REVIEW, got %s", detail.Status)
+		}
+		if len(noLeadRepo.approvals[mn.ID]) != 2 || noLeadRepo.approvals[mn.ID][1].LeaderID != nil {
+			t.Fatalf("expected nil LeaderID pending row for unassigned group, got %+v", noLeadRepo.approvals[mn.ID])
+		}
+		noLeadRepo.approvals[mn.ID][0].ID = "app-nl-1"
+		noLeadRepo.approvals[mn.ID][1].ID = "app-nl-2"
+		afterFirst, err := noLeadSvc.ApproveMigration(ctx, makePrincipal(leader1), dbID, mn.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil {
+			t.Fatalf("leader1 approve failed: %v", err)
+		}
+		if afterFirst.Status != models.MigrationPendingReview {
+			t.Fatalf("expected PENDING_REVIEW while unassigned group still pending, got %s", afterFirst.Status)
+		}
 	})
 
 	t.Run("Submit review creates pending approvals for all group leaders", func(t *testing.T) {
@@ -758,7 +780,7 @@ func TestBatchResumeAndCancel(t *testing.T) {
 	}
 	repo.migrations[mb.ID] = mb
 	repo.approvals[mb.ID] = []models.MigrationApproval{
-		{ID: "app-b1", MigrationID: mb.ID, GroupID: "g-1", LeaderID: leader1, Status: models.ApprovalApproved, Action: "MIGRATE"},
+		{ID: "app-b1", MigrationID: mb.ID, GroupID: "g-1", LeaderID: &leader1, Status: models.ApprovalApproved, Action: "MIGRATE"},
 	}
 
 	cursor := "1500"
