@@ -2071,8 +2071,12 @@ select[data-empty] {
 
 .connection-dialog .dialog-body {
   flex: 1;
+  min-height: 0;
+  max-height: calc(100vh - 14rem);
+  max-height: calc(100dvh - 14rem);
   padding: 1rem 1.25rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .plan-depth-0 {
