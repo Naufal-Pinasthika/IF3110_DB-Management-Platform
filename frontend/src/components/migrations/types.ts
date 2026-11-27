@@ -39,6 +39,7 @@ export type Execution = {
   action: 'UP' | 'ROLLBACK' | 'FORWARD' | 'RETRY' | 'REVERT_BATCH'
   actor: string
   status: ExecutionStatus
+  jobStatus?: string
   startedAt: string
   sql: string
   rolledBackExecutionId?: string

@@ -128,6 +128,7 @@ export function Migrations() {
     action: selectedExecSummary.action_type,
     actor: selectedExecSummary.executed_by_username || selectedExecSummary.executed_by,
     status: selectedExecSummary.status as 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'PARTIAL' | 'PARTIALLY_REVERTED' | 'UNKNOWN',
+    jobStatus: selectedExecSummary.job_status,
     startedAt: selectedExecSummary.started_at,
     sql: selectedExecSummary.executed_sql,
     rolledBackExecutionId: selectedExecSummary.rolled_back_execution_id || undefined,
@@ -259,8 +260,8 @@ export function Migrations() {
           </thead>
           <tbody>
             {(historyQuery.data || []).map(exec => {
-              const canResumeRow = canEdit && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
-              const canCancelRow = canEdit && exec.status === 'PARTIAL' && (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY')
+              const canResumeRow = canEdit && exec.job_status === 'BLOCKED' && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
+              const canCancelRow = canEdit && exec.job_status === 'BLOCKED' && exec.status === 'PARTIAL' && (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY')
               const canReconcileRow = canEdit && exec.status === 'UNKNOWN' && exec.job_status === 'BLOCKED'
               return (
                 <tr key={exec.id}>
@@ -1167,9 +1168,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               </thead>
               <tbody>
                 {partialExecutions.map(exec => {
-                  const canResumeExec = canEdit && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
+                  const canResumeExec = canEdit && exec.job_status === 'BLOCKED' && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
                   const canCancelExec =
                     canEdit &&
+                    exec.job_status === 'BLOCKED' &&
                     exec.status === 'PARTIAL' &&
                     (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY') &&
                     !migration.is_irreversible &&
@@ -1178,7 +1180,10 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                     <tr key={exec.id}>
                       <td><code>{exec.id.slice(0, 8)}</code></td>
                       <td><Badge value={exec.action_type} /></td>
-                      <td><Badge value={exec.status} /></td>
+                      <td>
+                        <Badge value={exec.status} />
+                        {exec.job_status && <span className="cell-subtitle">Job: {exec.job_status.toLowerCase().replaceAll('_', ' ')}</span>}
+                      </td>
                       <td>{exec.committed_batches} batches ({exec.committed_rows} rows)</td>
                       <td><code>{exec.last_cursor_value || '--'}</code></td>
                       <td>
