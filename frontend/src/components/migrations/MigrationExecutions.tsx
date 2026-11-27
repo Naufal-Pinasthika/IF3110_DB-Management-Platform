@@ -21,12 +21,14 @@ export function ExecutionProgress({
     canEdit &&
     onResume &&
     execution &&
+    execution.jobStatus === 'BLOCKED' &&
     (execution.status === 'PARTIAL' || execution.status === 'PARTIALLY_REVERTED')
   )
   const canCancel = Boolean(
     canEdit &&
     onCancelBatch &&
     execution &&
+    execution.jobStatus === 'BLOCKED' &&
     execution.status === 'PARTIAL' &&
     (execution.action === 'UP' || execution.action === 'FORWARD' || execution.action === 'RETRY')
   )
@@ -94,23 +96,32 @@ export function ExecutionProgress({
         <p className="notice">Compensation is incomplete. Continue from the last reverted batch.</p>
       )}
       <div className="toolbar-actions">
-        <button
-          className="button"
-          type="button"
-          disabled={!canResume || busy}
-          onClick={() => execution && onResume?.(execution.id)}
-        >
-          {busy ? 'Working…' : 'Request resume'}
-        </button>
-        <button
-          className="button danger"
-          type="button"
-          disabled={!canCancel || busy}
-          onClick={() => execution && onCancelBatch?.(execution.id)}
-        >
-          {busy ? 'Working…' : 'Request batch compensation'}
-        </button>
+        {canResume && (
+          <button
+            className="button"
+            type="button"
+            disabled={busy}
+            onClick={() => execution && onResume?.(execution.id)}
+          >
+            {busy ? 'Working…' : 'Request resume'}
+          </button>
+        )}
+        {canCancel && (
+          <button
+            className="button danger"
+            type="button"
+            disabled={busy}
+            onClick={() => execution && onCancelBatch?.(execution.id)}
+          >
+            {busy ? 'Working…' : 'Request batch compensation'}
+          </button>
+        )}
       </div>
+      {execution &&
+        (execution.status === 'PARTIAL' || execution.status === 'PARTIALLY_REVERTED') &&
+        !canResume && !canCancel && (
+          <p className="helper-text">This execution no longer owns the blocked queue slot. Check the latest execution in history.</p>
+        )}
       {!onResume && !onCancelBatch && (
         <p className="helper-text">Recovery actions become available for eligible jobs after review.</p>
       )}
