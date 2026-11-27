@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -313,13 +314,19 @@ func sanitizeLogArg(v any) any {
 	case fmt.Stringer:
 		return stripLogNewlines(val.String())
 	case int:
-		return val
+		n, _ := strconv.Atoi(stripLogNewlines(strconv.Itoa(val)))
+		return n
 	case int64:
-		return val
+		n, _ := strconv.ParseInt(stripLogNewlines(strconv.FormatInt(val, 10)), 10, 64)
+		return n
 	case float64:
-		return val
+		f, _ := strconv.ParseFloat(stripLogNewlines(strconv.FormatFloat(val, 'g', -1, 64)), 64)
+		return f
 	case bool:
-		return val
+		if val {
+			return true
+		}
+		return false
 	default:
 		return stripLogNewlines(fmt.Sprint(val))
 	}
