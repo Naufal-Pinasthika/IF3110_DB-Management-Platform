@@ -54,11 +54,20 @@ func RedactKey(key string) bool {
 	return false
 }
 
-// SanitizeValue masks credentials, DSN passwords, bearer tokens, and secret key-value pairs.
+// stripLogNewlines removes CR/LF control characters to prevent log injection.
+func stripLogNewlines(v string) string {
+	v = strings.ReplaceAll(v, "\r", "")
+	v = strings.ReplaceAll(v, "\n", " ")
+	return v
+}
+
+// SanitizeValue masks credentials, DSN passwords, bearer tokens, secret key-value pairs,
+// and newline control characters.
 func SanitizeValue(v string) string {
 	if v == "" {
 		return v
 	}
+	v = stripLogNewlines(v)
 	v = dsnPasswordPattern.ReplaceAllString(v, "${1}"+redacted+"${3}")
 	v = bearerPattern.ReplaceAllString(v, "${1}"+redacted)
 	v = kvSecretPattern.ReplaceAllString(v, "${1}${2}"+redacted)
@@ -285,11 +294,48 @@ func WithBatch(ctx context.Context, batch int) context.Context {
 	return context.WithValue(ctx, correlationKey{}, fields)
 }
 
+func sanitizeLogArg(v any) any {
+	switch val := v.(type) {
+	case nil:
+		return nil
+	case string:
+		return stripLogNewlines(val)
+	case []string:
+		clean := make([]string, len(val))
+		for i, item := range val {
+			clean[i] = stripLogNewlines(item)
+		}
+		return clean
+	case slog.Attr:
+		return slog.String(stripLogNewlines(val.Key), stripLogNewlines(val.Value.String()))
+	case error:
+		return stripLogNewlines(val.Error())
+	case fmt.Stringer:
+		return stripLogNewlines(val.String())
+	case int:
+		return val
+	case int64:
+		return val
+	case float64:
+		return val
+	case bool:
+		return val
+	default:
+		return stripLogNewlines(fmt.Sprint(val))
+	}
+}
+
 // Log emits a structured JSON log event enriched with context correlation IDs and OTel trace/span IDs.
 func Log(ctx context.Context, level slog.Level, event string, attrs ...any) {
+	cleanEvent := stripLogNewlines(event)
+	cleanAttrs := make([]any, 0, len(attrs)+16)
+	for _, attr := range attrs {
+		cleanAttrs = append(cleanAttrs, sanitizeLogArg(attr))
+	}
+
 	hasAttr := func(name string) bool {
-		for i := 0; i+1 < len(attrs); i += 2 {
-			if attrs[i] == name {
+		for i := 0; i+1 < len(cleanAttrs); i += 2 {
+			if cleanAttrs[i] == name {
 				return true
 			}
 		}
@@ -306,26 +352,26 @@ func Log(ctx context.Context, level slog.Level, event string, attrs ...any) {
 			{"execution_id", fields.execution},
 		} {
 			if field.value != "" && !hasAttr(field.name) {
-				attrs = append(attrs, field.name, field.value)
+				cleanAttrs = append(cleanAttrs, field.name, stripLogNewlines(field.value))
 			}
 		}
 		if fields.attempt > 0 && !hasAttr("attempt") {
-			attrs = append(attrs, "attempt", fields.attempt)
+			cleanAttrs = append(cleanAttrs, "attempt", fields.attempt)
 		}
 		if fields.batch > 0 && !hasAttr("batch") {
-			attrs = append(attrs, "batch", fields.batch)
+			cleanAttrs = append(cleanAttrs, "batch", fields.batch)
 		}
 	}
 	sc := trace.SpanContextFromContext(ctx)
 	if sc.IsValid() {
 		if !hasAttr("trace_id") {
-			attrs = append(attrs, "trace_id", sc.TraceID().String())
+			cleanAttrs = append(cleanAttrs, "trace_id", sc.TraceID().String())
 		}
 		if !hasAttr("span_id") {
-			attrs = append(attrs, "span_id", sc.SpanID().String())
+			cleanAttrs = append(cleanAttrs, "span_id", sc.SpanID().String())
 		}
 	}
-	slog.Log(ctx, level, event, attrs...)
+	slog.Log(ctx, level, cleanEvent, cleanAttrs...)
 }
 
 type statusRecorder struct {

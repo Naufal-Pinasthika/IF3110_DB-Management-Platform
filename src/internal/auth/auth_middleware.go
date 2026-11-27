@@ -58,7 +58,7 @@ func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 		}
 
 		if validated.RotatedToken != "" {
-			h.setCookie(w, h.Service.Policy.CookieName, validated.RotatedToken, true, validated.Session.AbsoluteExpiresAt)
+			h.setSessionCookie(w, validated.RotatedToken, validated.Session.AbsoluteExpiresAt)
 		}
 
 		// put validated principal and session in context then call next.
