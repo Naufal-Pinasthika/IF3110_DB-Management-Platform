@@ -43,8 +43,7 @@ type Service struct {
 }
 
 // finishUnqueuedExecution closes the history entry when a request cannot be
-// handed to the worker. UNKNOWN is used for enqueue errors because the queue
-// transaction may have committed even when its acknowledgement was lost.
+// handed to the worker.
 func (s *Service) finishUnqueuedExecution(ctx context.Context, execution *models.MigrationExecution, status, message string) error {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -66,6 +65,24 @@ func (s *Service) finishUnqueuedExecution(ctx context.Context, execution *models
 	current.FinishedAt = &now
 	current.ErrorSummary = &message
 	return s.Repository.UpdateExecution(writeCtx, current)
+}
+
+// finishRejectedEnqueue distinguishes a definite queue rejection from an
+// ambiguous infrastructure failure. State/validation errors are returned
+// before a job can be committed, so they must not leave an unreconcilable
+// UNKNOWN execution without a job record.
+func (s *Service) finishRejectedEnqueue(ctx context.Context, execution *models.MigrationExecution, enqueueErr error) {
+	status := "UNKNOWN"
+	message := "queue acceptance could not be confirmed: " + enqueueErr.Error()
+	if errors.Is(enqueueErr, apperror.ErrConflict) ||
+		errors.Is(enqueueErr, apperror.ErrInvalidInput) ||
+		errors.Is(enqueueErr, apperror.ErrNotFound) ||
+		errors.Is(enqueueErr, apperror.ErrForbidden) ||
+		errors.Is(enqueueErr, jobs.ErrUnavailable) {
+		status = "FAILED"
+		message = "queue rejected execution: " + enqueueErr.Error()
+	}
+	_ = s.finishUnqueuedExecution(ctx, execution, status, message)
 }
 
 func (s *Service) requirePostgresTarget(ctx context.Context, actor auth.Principal, databaseID string) error {
@@ -653,7 +670,7 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
-		_ = s.finishUnqueuedExecution(ctx, &exec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
+		s.finishRejectedEnqueue(ctx, &exec, err)
 		return api.MigrationExecuted{}, err
 	}
 
@@ -751,7 +768,7 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
-		_ = s.finishUnqueuedExecution(ctx, &exec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
+		s.finishRejectedEnqueue(ctx, &exec, err)
 		return api.MigrationExecuted{}, err
 	}
 
@@ -862,7 +879,7 @@ func (s *Service) ResumeExecution(ctx context.Context, actor auth.Principal, dat
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
-		_ = s.finishUnqueuedExecution(ctx, &newExec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
+		s.finishRejectedEnqueue(ctx, &newExec, err)
 		return api.MigrationExecuted{}, err
 	}
 
@@ -946,7 +963,7 @@ func (s *Service) CancelBatch(ctx context.Context, actor auth.Principal, databas
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
-		_ = s.finishUnqueuedExecution(ctx, &newExec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
+		s.finishRejectedEnqueue(ctx, &newExec, err)
 		return api.MigrationExecuted{}, err
 	}
 

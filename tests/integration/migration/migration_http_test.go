@@ -591,6 +591,25 @@ func TestBatchCheckpointRecoveryIntegration(t *testing.T) {
 		t.Fatalf("expected all 5 rows updated after resume, got %d (err=%v)", updatedCount, err)
 	}
 
+	// A stale retry against the original partial execution must be rejected
+	// without creating an unreconcilable UNKNOWN history row.
+	w = c.req("POST", "/api/v1/databases/"+dbID+"/executions/"+exec1ID+"/resume", nil, leadSess)
+	c.mustStatus(w, http.StatusConflict)
+	w = c.req("GET", "/api/v1/databases/"+dbID+"/migration-history", nil, leadSess)
+	c.mustStatus(w, http.StatusOK)
+	rejectedHistory := decodeData[[]api.MigrationExecutionSummary](t, w)
+	rejectedAsFailed := false
+	for _, item := range rejectedHistory {
+		if item.ActionType == "RETRY" && item.RolledBackExecutionID != nil && *item.RolledBackExecutionID == exec1ID &&
+			item.Status == "FAILED" && item.JobStatus == "" && item.ErrorSummary != nil && strings.Contains(*item.ErrorSummary, "queue rejected execution") {
+			rejectedAsFailed = true
+			break
+		}
+	}
+	if !rejectedAsFailed {
+		t.Fatalf("expected stale retry to be recorded as FAILED without a job, history=%+v", rejectedHistory)
+	}
+
 	// Reset table with divisor=0 on id=4 to test CancelBatch (REVERT_BATCH compensation).
 	if _, err := targetConn.Exec(`UPDATE public.batch_items SET updated = 0; UPDATE public.batch_items SET divisor = 0 WHERE id = 4;`); err != nil {
 		t.Fatal(err)
@@ -689,4 +708,3 @@ func TestParallelDatabaseConcurrencyIntegration(t *testing.T) {
 		t.Fatalf("expected public.b1 in targetB (exists=%v, err=%v)", exists, err)
 	}
 }
-
