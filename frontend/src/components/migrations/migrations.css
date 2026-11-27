@@ -241,5 +241,26 @@
   .m2-preview-shell .topbar {
     position: static;
     flex-wrap: wrap;
+    height: auto;
+  }
+
+  .m2-inline-field {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .m2-inline-field select {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .m2-execution-metadata {
+    grid-template-columns: minmax(0, 1fr);
+    padding: .75rem;
+  }
+
+  .m2-workflow-steps {
+    gap: .65rem 1rem;
   }
 }

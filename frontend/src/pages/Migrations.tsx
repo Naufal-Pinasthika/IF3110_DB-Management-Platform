@@ -218,7 +218,6 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Execution history</h2>
-          <p>Immutable audit trail of all execution attempts (forward, rollback, retry, compensation, and failures).</p>
         </div>
         <div
           className="toolbar-actions"
@@ -354,7 +353,6 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Worker queue</h2>
-          <p>Queue status, attempts, committed progress, and lease expiry for recent jobs.</p>
         </div>
         <ActionButton onAction={() => jobsQuery.refetch()} disabled={jobsQuery.isFetching}>
           Refresh queue
@@ -675,7 +673,6 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           <div className="panel-toolbar">
             <div>
               <h2 id="schema-diff-title">Generate from schema</h2>
-              <p>Describe desired schema to generate candidate migration SQL.</p>
             </div>
           </div>
           <label htmlFor="desired-schema-ddl">Desired schema DDL</label>
@@ -785,7 +782,6 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         <div className="panel-toolbar">
           <div>
             <h2>{creating ? 'Migration definition' : 'SQL changes'}</h2>
-            {draft && <p>Configure migration parameters and statements.</p>}
           </div>
           <div className="toolbar-actions">
             {migration && canEdit && !draft && (
@@ -822,14 +818,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           </div>
         )}
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: '1rem',
-            marginBottom: '1rem',
-          }}
-        >
+        <div className="migration-parameters">
           <div>
             <label htmlFor="migration-type">Execution mode</label>
             <select

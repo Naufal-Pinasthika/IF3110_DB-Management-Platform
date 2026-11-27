@@ -1099,6 +1099,13 @@ input[type="checkbox"] {
   padding: .1rem 0 1rem;
 }
 
+.migration-parameters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
 .metadata-strip {
   display: flex;
   flex-wrap: wrap;
@@ -2199,5 +2206,225 @@ select[data-empty] {
   .notice.success {
     bottom: 1rem;
     right: 1rem;
+  }
+}
+
+/* Keep responsive adjustments scoped to smaller screens. */
+@media (max-width: 1100px) {
+  .topbar .connection-context {
+    flex-wrap: wrap;
+  }
+
+  .topbar .database-identity strong {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    --mobile-topbar-height: 60px;
+  }
+
+  .topbar {
+    height: var(--mobile-topbar-height);
+    min-height: var(--mobile-topbar-height);
+    gap: .5rem;
+  }
+
+  .sidebar {
+    top: var(--mobile-topbar-height);
+    height: calc(100dvh - var(--mobile-topbar-height));
+    overscroll-behavior-y: contain;
+    padding-bottom: max(.9rem, env(safe-area-inset-bottom));
+  }
+
+  .mobile-menu-button, .account .button {
+    flex-shrink: 0;
+  }
+
+  .topbar .connection-context {
+    flex: 1;
+    flex-wrap: nowrap;
+  }
+
+  .topbar .database-identity strong {
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  .account, #account-name {
+    min-width: 0;
+  }
+
+  .content {
+    min-height: calc(100dvh - var(--mobile-topbar-height, 60px));
+    padding-bottom: max(1.2rem, env(safe-area-inset-bottom));
+  }
+
+  .page-heading > *, .panel-toolbar > *, .section-toolbar > *,
+  .toolbar-actions, .heading-actions, .metadata-strip > div,
+  .migration-parameters > div, .plan-statement, .plan-node,
+  .migration-error-title-wrap > div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .panel-toolbar, .section-toolbar {
+    gap: .75rem;
+  }
+
+  .panel-toolbar, .section-toolbar, .metadata-strip,
+  .notice, .dialog-heading, .plan-statement {
+    overflow-wrap: anywhere;
+  }
+
+  .table-scroll {
+    max-width: 100%;
+  }
+
+  .heading-actions, .toolbar-actions, .form-actions {
+    gap: .5rem;
+  }
+
+  .button {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .toolbar-actions .button.danger, .toolbar-actions #execute-migration {
+    margin-left: 0;
+  }
+
+  .toolbar-actions select {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tab-bar {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    gap: 1rem;
+  }
+
+  .tab {
+    flex-shrink: 0;
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .tab:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .pagination .toolbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea,
+  .toolbar-actions select, .connection-dialog input:not([type="checkbox"]),
+  .connection-dialog select, .m2-sql-grid .sql-editor {
+    font-size: 16px;
+  }
+
+  input, select, textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  input[type="checkbox"], input[type="radio"] {
+    flex-shrink: 0;
+  }
+
+  .checkbox-label, .permission-option {
+    min-height: 44px;
+  }
+
+  .sql-editor {
+    padding: .75rem;
+  }
+
+  .plan-statement {
+    padding: .75rem;
+  }
+
+  .plan-node {
+    margin-left: calc(var(--plan-depth, 0) * .35rem);
+    padding: .6rem;
+  }
+
+  .migration-error-card {
+    padding: .85rem;
+  }
+
+  .migration-error-actions, .form-actions, .fieldset-header {
+    flex-wrap: wrap;
+  }
+
+  dialog {
+    padding: 1rem;
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .dialog-heading {
+    gap: .65rem;
+  }
+
+  .dialog-heading .icon-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .connection-dialog {
+    padding: 0;
+  }
+
+  .connection-dialog .dialog-body,
+  .connection-dialog > .dialog-heading {
+    padding: .85rem 1rem;
+  }
+
+  .connection-footer .toolbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .login-layout {
+    min-height: 100dvh;
+    padding: clamp(1.5rem, 8dvh, 4rem) 1rem 1.5rem;
+  }
+
+  .login-form-wrap {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .heading-actions {
+    width: 100%;
+  }
+
+  .heading-actions > .button, .form-actions > .button {
+    flex: 1 1 auto;
+  }
+
+  .database-grid tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .database-grid td:last-child:not(:first-child) {
+    grid-column: 1;
+    grid-row: auto;
+    margin-top: .5rem;
+    white-space: normal;
+  }
+
+  .connection-dialog .host-port {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
   }
 }
