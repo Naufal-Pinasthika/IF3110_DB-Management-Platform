@@ -188,8 +188,13 @@ export function Shell() {
 
   // Move focus to the main content after each route change
   useEffect(() => {
-    main.current?.focus()
+    main.current?.focus({ preventScroll: true })
   }, [location.pathname, location.search])
+
+  // Start each page with its navigation and connection context visible.
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [location.pathname])
 
   // Keep the mobile drawer keyboard and screen reader state in sync
   useEffect(() => {

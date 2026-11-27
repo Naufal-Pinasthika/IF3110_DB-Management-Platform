@@ -246,7 +246,8 @@ h3 {
 }
 
 .database-topbar {
-  min-height: 72px;
+  min-height: 88px;
+  padding-block: 1rem;
   gap: 1.5rem;
 }
 

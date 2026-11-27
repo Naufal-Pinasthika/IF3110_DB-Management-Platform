@@ -582,7 +582,6 @@ function GroupEditor({
               </>
             ) : (
               <>
-                <p className="muted">Permissions for {editor.group.name}.</p>
                 <label htmlFor="grant-database">Managed database</label>
                 <select
                   id="grant-database"
@@ -613,13 +612,10 @@ function GroupEditor({
                   ))}
                   <p className="helper-text">
                     {values.access_level === 'VIEW_EDIT'
-                      ? 'Inspect schemas, browse data, run read-only queries, and create, edit, or execute migrations. Migrations can change schemas and data.'
-                      : 'Inspect schemas, browse table rows, and run permitted read-only queries. Cannot author or execute migrations.'}
+                      ? 'Inspect schemas, browse data, run read-only queries, and create, edit, or execute migrations'
+                      : 'Inspect schemas, browse table rows, and run permitted read-only queries'}
                   </p>
                 </fieldset>
-                <p className="helper-text">
-                  Changes refresh affected members' sessions. Other groups may still provide broader access.
-                </p>
               </>
             )}
           </fieldset>
