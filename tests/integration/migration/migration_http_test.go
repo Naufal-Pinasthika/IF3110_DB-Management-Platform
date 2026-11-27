@@ -484,8 +484,8 @@ func TestMigrationWorkflowIntegration(t *testing.T) {
 	c.mustStatus(c.req("POST", "/api/v1/databases/"+dbID+"/migrations/"+migID+"/forward", nil, carolSess), http.StatusOK)
 
 	forwarded := waitForMigrationStatus(t, c, carolSess, dbID, migID, api.MigrationApplied)
-	if forwarded.Version == nil || *forwarded.Version != 1 {
-		t.Fatalf("expected re-applied version 1 (no other active migrations), got %v", forwarded.Version)
+	if forwarded.Version == nil || *forwarded.Version != 2 {
+		t.Fatalf("expected re-applied version 2 after rollback (monotonic history), got %v", forwarded.Version)
 	}
 	if err := targetConn.QueryRow(`SELECT to_regclass('public.widgets') IS NOT NULL`).Scan(&exists); err != nil || !exists {
 		t.Fatalf("expected public.widgets recreated after forward (exists=%v, err=%v)", exists, err)

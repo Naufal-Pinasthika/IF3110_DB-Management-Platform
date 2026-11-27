@@ -88,6 +88,7 @@ func Database(t *testing.T) *gorm.DB {
 		"000009_rollback_approval.sql",
 		"000010_rollback_version_constraint.sql",
 		"000011_nullable_approval_leader.sql",
+		"000012_migration_version_sequences.sql",
 	} {
 		migration, err := os.ReadFile(filepath.Join(Root(), "db/platform", name))
 		if err != nil {
