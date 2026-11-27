@@ -66,7 +66,7 @@ export function Explorer() {
               <tr>
                 <th>Table</th>
                 <th>Schema</th>
-                <th />
+                <th>Type</th>
               </tr>
             </thead>
             <tbody>

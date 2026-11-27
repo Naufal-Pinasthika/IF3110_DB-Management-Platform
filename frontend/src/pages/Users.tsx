@@ -146,7 +146,7 @@ function UserDialog({ user, onClose }: { user?: AdminUser; onClose: () => void }
               value={values.password}
               onChange={event => setValues({ ...values, password: event.target.value })}
             />
-            {!user && <p className="helper-text">Maximum 72 char</p>}
+            {!user && <p className="helper-text">Maximum 72 characters  </p>}
             {user ? (
               <label className="checkbox-label">
                 <input
