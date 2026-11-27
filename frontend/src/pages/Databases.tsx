@@ -84,12 +84,9 @@ export default function Databases() {
                     <td>
                       <div title={accessDescription(database.effective_access)}>
                         <span className="permission-name">
-                          {accessLabel(database.effective_access)}
-                        </span>
-                        <span className="permission-detail">
-                          {database.effective_access === 'VIEW_EDIT'
-                            ? 'SELECT - create & execute migrations'
-                            : 'SELECT - schema - history'}
+                          {database.effective_access === 'VIEW_ONLY'
+                            ? 'Read'
+                            : accessLabel(database.effective_access)}
                         </span>
                       </div>
                     </td>

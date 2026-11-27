@@ -565,7 +565,6 @@ function GroupEditor({
               </>
             ) : editor.kind === 'member' ? (
               <>
-                <p className="muted">Add a user to {editor.group.name}.</p>
                 <label htmlFor="member-user">Platform user</label>
                 <select
                   id="member-user"
@@ -580,9 +579,6 @@ function GroupEditor({
                     <option value={user.id} key={user.id}>{user.username}</option>
                   ))}
                 </select>
-                <p className="helper-text">
-                  Changing membership signs the affected user out so their permissions refresh.
-                </p>
               </>
             ) : (
               <>

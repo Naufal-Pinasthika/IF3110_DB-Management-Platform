@@ -763,6 +763,14 @@ input[type="checkbox"] {
   margin-left: 1rem;
 }
 
+.table-scroll .toolbar-actions {
+  gap: .5rem;
+}
+
+.table-scroll .toolbar-actions .button {
+  margin-left: 0;
+}
+
 .toolbar-actions select {
   width: auto;
   min-height: 2.25rem;
