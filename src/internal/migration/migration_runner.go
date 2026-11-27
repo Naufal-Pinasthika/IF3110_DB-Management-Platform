@@ -42,7 +42,6 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 		}
 		statements = plan.Statements
 	} else {
-		// Parse transaction commands, including END/ABORT, instead of searching comments/literals.
 		parsed, err := pgquery.Parse(sqlText)
 		if err != nil || len(parsed.Stmts) == 0 {
 			return fmt.Errorf("%w: invalid migration SQL", apperror.ErrInvalidInput)
@@ -82,7 +81,6 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 		}
 	}()
 	if config.TargetEngine() == models.EngineMySQL {
-		// Nontransactional tables would silently violate the rollback guarantee.
 		for _, table := range plan.Tables {
 			var engine sql.NullString
 			err := tx.QueryRowContext(ctx, "SELECT engine FROM information_schema.tables WHERE table_schema=? AND table_name=?", config.DatabaseName, table).Scan(&engine)
@@ -125,7 +123,7 @@ func (r *Runner) Execute(ctx context.Context, databaseID, sqlText string) error 
 				)
 				return fmt.Errorf("%w: execution failed and rollback was not confirmed", apperror.ErrTransactionOutcomeUnknown)
 			}
-			committed = true // already rolled back explicitly
+			committed = true
 			telemetry.Log(ctx, slog.LevelInfo, "sql.transaction_rollback",
 				"operation", "migration.execute",
 				"database_id", databaseID,
@@ -174,7 +172,6 @@ func executeMySQLDDL(ctx context.Context, db *sql.DB, statement string) error {
 	if _, err := conn.ExecContext(ctx, "SET SESSION default_storage_engine = 'InnoDB'"); err != nil {
 		return err
 	}
-	// One DDL statement, outside a transaction: MySQL implicitly commits schema changes.
 	started := time.Now()
 	telemetry.Log(ctx, slog.LevelInfo, "sql.started",
 		"operation", "migration.mysql_ddl",
@@ -332,7 +329,6 @@ func (r *Runner) ExecuteBatch(
 		var rowsAffected int64
 		nextCursor := cursorVal
 
-		// Attempt RETURNING to accurately track cursor progression across batches
 		hasReturning := strings.Contains(strings.ToUpper(batchSQL), "RETURNING")
 		querySQL := batchSQL
 		if !hasReturning && attr != "" {
@@ -354,7 +350,6 @@ func (r *Runner) ExecuteBatch(
 			}
 			_ = qRows.Close()
 		} else {
-			// Fallback to direct ExecContext if RETURNING is not supported by statement structure
 			res, err := tx.ExecContext(batchCtx, batchSQL)
 			if err != nil {
 				durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
@@ -386,7 +381,6 @@ func (r *Runner) ExecuteBatch(
 				return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", err)
 			}
 			rowsAffected, _ = res.RowsAffected()
-			// If cursor couldn't be scanned, attempt integer increment fallback
 			if rowsAffected > 0 {
 				var intCursor int64
 				if _, err := fmt.Sscanf(cursorVal, "%d", &intCursor); err == nil {

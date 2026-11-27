@@ -9,7 +9,8 @@ usage() {
   cat <<'EOF'
 Usage: ./scripts/setup.sh [--reset]
 
-Build and start the complete development stack using Docker Compose.
+Build and start the complete development stack, including the migration worker,
+using Docker Compose.
 Requires Docker with Compose v2 and OpenSSL; local Go, Node.js and psql
 are not required. Run from any directory.
 
@@ -105,7 +106,7 @@ fi
 export DB_CREDENTIAL_ENCRYPTION_KEY="$key"
 unset key
 
-compose=(docker compose --project-directory "$ROOT_DIR" --env-file "$ROOT_DIR/.env" -f "$ROOT_DIR/docker-compose.yml")
+compose=(docker compose --profile jobs --project-directory "$ROOT_DIR" --env-file "$ROOT_DIR/.env" -f "$ROOT_DIR/docker-compose.yml")
 "${compose[@]}" config --quiet
 
 if "$RESET"; then
@@ -114,7 +115,7 @@ if "$RESET"; then
 fi
 
 printf 'Building React, the Go server, and the worker in Docker...\n'
-"${compose[@]}" build backend
+"${compose[@]}" build backend worker
 
 printf 'Starting the platform database...\n'
 "${compose[@]}" up -d postgres
@@ -143,11 +144,11 @@ for migration in "$ROOT_DIR"/db/platform/[0-9]*.sql; do
     psql -X -v ON_ERROR_STOP=1 -U admin -d platform_db < "$migration"
 done
 
-printf 'Starting target databases and the web server...\n'
+printf 'Starting target databases, the web server, and the migration worker...\n'
 "${compose[@]}" up -d \
-  target-db-1 target-db-2 target-db-3 target-mysql backend
+  target-db-1 target-db-2 target-db-3 target-mysql backend worker
 
 origin="${PUBLIC_ORIGIN:-$(read_env_value PUBLIC_ORIGIN)}"
 printf '\nWeb starting at: %s\n' "${origin:-http://localhost:6767}"
 printf 'Development login: admin / AdminDemo-2026! (on a fresh database)\n'
-printf 'Logs: docker compose logs -f backend\nStop: docker compose down\n'
+printf 'Logs: docker compose logs -f backend worker\nStop: docker compose --profile jobs down\n'

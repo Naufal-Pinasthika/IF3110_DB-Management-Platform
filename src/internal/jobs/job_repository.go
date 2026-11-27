@@ -138,7 +138,7 @@ func (r *PostgresRepository) Enqueue(ctx context.Context, ref contracts.Executio
 	return job, err
 }
 
-// Transfer the gate only when Migration explicitly replaces its blocked request
+// transfers database gate on replacement
 func (r *PostgresRepository) handoff(ctx context.Context, gate DatabaseGate, blockedExecutionID string, replacement Job) error {
 	if gate.BlockedJobID == nil {
 		return apperror.ErrConflict
@@ -205,7 +205,7 @@ func (r *PostgresRepository) List(ctx context.Context, databaseID string, option
 	return jobs, nil
 }
 
-// Lock the database gate before job rows to keep transaction ordering consistent
+// locks database gate row before jobs
 func (r *PostgresRepository) lockGate(ctx context.Context, databaseID string) (DatabaseGate, error) {
 	var gate DatabaseGate
 	result := r.run(ctx, "job.lock_gate", func(db *gorm.DB) *gorm.DB {
@@ -220,7 +220,6 @@ func (r *PostgresRepository) lockGate(ctx context.Context, databaseID string) (D
 	return gate, result.Error
 }
 
-// CountByStatus returns current migration_jobs row counts grouped by status for Prometheus gauges.
 func (r *PostgresRepository) CountByStatus(ctx context.Context) (map[string]int64, error) {
 	type row struct {
 		Status string

@@ -177,8 +177,6 @@ func parseDesiredDDL(sqlText string) (*pg_query.ParseResult, map[string]string, 
 		mapping[name] = fmt.Sprintf("%s_%d", prefix, i)
 	}
 
-	// Rewrite relation names into isolated scratch schemas. CREATE SCHEMA
-	// statements become namespace declarations and are issued ourselves.
 	filtered := &pg_query.ParseResult{}
 	for _, raw := range parsed.Stmts {
 		n := raw.Stmt
@@ -278,8 +276,6 @@ func schemaDiffContext(ctx context.Context, timeout time.Duration) (context.Cont
 	return context.WithTimeout(ctx, timeout)
 }
 
-// Compare returns a diff against the declared desired schema without changing
-// the target. All DDL runs in a transaction that is always rolled back.
 func (d *SchemaDiffer) Compare(ctx context.Context, databaseID, desiredDDL string) (api.SchemaDiffResult, error) {
 	parsed, mapping, err := parseDesiredDDL(desiredDDL)
 	if err != nil {
@@ -500,7 +496,6 @@ func readSchemaShape(ctx context.Context, tx *sql.Tx, aliases map[string]string)
 	return shape, nil
 }
 
-// compareSchemaShapes produces deterministic diff entries and reviewed SQL.
 func compareSchemaShapes(current, desired schemaShape) api.SchemaDiffResult {
 	result := api.SchemaDiffResult{Changes: []api.SchemaDiffChange{}, ExcludedObjectCount: current.Excluded}
 	var createSchemas, dropDependencies, dropColumns, alterColumns, dropTables, createTables, addColumns, addConstraints, createIndexes []string
@@ -638,6 +633,7 @@ func compareSchemaShapes(current, desired schemaShape) api.SchemaDiffResult {
 	return result
 }
 
+// maps existence flag to diff action
 func actionFor(exists bool) string {
 	if exists {
 		return "modified"

@@ -17,7 +17,6 @@ var (
 	errRotationConflict = errors.New("session rotation conflict")	
 )
 
-// collection of helper function for auth servies
 func WriteAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):

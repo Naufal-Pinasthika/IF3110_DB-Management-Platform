@@ -16,7 +16,6 @@ type Handler struct {
 	Service *Service
 }
 
-// ListMigrations handles GET /api/v1/databases/{dbId}/migrations.
 func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	status := api.MigrationStatus(r.URL.Query().Get("status"))
@@ -31,7 +30,6 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, summaries)
 }
 
-// GetMigration handles GET /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -46,12 +44,11 @@ func (h *Handler) GetMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
-// CreateMigration handles POST /api/v1/databases/{dbId}/migrations.
 func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	principal, _ := auth.PrincipalFromContext(r.Context())
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB body limit
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	var req api.CreateMigrationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
@@ -67,7 +64,6 @@ func (h *Handler) CreateMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusCreated, created)
 }
 
-// UpdateMigration handles PATCH /api/v1/databases/{dbId}/migrations/{migrationId}.
 func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -89,7 +85,6 @@ func (h *Handler) UpdateMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, updated)
 }
 
-// ExecuteMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/execute.
 func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -104,7 +99,6 @@ func (h *Handler) ExecuteMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
-// SubmitReview handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/submit-review.
 func (h *Handler) SubmitReview(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -149,7 +143,6 @@ func (h *Handler) SubmitForwardReview(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
-// Approve handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/approve.
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -167,7 +160,6 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
-// Reject handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/reject.
 func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -185,7 +177,6 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
-// Rollback handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/rollback.
 func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -200,7 +191,6 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
-// Forward handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/forward.
 func (h *Handler) Forward(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	migrationID := r.PathValue("migrationId")
@@ -245,7 +235,6 @@ func (h *Handler) CancelBatch(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, executed)
 }
 
-// ListHistory handles GET /api/v1/databases/{dbId}/migration-history.
 func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
 	principal, _ := auth.PrincipalFromContext(r.Context())
@@ -260,7 +249,6 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, history)
 }
 
-// ExplainMigration handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/explain.
 func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	dbID, migrationID := r.PathValue("dbId"), r.PathValue("migrationId")
 	principal, _ := auth.PrincipalFromContext(r.Context())
@@ -279,7 +267,6 @@ func (h *Handler) ExplainMigration(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, result)
 }
 
-// CompareSchema handles POST /api/v1/databases/{dbId}/migrations/schema-diff.
 func (h *Handler) CompareSchema(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.PrincipalFromContext(r.Context())
 	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)

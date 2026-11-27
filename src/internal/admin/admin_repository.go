@@ -23,7 +23,6 @@ type PostgresRepository struct {
 var _ Repository = (*PostgresRepository)(nil)
 var _ store.DatabaseRepository = (*PostgresRepository)(nil)
 
-// lists users without password hashes.
 func (r *PostgresRepository) ListUsers(ctx context.Context) ([]models.User, error) {
 	var users []models.User
 	err := r.DB.WithContext(ctx).
@@ -33,7 +32,6 @@ func (r *PostgresRepository) ListUsers(ctx context.Context) ([]models.User, erro
 	return users, err
 }
 
-// loads an account for a partial update.
 func (r *PostgresRepository) GetUser(ctx context.Context, userID string) (models.User, error) {
 	var user models.User
 	err := r.DB.WithContext(ctx).
@@ -53,10 +51,8 @@ func (r *PostgresRepository) CreateUser(ctx context.Context, user models.User) (
 	return user, err
 }
 
-// updates an account and revokes sessions when required.
 func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, revokeSessions bool, now time.Time) (models.User, error) {
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Leader assignment takes the same user lock, so disabling cannot race it.
 		var current models.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", user.ID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -73,7 +69,6 @@ func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, r
 				return fmt.Errorf("%w: assign another group leader before disabling this user", apperror.ErrConflict)
 			}
 		}
-		// Update user using map to allow false values
 		updates := map[string]interface{}{
 			"username":          user.Username,
 			"password_hash":     user.PasswordHash,
@@ -99,7 +94,6 @@ func (r *PostgresRepository) UpdateUser(ctx context.Context, user models.User, r
 		return models.User{}, err
 	}
 
-	// Reload to return updated user
 	return r.GetUser(ctx, user.ID)
 }
 
@@ -111,7 +105,6 @@ func (r *PostgresRepository) ListGroups(ctx context.Context) ([]models.Group, er
 	return groups, err
 }
 
-// creates a group and its active leader membership atomically.
 func (r *PostgresRepository) CreateGroup(ctx context.Context, name, leaderID string) (models.Group, error) {
 	var group models.Group
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -134,13 +127,11 @@ func (r *PostgresRepository) CreateGroup(ctx context.Context, name, leaderID str
 	return group, err
 }
 
-// updates a group's supplied fields; a replacement leader must already be a member.
 func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID string, name, leaderID *string) (models.Group, error) {
 	var group models.Group
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]interface{}{}
 		if leaderID != nil {
-			// Always lock the user before the group, matching create/disable operations.
 			leader, err := activeGroupLeader(tx, *leaderID)
 			if err != nil {
 				return err
@@ -202,7 +193,7 @@ func (r *PostgresRepository) UpdateGroup(ctx context.Context, groupID string, na
 	return group, err
 }
 
-// locks the candidate user so leader assignment and account disabling serialize.
+// locks candidate user for leader assignment
 func activeGroupLeader(tx *gorm.DB, userID string) (models.User, error) {
 	var user models.User
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error
@@ -226,7 +217,6 @@ func (r *PostgresRepository) DeleteGroup(ctx context.Context, groupID string, no
 			return err
 		}
 
-		// Delete group - FK cascades will handle user_groups and group_access
 		if err := tx.Delete(&models.Group{}, "id = ?", groupID).Error; err != nil {
 			return err
 		}
@@ -235,11 +225,9 @@ func (r *PostgresRepository) DeleteGroup(ctx context.Context, groupID string, no
 	})
 }
 
-// adds a membership with session revocation for the affected user
 func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID string, now time.Time) (models.UserGroup, error) {
 	var ug models.UserGroup
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Always lock user before group to match UpdateUser/UpdateGroup lock order.
 		var user models.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "id = ?", userID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -263,7 +251,6 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 			return err
 		}
 
-		// For legacy groups without a leader, designate the first active member as leader.
 		if grp.LeaderID == nil && user.IsActive {
 			if err := tx.Model(&models.Group{}).Where("id = ? AND leader_id IS NULL", grp.ID).Update("leader_id", user.ID).Error; err != nil {
 				return err
@@ -281,10 +268,8 @@ func (r *PostgresRepository) AddGroupMember(ctx context.Context, groupID, userID
 	return ug, err
 }
 
-// removes membership
 func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, userID string, now time.Time) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Serialize with leader replacement before removing the membership.
 		var group models.Group
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&group, "id = ?", groupID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -292,7 +277,6 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 			}
 			return err
 		}
-		// Compare UUID values in PostgreSQL, including alternate URL spellings.
 		var ledGroups int64
 		if err := tx.Model(&models.Group{}).Where("id = ? AND leader_id = ?", group.ID, userID).Count(&ledGroups).Error; err != nil {
 			return err
@@ -305,7 +289,6 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 			return err
 		}
 
-		// Revoke affected user sessions
 		if err := tx.Model(&models.Session{}).
 			Where("user_id = ? AND revoked_at IS NULL", userID).
 			Update("revoked_at", now).Error; err != nil {
@@ -316,7 +299,6 @@ func (r *PostgresRepository) RemoveGroupMember(ctx context.Context, groupID, use
 	})
 }
 
-// lists registered targets without secrets.
 func (r *PostgresRepository) ListDatabases(ctx context.Context) ([]models.ManagedDatabase, error) {
 	var dbs []models.ManagedDatabase
 	err := r.DB.WithContext(ctx).
@@ -326,7 +308,6 @@ func (r *PostgresRepository) ListDatabases(ctx context.Context) ([]models.Manage
 	return dbs, err
 }
 
-// GetDatabase loads a target with encrypted credentials for internal use.
 func (r *PostgresRepository) GetDatabase(ctx context.Context, databaseID string) (models.ManagedDatabase, error) {
 	var db models.ManagedDatabase
 	err := r.DB.WithContext(ctx).
@@ -335,7 +316,6 @@ func (r *PostgresRepository) GetDatabase(ctx context.Context, databaseID string)
 	return db, err
 }
 
-// CreateDatabase stores a target with encrypted credentials.
 func (r *PostgresRepository) CreateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error) {
 	err := r.DB.WithContext(ctx).Create(&database).Error
 	if err != nil {
@@ -347,7 +327,6 @@ func (r *PostgresRepository) CreateDatabase(ctx context.Context, database models
 	return database, nil
 }
 
-// UpdateDatabase updates registered target settings.
 func (r *PostgresRepository) UpdateDatabase(ctx context.Context, database models.ManagedDatabase) (models.ManagedDatabase, error) {
 	updates := map[string]interface{}{
 		"label":                 database.Label,
@@ -374,7 +353,6 @@ func (r *PostgresRepository) UpdateDatabase(ctx context.Context, database models
 	return r.GetDatabase(ctx, database.ID)
 }
 
-// DisableDatabase disables a target without deleting its history.
 func (r *PostgresRepository) DisableDatabase(ctx context.Context, databaseID string) error {
 	return r.DB.WithContext(ctx).
 		Model(&models.ManagedDatabase{}).
@@ -382,8 +360,6 @@ func (r *PostgresRepository) DisableDatabase(ctx context.Context, databaseID str
 		Update("is_enabled", false).Error
 }
 
-// DeleteDisabledDatabase permanently removes a disabled connection. Database
-// history is protected by the migrations foreign key and prevents deletion.
 func (r *PostgresRepository) DeleteDisabledDatabase(ctx context.Context, databaseID string) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var database models.ManagedDatabase
@@ -405,11 +381,9 @@ func (r *PostgresRepository) DeleteDisabledDatabase(ctx context.Context, databas
 	})
 }
 
-// SetGroupDatabaseAccess upserts one group grant.
 func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant models.GroupAccess, now time.Time) (models.GroupAccess, error) {
 	var result models.GroupAccess
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Check foreign keys
 		if err := tx.First(&models.Group{}, "id = ?", grant.GroupID).Error; err != nil {
 			return err
 		}
@@ -417,7 +391,6 @@ func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant m
 			return err
 		}
 
-		// Upsert using ON CONFLICT
 		if err := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "group_id"}, {Name: "database_id"}},
 			DoUpdates: clause.AssignmentColumns([]string{"access_level"}),
@@ -425,7 +398,6 @@ func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant m
 			return err
 		}
 
-		// Revoke affected group member sessions
 		if err := tx.Model(&models.Session{}).
 			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", grant.GroupID).
 			Update("revoked_at", now).Error; err != nil {
@@ -469,10 +441,8 @@ func (r *PostgresRepository) SetGroupDatabaseAccess(ctx context.Context, grant m
 	return result, err
 }
 
-// DeleteGroupDatabaseAccess revokes one group grant.
 func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, groupID, databaseID string, now time.Time) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Delete the grant
 		if err := tx.Where("group_id = ? AND database_id = ?", groupID, databaseID).
 			Delete(&models.GroupAccess{}).Error; err != nil {
 			return err
@@ -490,7 +460,6 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 			return err
 		}
 
-		// Revoke affected group member sessions
 		if err := tx.Model(&models.Session{}).
 			Where("user_id IN (SELECT user_id FROM user_groups WHERE group_id = ?) AND revoked_at IS NULL", groupID).
 			Update("revoked_at", now).Error; err != nil {
@@ -501,7 +470,7 @@ func (r *PostgresRepository) DeleteGroupDatabaseAccess(ctx context.Context, grou
 	})
 }
 
-// ListAccessSnapshot reads memberships and grants from the same database snapshot.
+// reads memberships and grants atomically
 func (r *PostgresRepository) ListAccessSnapshot(ctx context.Context) (api.AccessSnapshot, error) {
 	result := api.AccessSnapshot{Members: []api.GroupMember{}, Grants: []api.GroupDatabaseAccess{}}
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

@@ -16,7 +16,6 @@ type Handler struct {
 	Service *Service
 }
 
-
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, apperror.ErrNotFound), errors.Is(err, access.ErrNotFound):
@@ -34,8 +33,6 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 }
 
-
-// ListDatabases handles GET /api/v1/databases.
 func (h *Handler) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -52,8 +49,6 @@ func (h *Handler) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, dbs)
 }
 
-
-// GetDatabase handles GET /api/v1/databases/{dbId}.
 func (h *Handler) GetDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -71,8 +66,6 @@ func (h *Handler) GetDatabase(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, db)
 }
 
-
-// ListSchemas handles GET /api/v1/databases/{dbId}/schemas.
 func (h *Handler) ListSchemas(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -90,8 +83,6 @@ func (h *Handler) ListSchemas(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, schemas)
 }
 
-
-// ListTables handles GET /api/v1/databases/{dbId}/schemas/{schema}/tables.
 func (h *Handler) ListTables(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -110,8 +101,6 @@ func (h *Handler) ListTables(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, tables)
 }
 
-
-// GetTableDetail handles GET /api/v1/databases/{dbId}/schemas/{schema}/tables/{table}.
 func (h *Handler) GetTableDetail(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -131,8 +120,6 @@ func (h *Handler) GetTableDetail(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
-
-// GetTableRows handles GET /api/v1/databases/{dbId}/schemas/{schema}/tables/{table}/rows.
 func (h *Handler) GetTableRows(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -147,7 +134,7 @@ func (h *Handler) GetTableRows(w http.ResponseWriter, r *http.Request) {
 	limitStr := r.URL.Query().Get("limit")
 	offsetStr := r.URL.Query().Get("offset")
 
-	limit := 50 // default limit
+	limit := 50
 	var err error
 	if limitStr != "" {
 		if limit, err = strconv.Atoi(limitStr); err != nil {
@@ -156,7 +143,7 @@ func (h *Handler) GetTableRows(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	offset := 0 // default offset
+	offset := 0
 	if offsetStr != "" {
 		if offset, err = strconv.Atoi(offsetStr); err != nil {
 			api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "Malformed offset parameter")
@@ -173,8 +160,6 @@ func (h *Handler) GetTableRows(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, rows)
 }
 
-
-// RunQuery handles POST /api/v1/databases/{dbId}/queries.
 func (h *Handler) RunQuery(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -183,7 +168,7 @@ func (h *Handler) RunQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	dbID := r.PathValue("dbId")
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024) // 1MB body limit for queries
+	r.Body = http.MaxBytesReader(w, r.Body, 1024*1024)
 	var req api.RunQueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body")
@@ -199,7 +184,6 @@ func (h *Handler) RunQuery(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, result)
 }
 
-// ExplainQuery handles POST /api/v1/databases/{dbId}/queries/explain.
 func (h *Handler) ExplainQuery(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok { api.WriteAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing or invalid token"); return }

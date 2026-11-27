@@ -82,7 +82,7 @@ const (
 	EngineMySQL    = "mysql"
 )
 
-// TargetEngine keeps pre-existing/default connection values PostgreSQL-compatible.
+// defaults empty engine to postgres
 func (db ManagedDatabase) TargetEngine() string {
 	if db.Engine == "" {
 		return EnginePostgres

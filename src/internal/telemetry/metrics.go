@@ -72,7 +72,6 @@ func init() {
 		jobStatusCollector,
 	)
 
-	// Pre-initialize bounded label sets so dashboards render zero baselines cleanly.
 	for _, s := range []string{"enqueued", "succeeded", "failed", "blocked"} {
 		jobsTotal.WithLabelValues(s)
 	}
@@ -94,7 +93,6 @@ func init() {
 	}
 }
 
-// MetricsHandler exposes application metrics in Prometheus exposition format.
 func MetricsHandler() http.Handler {
 	return promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{})
 }
@@ -173,7 +171,6 @@ func IncBatchProcessed(action, status string, rows int64) {
 	}
 }
 
-// RegisterDBPool registers a single named *sql.DB pool (e.g. "platform") for pool metrics.
 func RegisterDBPool(name string, pool *sql.DB) {
 	if pool == nil {
 		return
@@ -183,8 +180,6 @@ func RegisterDBPool(name string, pool *sql.DB) {
 	})
 }
 
-// RegisterDBPoolProvider registers a dynamic stats provider with bounded pool names
-// (e.g. "target_reader", "target_migrator") — never per-database or per-user IDs.
 func RegisterDBPoolProvider(key string, fn func() map[string]sql.DBStats) {
 	poolCollector.mu.Lock()
 	defer poolCollector.mu.Unlock()
@@ -195,7 +190,6 @@ func RegisterDBPoolProvider(key string, fn func() map[string]sql.DBStats) {
 	poolCollector.providers[key] = fn
 }
 
-// RegisterJobStatusCounter registers a live query against migration_jobs for status gauges.
 func RegisterJobStatusCounter(fn func(context.Context) (map[string]int64, error)) {
 	jobStatusCollector.mu.Lock()
 	defer jobStatusCollector.mu.Unlock()

@@ -32,7 +32,6 @@ type SessionConfig struct {
 	GracePeriod      time.Duration
 }
 
-// Load reads environment settings without logging secrets.
 func Load() (Config, error) {
 	cfg := Config{
 		AppAddr:             envOrDefault("APP_ADDR", ":8080"),
@@ -66,7 +65,6 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration", setting.name)
 		}
 	}
-	// Database credential encryption key (base64-encoded 32-byte key for AES-256-GCM)
 	encKeyB64 := strings.Trim(os.Getenv("DB_CREDENTIAL_ENCRYPTION_KEY"), "\"'")
 	if encKeyB64 == "" {
 		return Config{}, apperror.New("DB_CREDENTIAL_ENCRYPTION_KEY is required")
@@ -83,7 +81,6 @@ func Load() (Config, error) {
 	return cfg, cfg.Validate()
 }
 
-// Validate rejects invalid settings before serving requests.
 func (c Config) Validate() error {
 	if c.AppAddr == "" || c.PlatformDatabaseURL == "" {
 		return fmt.Errorf("APP_ADDR and PLATFORM_DATABASE_URL are required")

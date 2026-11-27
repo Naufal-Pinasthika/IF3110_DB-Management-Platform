@@ -16,7 +16,6 @@ func RequireBrowser(t *testing.T) {
 	}
 }
 
-// RunBrowser keeps the test server alive while Node drives the real browser.
 func RunBrowser(t *testing.T, script, origin string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

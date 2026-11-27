@@ -17,10 +17,7 @@ const (
 
 type sessionContextKey struct{}
 
-
-// reads identity written by session middleware.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
-	// use private typed context key shared with SessionMiddleware
 	session, ok := ctx.Value(sessionContextKey{}).(ValidatedSession)
 	if !ok {
 		return Principal{}, false
@@ -28,8 +25,6 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return session.Principal, true
 }
 
-
-// stores the Principal in request context
 func SetPrincipalContext(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, principalContextKey, principal)
 }
@@ -38,13 +33,10 @@ func SetValidatedPrincipalContext(ctx context.Context, principal Principal) cont
 	return context.WithValue(ctx, sessionContextKey{}, ValidatedSession{Principal: principal})
 }
 
-
-// validates a cookie before calling the protected handler.
 func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 
-		// rad configured cookie and call ValidateSession with the current time
 		cookie, err := r.Cookie(h.Service.Policy.CookieName)
 		if err != nil {
 			WriteAuthError(w, ErrUnauthenticated)
@@ -61,13 +53,13 @@ func (h *Handler) SessionMiddleware(next http.Handler) http.Handler {
 			h.setSessionCookie(w, validated.RotatedToken, validated.Session.AbsoluteExpiresAt)
 		}
 
-		// put validated principal and session in context then call next.
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, validated)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+// checks request origin against public origin
 func (h *Handler) sameOrigin(r *http.Request) bool {
 	if h.PublicOrigin == "" {
 		return false
@@ -102,7 +94,6 @@ func (h *Handler) sameOrigin(r *http.Request) bool {
 	return false
 }
 
-
 func (h *Handler) LoginCSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !h.sameOrigin(r) {
@@ -116,7 +107,6 @@ func (h *Handler) LoginCSRFMiddleware(next http.Handler) http.Handler {
 
 func (h *Handler) CSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Read the validated session and X-CSRF-Token then call ValidateCSRF
 		validated, ok := r.Context().Value(sessionContextKey{}).(ValidatedSession)
 		if !ok {
 			WriteAuthError(w, ErrUnauthenticated)
