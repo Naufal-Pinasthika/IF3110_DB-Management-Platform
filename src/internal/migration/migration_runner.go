@@ -340,76 +340,59 @@ func (r *Runner) ExecuteBatch(
 		}
 
 		qRows, qErr := tx.QueryContext(batchCtx, querySQL)
-		if qErr == nil {
+		var queryErr error
+		if qErr != nil {
+			// QueryContext has already executed the statement. Retrying it with
+			// ExecContext in this transaction can only replace the original SQL
+			// error with PostgreSQL's "current transaction is aborted" error.
+			queryErr = qErr
+		} else {
 			for qRows.Next() {
 				rowsAffected++
 				var val any
-				if err := qRows.Scan(&val); err == nil && val != nil {
+				if err := qRows.Scan(&val); err != nil {
+					queryErr = err
+					break
+				}
+				if val != nil {
 					nextCursor = fmt.Sprintf("%v", val)
 				}
 			}
-			queryErr := qRows.Err()
+			if rowsErr := qRows.Err(); queryErr == nil {
+				queryErr = rowsErr
+			}
 			if closeErr := qRows.Close(); queryErr == nil {
 				queryErr = closeErr
 			}
-			if queryErr != nil {
-				durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
-				batchSpan.RecordError(queryErr)
-				batchSpan.SetStatus(codes.Error, "batch SQL failed")
-				telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
-					"operation", "migration.batch", "database_id", databaseID,
-					"query", batchSQL, "parameters", telemetry.RedactParams(cursorVal, batchSize),
-					"duration_ms", durMS, "rows", 0, "status", "failed",
-					"error", telemetry.SanitizeValue(queryErr.Error()), "sqlstate", telemetry.SQLState(queryErr))
-				rbErr := tx.Rollback()
-				rbStatus := "success"
-				if rbErr != nil {
-					rbStatus = "failed"
-				}
-				telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
-					"operation", "migration.batch", "database_id", databaseID, "status", rbStatus)
-				batchSpan.End()
-				telemetry.IncBatchProcessed("forward", "failed", 0)
-				return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", queryErr)
+		}
+		if queryErr != nil {
+			durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
+			batchSpan.RecordError(queryErr)
+			batchSpan.SetStatus(codes.Error, "batch SQL failed")
+			telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
+				"operation", "migration.batch",
+				"database_id", databaseID,
+				"query", batchSQL,
+				"parameters", telemetry.RedactParams(cursorVal, batchSize),
+				"duration_ms", durMS,
+				"rows", 0,
+				"status", "failed",
+				"error", telemetry.SanitizeValue(queryErr.Error()),
+				"sqlstate", telemetry.SQLState(queryErr),
+			)
+			rbErr := tx.Rollback()
+			rbStatus := "success"
+			if rbErr != nil {
+				rbStatus = "failed"
 			}
-		} else {
-			res, err := tx.ExecContext(batchCtx, batchSQL)
-			if err != nil {
-				durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
-				batchSpan.RecordError(err)
-				batchSpan.SetStatus(codes.Error, "batch SQL failed")
-				telemetry.Log(batchCtx, slog.LevelError, "sql.finished",
-					"operation", "migration.batch",
-					"database_id", databaseID,
-					"query", batchSQL,
-					"parameters", telemetry.RedactParams(cursorVal, batchSize),
-					"duration_ms", durMS,
-					"rows", 0,
-					"status", "failed",
-					"error", telemetry.SanitizeValue(err.Error()),
-					"sqlstate", telemetry.SQLState(err),
-				)
-				rbErr := tx.Rollback()
-				rbStatus := "success"
-				if rbErr != nil {
-					rbStatus = "failed"
-				}
-				telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
-					"operation", "migration.batch",
-					"database_id", databaseID,
-					"status", rbStatus,
-				)
-				batchSpan.End()
-				telemetry.IncBatchProcessed("forward", "failed", 0)
-				return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", err)
-			}
-			rowsAffected, _ = res.RowsAffected()
-			if rowsAffected > 0 {
-				var intCursor int64
-				if _, err := fmt.Sscanf(cursorVal, "%d", &intCursor); err == nil {
-					nextCursor = fmt.Sprintf("%d", intCursor+rowsAffected)
-				}
-			}
+			telemetry.Log(batchCtx, slog.LevelInfo, "sql.transaction_rollback",
+				"operation", "migration.batch",
+				"database_id", databaseID,
+				"status", rbStatus,
+			)
+			batchSpan.End()
+			telemetry.IncBatchProcessed("forward", "failed", 0)
+			return committedBatches, committedRows, lastCursor, fmt.Errorf("batch execution failed: %w", queryErr)
 		}
 
 		durMS := float64(time.Since(batchStarted)) / float64(time.Millisecond)
