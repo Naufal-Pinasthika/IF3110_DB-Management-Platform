@@ -136,6 +136,10 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 
 	approvalItems := make([]api.MigrationApprovalItem, 0, len(approvals))
 	for _, app := range approvals {
+		action := app.Action
+		if action == "" {
+			action = "MIGRATE"
+		}
 		approvalItems = append(approvalItems, api.MigrationApprovalItem{
 			ID:             app.ID,
 			GroupID:        app.GroupID,
@@ -143,17 +147,21 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 			LeaderID:       app.LeaderID,
 			LeaderUsername: app.Leader.Username,
 			Status:         string(app.Status),
+			Action:         action,
 			Comment:        app.Comment,
 			DecidedAt:      app.DecidedAt,
 		})
 	}
 
 	lastApplied, _ := s.Repository.GetLastAppliedMigration(ctx, databaseID)
-	canRollback := lastApplied != nil && lastApplied.ID == migrationID &&
-		!m.IsIrreversible && m.SQLDown != nil && *m.SQLDown != "" &&
-		m.Status == models.MigrationApplied
+	reversibleTop := lastApplied != nil && lastApplied.ID == migrationID &&
+		!m.IsIrreversible && m.SQLDown != nil && *m.SQLDown != ""
+	canRequestRollback := reversibleTop && m.Status == models.MigrationApplied
+	canRollback := reversibleTop && m.Status == models.MigrationRollbackApproved
 
 	nextForward, _ := s.Repository.GetNextForwardCandidate(ctx, databaseID)
+	canRequestForward := nextForward != nil && nextForward.ID == migrationID &&
+		m.Status == models.MigrationRolledBack
 	canForward := nextForward != nil && nextForward.ID == migrationID &&
 		m.Status == models.MigrationApproved
 
@@ -179,6 +187,8 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 		Approvals:          approvalItems,
 		CanRollback:        canRollback,
 		CanForward:         canForward,
+		CanRequestRollback: canRequestRollback,
+		CanRequestForward:  canRequestForward,
 	}, nil
 }
 
@@ -284,6 +294,65 @@ func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
+func (s *Service) buildPendingApprovals(ctx context.Context, databaseID, migrationID, action string, now time.Time) ([]models.MigrationApproval, error) {
+	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
+	}
+
+	approvals := make([]models.MigrationApproval, 0, len(groups))
+	for _, g := range groups {
+		if g.LeaderID == nil || *g.LeaderID == "" {
+			return nil, fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
+		}
+		approvals = append(approvals, models.MigrationApproval{
+			MigrationID: migrationID,
+			GroupID:     g.ID,
+			LeaderID:    *g.LeaderID,
+			Status:      models.ApprovalPending,
+			Action:      action,
+			CreatedAt:   now,
+		})
+	}
+	return approvals, nil
+}
+
+func (s *Service) validateApprovedByCurrentGroups(ctx context.Context, databaseID string, approvals []models.MigrationApproval, requiredAction string) error {
+	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
+	if err != nil {
+		return err
+	}
+	if len(groups) == 0 {
+		return fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
+	}
+	approvedGroups := make(map[string]bool, len(approvals))
+	for _, a := range approvals {
+		if a.Status != models.ApprovalApproved {
+			continue
+		}
+		if requiredAction != "" {
+			if a.Action != requiredAction {
+				continue
+			}
+		} else if a.Action == "ROLLBACK" {
+			continue
+		}
+		approvedGroups[a.GroupID] = true
+	}
+	for _, g := range groups {
+		if g.LeaderID == nil || *g.LeaderID == "" {
+			return fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
+		}
+		if !approvedGroups[g.ID] {
+			return fmt.Errorf("%w: missing approval from leader of group %q", apperror.ErrConflict, g.Name)
+		}
+	}
+	return nil
+}
+
 // SubmitReview requests approval from all group leaders with database access.
 func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
@@ -298,26 +367,9 @@ func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databa
 		return api.MigrationDetail{}, fmt.Errorf("%w: migration must be DRAFT or REJECTED to submit for review", apperror.ErrConflict)
 	}
 
-	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
+	approvals, err := s.buildPendingApprovals(ctx, databaseID, migrationID, "MIGRATE", now)
 	if err != nil {
 		return api.MigrationDetail{}, err
-	}
-	if len(groups) == 0 {
-		return api.MigrationDetail{}, fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
-	}
-
-	var approvals []models.MigrationApproval
-	for _, g := range groups {
-		if g.LeaderID == nil || *g.LeaderID == "" {
-			return api.MigrationDetail{}, fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
-		}
-		approvals = append(approvals, models.MigrationApproval{
-			MigrationID: migrationID,
-			GroupID:     g.ID,
-			LeaderID:    *g.LeaderID,
-			Status:      models.ApprovalPending,
-			CreatedAt:   now,
-		})
 	}
 
 	if err := s.Repository.SubmitForReview(ctx, databaseID, migrationID, approvals); err != nil {
@@ -325,6 +377,92 @@ func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databa
 	}
 
 	telemetry.Log(ctx, slog.LevelInfo, "migration.review_submitted",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"required_approvals", len(approvals),
+		"status", string(models.MigrationPendingReview),
+	)
+
+	return s.GetMigration(ctx, actor, databaseID, migrationID)
+}
+
+// SubmitRollbackReview requests leader approval before rolling back an applied migration.
+func (s *Service) SubmitRollbackReview(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationDetail, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	lastApplied, err := s.Repository.GetLastAppliedMigration(ctx, databaseID)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+	if lastApplied == nil || lastApplied.ID != migrationID || lastApplied.Status != models.MigrationApplied {
+		return api.MigrationDetail{}, fmt.Errorf("%w: only the latest applied migration can be submitted for rollback review", apperror.ErrConflict)
+	}
+	if lastApplied.IsIrreversible {
+		reason := "irreversible migration cannot be rolled back"
+		if lastApplied.IrreversibleReason != nil && *lastApplied.IrreversibleReason != "" {
+			reason = *lastApplied.IrreversibleReason
+		}
+		return api.MigrationDetail{}, fmt.Errorf("%w: %s", apperror.ErrConflict, reason)
+	}
+	if lastApplied.SQLDown == nil || *lastApplied.SQLDown == "" {
+		return api.MigrationDetail{}, fmt.Errorf("%w: migration has no SQL down defined", apperror.ErrConflict)
+	}
+
+	approvals, err := s.buildPendingApprovals(ctx, databaseID, migrationID, "ROLLBACK", now)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	if err := s.Repository.SubmitRollbackReview(ctx, databaseID, migrationID, approvals); err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.rollback_review_submitted",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", migrationID,
+		"required_approvals", len(approvals),
+		"status", string(models.MigrationPendingReview),
+	)
+
+	return s.GetMigration(ctx, actor, databaseID, migrationID)
+}
+
+// SubmitForwardReview requests leader approval before re-applying a rolled-back migration in linear order.
+func (s *Service) SubmitForwardReview(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationDetail, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	m, err := s.Repository.GetMigration(ctx, databaseID, migrationID)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+	if m.Status != models.MigrationRolledBack {
+		return api.MigrationDetail{}, fmt.Errorf("%w: migration must be ROLLED_BACK to submit for forward review", apperror.ErrConflict)
+	}
+
+	nextCandidate, err := s.Repository.GetNextForwardCandidate(ctx, databaseID)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+	if nextCandidate == nil || nextCandidate.ID != migrationID {
+		return api.MigrationDetail{}, fmt.Errorf("%w: forward review must follow linear migration order", apperror.ErrConflict)
+	}
+
+	approvals, err := s.buildPendingApprovals(ctx, databaseID, migrationID, "FORWARD", now)
+	if err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	if err := s.Repository.SubmitForwardReview(ctx, databaseID, migrationID, approvals); err != nil {
+		return api.MigrationDetail{}, err
+	}
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.forward_review_submitted",
 		"actor", actor.User.ID,
 		"database_id", databaseID,
 		"migration_id", migrationID,
@@ -357,18 +495,29 @@ func (s *Service) ApproveMigration(ctx context.Context, actor auth.Principal, da
 		return api.MigrationDetail{}, fmt.Errorf("%w: caller is not a group leader with pending approval for this migration", apperror.ErrForbidden)
 	}
 
+	reviewAction := approvals[0].Action
+	if reviewAction == "" {
+		reviewAction = "MIGRATE"
+	}
+
 	for _, app := range approvals {
 		if err := s.Repository.UpdateApprovalStatus(ctx, app.ID, models.ApprovalApproved, input.Comment, now); err != nil {
 			return api.MigrationDetail{}, err
 		}
 	}
 
-	approvedAll, _ := s.Repository.CheckAndSetApproved(ctx, databaseID, migrationID)
+	var approvedAll bool
+	if reviewAction == "ROLLBACK" {
+		approvedAll, _ = s.Repository.CheckAndSetRollbackApproved(ctx, databaseID, migrationID)
+	} else {
+		approvedAll, _ = s.Repository.CheckAndSetApproved(ctx, databaseID, migrationID)
+	}
 
 	telemetry.Log(ctx, slog.LevelInfo, "migration.approved",
 		"actor", actor.User.ID,
 		"database_id", databaseID,
 		"migration_id", migrationID,
+		"action", reviewAction,
 		"approved_groups", len(approvals),
 		"fully_approved", approvedAll,
 		"status", "approved",
@@ -399,19 +548,38 @@ func (s *Service) RejectMigration(ctx context.Context, actor auth.Principal, dat
 		return api.MigrationDetail{}, fmt.Errorf("%w: caller is not an assigned group leader for this migration", apperror.ErrForbidden)
 	}
 
+	reviewAction := approvals[0].Action
+	if reviewAction == "" {
+		reviewAction = "MIGRATE"
+	}
+
 	for _, app := range approvals {
 		_ = s.Repository.UpdateApprovalStatus(ctx, app.ID, models.ApprovalRejected, input.Comment, now)
 	}
 
-	if err := s.Repository.RejectMigration(ctx, databaseID, migrationID); err != nil {
-		return api.MigrationDetail{}, err
+	var rejectErr error
+	var resultingStatus models.MigrationStatus
+	switch reviewAction {
+	case "ROLLBACK":
+		rejectErr = s.Repository.RejectRollbackReview(ctx, databaseID, migrationID)
+		resultingStatus = models.MigrationApplied
+	case "FORWARD":
+		rejectErr = s.Repository.RejectForwardReview(ctx, databaseID, migrationID)
+		resultingStatus = models.MigrationRolledBack
+	default:
+		rejectErr = s.Repository.RejectMigration(ctx, databaseID, migrationID)
+		resultingStatus = models.MigrationRejected
+	}
+	if rejectErr != nil {
+		return api.MigrationDetail{}, rejectErr
 	}
 
 	telemetry.Log(ctx, slog.LevelInfo, "migration.rejected",
 		"actor", actor.User.ID,
 		"database_id", databaseID,
 		"migration_id", migrationID,
-		"status", string(models.MigrationRejected),
+		"action", reviewAction,
+		"status", string(resultingStatus),
 	)
 
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
@@ -432,26 +600,8 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}
 
 	// Revalidate that every group currently granted access to this database has a leader and approved this migration.
-	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
-	if err != nil {
+	if err := s.validateApprovedByCurrentGroups(ctx, databaseID, approvals, ""); err != nil {
 		return api.MigrationExecuted{}, err
-	}
-	if len(groups) == 0 {
-		return api.MigrationExecuted{}, fmt.Errorf("%w: no groups have access to this database", apperror.ErrConflict)
-	}
-	approvedGroups := make(map[string]bool, len(approvals))
-	for _, a := range approvals {
-		if a.Status == models.ApprovalApproved {
-			approvedGroups[a.GroupID] = true
-		}
-	}
-	for _, g := range groups {
-		if g.LeaderID == nil || *g.LeaderID == "" {
-			return api.MigrationExecuted{}, fmt.Errorf("%w: group %q has no designated leader", apperror.ErrConflict, g.Name)
-		}
-		if !approvedGroups[g.ID] {
-			return api.MigrationExecuted{}, fmt.Errorf("%w: missing approval from leader of group %q", apperror.ErrConflict, g.Name)
-		}
 	}
 
 	exec := models.MigrationExecution{
@@ -500,10 +650,18 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}, nil
 }
 
-// RollbackMigration triggers an asynchronous rollback of the latest active migration.
+// RollbackMigration triggers an asynchronous rollback of the latest active migration after leader approval.
 func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationExecuted{}, err
+	}
+
+	m, approvals, err := s.Repository.GetMigrationWithApprovals(ctx, databaseID, migrationID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if m.Status != models.MigrationRollbackApproved {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: rollback must be approved by group leaders before execution", apperror.ErrConflict)
 	}
 
 	lastApplied, err := s.Repository.GetLastAppliedMigration(ctx, databaseID)
@@ -513,22 +671,27 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 	if lastApplied == nil || lastApplied.ID != migrationID {
 		return api.MigrationExecuted{}, fmt.Errorf("%w: only the latest active applied migration can be rolled back", apperror.ErrConflict)
 	}
-	if lastApplied.IsIrreversible {
+	if m.IsIrreversible {
 		reason := "irreversible migration cannot be rolled back"
-		if lastApplied.IrreversibleReason != nil && *lastApplied.IrreversibleReason != "" {
-			reason = *lastApplied.IrreversibleReason
+		if m.IrreversibleReason != nil && *m.IrreversibleReason != "" {
+			reason = *m.IrreversibleReason
 		}
 		return api.MigrationExecuted{}, fmt.Errorf("%w: %s", apperror.ErrConflict, reason)
 	}
-	if lastApplied.SQLDown == nil || *lastApplied.SQLDown == "" {
+	if m.SQLDown == nil || *m.SQLDown == "" {
 		return api.MigrationExecuted{}, fmt.Errorf("%w: migration has no SQL down defined", apperror.ErrConflict)
+	}
+
+	// Revalidate that every group currently granted access to this database has a leader and approved this rollback.
+	if err := s.validateApprovedByCurrentGroups(ctx, databaseID, approvals, "ROLLBACK"); err != nil {
+		return api.MigrationExecuted{}, err
 	}
 
 	executions, err := s.Repository.ListExecutions(ctx, databaseID, false)
 	var cancelledExecID *string
 	if err == nil {
 		for i := len(executions) - 1; i >= 0; i-- {
-			if executions[i].MigrationID == migrationID && executions[i].ActionType == "FORWARD" && executions[i].Status == "SUCCEEDED" {
+			if executions[i].MigrationID == migrationID && (executions[i].ActionType == "FORWARD" || executions[i].ActionType == "RETRY") && executions[i].Status == "SUCCEEDED" {
 				id := executions[i].ID
 				cancelledExecID = &id
 				break
@@ -542,7 +705,7 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 		ActionType:            "ROLLBACK",
 		RolledBackExecutionID: cancelledExecID,
 		Status:                "RUNNING",
-		ExecutedSQL:           *lastApplied.SQLDown,
+		ExecutedSQL:           *m.SQLDown,
 		ExecutedBy:            actor.User.ID,
 		StartedAt:             now,
 	}
@@ -561,6 +724,8 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 	if err != nil {
 		return api.MigrationExecuted{}, err
 	}
+
+	_, _ = s.Repository.MarkRunning(ctx, databaseID, migrationID, actor.User.ID, now)
 
 	telemetry.Log(ctx, slog.LevelInfo, "migration.rollback_queued",
 		"actor", actor.User.ID,
@@ -598,6 +763,182 @@ func (s *Service) ForwardMigration(ctx context.Context, actor auth.Principal, da
 	return s.ExecuteMigration(ctx, actor, databaseID, migrationID, now)
 }
 
+// ResumeExecution enqueues a retry/resume job from the last committed batch checkpoint.
+func (s *Service) ResumeExecution(ctx context.Context, actor auth.Principal, databaseID, executionID string, now time.Time) (api.MigrationExecuted, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	exec, err := s.Repository.GetExecution(ctx, executionID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if exec.DatabaseID != databaseID {
+		return api.MigrationExecuted{}, apperror.ErrNotFound
+	}
+	if exec.Status != "PARTIAL" && exec.Status != "PARTIALLY_REVERTED" {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: only PARTIAL or PARTIALLY_REVERTED executions can be resumed", apperror.ErrConflict)
+	}
+
+	m, approvals, err := s.Repository.GetMigrationWithApprovals(ctx, databaseID, exec.MigrationID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if m.MigrationType != "BATCH" {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: resume from checkpoint is only available for BATCH migrations", apperror.ErrConflict)
+	}
+
+	requiredAction := ""
+	if exec.ActionType == "ROLLBACK" {
+		requiredAction = "ROLLBACK"
+	}
+	if err := s.validateApprovedByCurrentGroups(ctx, databaseID, approvals, requiredAction); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	actionType := "RETRY"
+	if exec.Status == "PARTIALLY_REVERTED" {
+		if exec.ActionType == "ROLLBACK" {
+			actionType = "ROLLBACK"
+		} else {
+			actionType = "REVERT_BATCH"
+		}
+	}
+
+	prevID := exec.ID
+	newExec := models.MigrationExecution{
+		MigrationID:           exec.MigrationID,
+		DatabaseID:            databaseID,
+		ActionType:            actionType,
+		RolledBackExecutionID: &prevID,
+		Status:                "RUNNING",
+		ExecutedSQL:           exec.ExecutedSQL,
+		ExecutedBy:            actor.User.ID,
+		StartedAt:             now,
+		CommittedBatches:      exec.CommittedBatches,
+		CommittedRows:         exec.CommittedRows,
+		LastCursorValue:       exec.LastCursorValue,
+	}
+	if err := s.Repository.CreateExecution(ctx, &newExec); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	if s.Dispatcher == nil {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
+	}
+
+	receipt, err := s.Dispatcher.Enqueue(ctx, contracts.ExecutionRef{
+		ExecutionID: newExec.ID,
+		DatabaseID:  databaseID,
+	})
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	_, _ = s.Repository.MarkRunning(ctx, databaseID, m.ID, actor.User.ID, now)
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.resume_queued",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", m.ID,
+		"execution_id", newExec.ID,
+		"previous_execution_id", exec.ID,
+		"job_id", receipt.JobID,
+		"action_type", newExec.ActionType,
+		"status", string(receipt.Status),
+	)
+
+	return api.MigrationExecuted{
+		ID:          m.ID,
+		Status:      models.MigrationRunning,
+		ExecutedBy:  &actor.User.ID,
+		JobID:       receipt.JobID,
+		ExecutionID: newExec.ID,
+	}, nil
+}
+
+// CancelBatch creates an asynchronous REVERT_BATCH compensation job for a PARTIAL forward batch execution.
+func (s *Service) CancelBatch(ctx context.Context, actor auth.Principal, databaseID, executionID string, now time.Time) (api.MigrationExecuted, error) {
+	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	exec, err := s.Repository.GetExecution(ctx, executionID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if exec.DatabaseID != databaseID {
+		return api.MigrationExecuted{}, apperror.ErrNotFound
+	}
+	if exec.Status != "PARTIAL" || (exec.ActionType != "FORWARD" && exec.ActionType != "RETRY") {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: only PARTIAL forward/retry batch executions can be compensated", apperror.ErrConflict)
+	}
+
+	m, approvals, err := s.Repository.GetMigrationWithApprovals(ctx, databaseID, exec.MigrationID)
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+	if m.MigrationType != "BATCH" {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: batch compensation is only available for BATCH migrations", apperror.ErrConflict)
+	}
+	if m.IsIrreversible || m.SQLDown == nil || *m.SQLDown == "" {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: compensation is unsafe without approved SQL down; create a corrective migration instead", apperror.ErrConflict)
+	}
+
+	if err := s.validateApprovedByCurrentGroups(ctx, databaseID, approvals, ""); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	prevID := exec.ID
+	newExec := models.MigrationExecution{
+		MigrationID:           exec.MigrationID,
+		DatabaseID:            databaseID,
+		ActionType:            "REVERT_BATCH",
+		RolledBackExecutionID: &prevID,
+		Status:                "RUNNING",
+		ExecutedSQL:           *m.SQLDown,
+		ExecutedBy:            actor.User.ID,
+		StartedAt:             now,
+		LastCursorValue:       exec.LastCursorValue,
+	}
+	if err := s.Repository.CreateExecution(ctx, &newExec); err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	if s.Dispatcher == nil {
+		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
+	}
+
+	receipt, err := s.Dispatcher.Enqueue(ctx, contracts.ExecutionRef{
+		ExecutionID: newExec.ID,
+		DatabaseID:  databaseID,
+	})
+	if err != nil {
+		return api.MigrationExecuted{}, err
+	}
+
+	_, _ = s.Repository.MarkRunning(ctx, databaseID, m.ID, actor.User.ID, now)
+
+	telemetry.Log(ctx, slog.LevelInfo, "migration.cancel_batch_queued",
+		"actor", actor.User.ID,
+		"database_id", databaseID,
+		"migration_id", m.ID,
+		"execution_id", newExec.ID,
+		"partial_execution_id", exec.ID,
+		"job_id", receipt.JobID,
+		"action_type", newExec.ActionType,
+		"status", string(receipt.Status),
+	)
+
+	return api.MigrationExecuted{
+		ID:          m.ID,
+		Status:      models.MigrationRunning,
+		ExecutedBy:  &actor.User.ID,
+		JobID:       receipt.JobID,
+		ExecutionID: newExec.ID,
+	}, nil
+}
+
 // ListMigrationHistory returns all execution attempts, optionally hiding rolled back pairs.
 func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal, databaseID string, hideRollback bool) ([]api.MigrationExecutionSummary, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
@@ -628,6 +969,7 @@ func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal
 			ErrorSummary:          e.ErrorSummary,
 			CommittedBatches:      e.CommittedBatches,
 			CommittedRows:         e.CommittedRows,
+			LastCursorValue:       e.LastCursorValue,
 		})
 	}
 	return result, nil
@@ -639,7 +981,11 @@ func (s *Service) ValidateExecution(ctx context.Context, ref contracts.Execution
 	if err == nil {
 		metadata := jobs.ExecutionMetadata{ActorID: exec.ExecutedBy}
 		if exec.RolledBackExecutionID != nil && *exec.RolledBackExecutionID != "" {
-			metadata.ReplaceBlockedExecutionID = *exec.RolledBackExecutionID
+			prev, prevErr := s.Repository.GetExecution(ctx, *exec.RolledBackExecutionID)
+			// Only hand off blocked database gate when the referenced execution is NOT already SUCCEEDED.
+			if prevErr != nil || (prev != nil && prev.Status != "SUCCEEDED") {
+				metadata.ReplaceBlockedExecutionID = *exec.RolledBackExecutionID
+			}
 		}
 		return metadata, nil
 	}
@@ -650,16 +996,38 @@ func (s *Service) ValidateExecution(ctx context.Context, ref contracts.Execution
 	return jobs.ExecutionMetadata{ActorID: m.CreatedBy}, nil
 }
 
+func (s *Service) resolveCheckpointExecutionID(ctx context.Context, exec *models.MigrationExecution) string {
+	if exec == nil {
+		return ""
+	}
+	cur := exec
+	for range 20 {
+		if cur.ActionType == "FORWARD" || cur.RolledBackExecutionID == nil || *cur.RolledBackExecutionID == "" {
+			return cur.ID
+		}
+		prev, err := s.Repository.GetExecution(ctx, *cur.RolledBackExecutionID)
+		if err != nil || prev == nil {
+			return cur.ID
+		}
+		cur = prev
+	}
+	return cur.ID
+}
+
 // ReadProgress satisfies jobs.ProgressReader for real-time batch progress monitoring.
 func (s *Service) ReadProgress(ctx context.Context, ref contracts.ExecutionRef) (jobs.Progress, error) {
+	exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID)
+	checkpointExecID := ref.ExecutionID
+	if err == nil && exec != nil {
+		checkpointExecID = s.resolveCheckpointExecutionID(ctx, exec)
+	}
 	if runner, ok := s.Runner.(*Runner); ok {
-		batches, rows, _, err := runner.InspectCheckpoints(ctx, ref.DatabaseID, ref.ExecutionID)
-		if err == nil && (batches > 0 || rows > 0) {
+		batches, rows, _, rErr := runner.InspectCheckpoints(ctx, ref.DatabaseID, checkpointExecID)
+		if rErr == nil && (batches > 0 || rows > 0) {
 			return jobs.Progress{CommittedBatches: batches, CommittedRows: rows}, nil
 		}
 	}
-	exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID)
-	if err == nil {
+	if err == nil && exec != nil {
 		return jobs.Progress{CommittedBatches: exec.CommittedBatches, CommittedRows: exec.CommittedRows}, nil
 	}
 	return jobs.Progress{}, err
@@ -770,7 +1138,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 
 	now := time.Now()
 
-	if exec != nil && exec.ActionType == "ROLLBACK" {
+	if exec != nil && (exec.ActionType == "ROLLBACK" || exec.ActionType == "REVERT_BATCH") {
 		downSQL := exec.ExecutedSQL
 		if downSQL == "" && m.SQLDown != nil {
 			downSQL = *m.SQLDown
@@ -781,12 +1149,19 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			if !ok {
 				return contracts.ExecutionResult{State: contracts.ExecutionFailed, RetryAdvice: contracts.RetryStop}, fmt.Errorf("batch runner not available")
 			}
-			revertedBatches, revertedRows, bErr := runner.RevertBatch(ctx, ref.DatabaseID, ref.ExecutionID, downSQL, batchAttr, func(b, r int64, cursor string) {
-				exec.CommittedBatches = b
-				exec.CommittedRows = r
+			checkpointExecID := s.resolveCheckpointExecutionID(ctx, exec)
+			baseBatches := exec.CommittedBatches
+			baseRows := exec.CommittedRows
+			revertedBatches, revertedRows, bErr := runner.RevertBatch(ctx, ref.DatabaseID, checkpointExecID, downSQL, batchAttr, batchSize, func(b, r int64, cursor string) {
+				exec.CommittedBatches = baseBatches + b
+				exec.CommittedRows = baseRows + r
+				exec.LastCursorValue = &cursor
 				_ = s.Repository.UpdateExecution(ctx, exec)
 			})
 
+			now = time.Now()
+			exec.CommittedBatches = baseBatches + revertedBatches
+			exec.CommittedRows = baseRows + revertedRows
 			exec.FinishedAt = &now
 			if bErr != nil {
 				exec.Status = "PARTIALLY_REVERTED"
@@ -795,8 +1170,8 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 				_ = s.Repository.UpdateExecution(ctx, exec)
 				return contracts.ExecutionResult{
 					State:            contracts.ExecutionPartiallyReverted,
-					CommittedBatches: revertedBatches,
-					CommittedRows:    revertedRows,
+					CommittedBatches: exec.CommittedBatches,
+					CommittedRows:    exec.CommittedRows,
 					RetryAdvice:      contracts.RetryResume,
 					BlocksDatabase:   true,
 					ErrorCode:        bErr.Error(),
@@ -811,18 +1186,24 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			return contracts.ExecutionResult{
 				State:            contracts.ExecutionSucceeded,
 				RetryAdvice:      contracts.RetryStop,
-				CommittedBatches: revertedBatches,
-				CommittedRows:    revertedRows,
+				CommittedBatches: exec.CommittedBatches,
+				CommittedRows:    exec.CommittedRows,
 			}, nil
 		}
 
 		execErr := s.Runner.Execute(ctx, ref.DatabaseID, downSQL)
+		now = time.Now()
 		exec.FinishedAt = &now
 		if execErr != nil {
 			exec.Status = "FAILED"
 			errSummary := execErr.Error()
 			exec.ErrorSummary = &errSummary
 			_ = s.Repository.UpdateExecution(ctx, exec)
+			if exec.ActionType == "ROLLBACK" {
+				_, _ = s.Repository.RestoreApplied(ctx, ref.DatabaseID, m.ID, now)
+			} else {
+				_, _ = s.Repository.MarkFailed(ctx, ref.DatabaseID, m.ID, actorID, execErr.Error(), now)
+			}
 			return contracts.ExecutionResult{State: contracts.ExecutionFailed, RetryAdvice: contracts.RetryStop, ErrorCode: execErr.Error()}, execErr
 		}
 
@@ -833,7 +1214,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded, RetryAdvice: contracts.RetryStop}, nil
 	}
 
-	// FORWARD execution
+	// FORWARD / RETRY execution
 	sqlUp := m.SQLText
 	if exec != nil && exec.ExecutedSQL != "" {
 		sqlUp = exec.ExecutedSQL
@@ -850,7 +1231,12 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			startCursor = *exec.LastCursorValue
 		}
 
-		committedBatches, committedRows, lastCursor, bErr := runner.ExecuteBatch(ctx, ref.DatabaseID, ref.ExecutionID, sqlUp, batchAttr, batchSize, startCursor, func(b, r int64, cursor string) {
+		checkpointExecID := ref.ExecutionID
+		if exec != nil {
+			checkpointExecID = s.resolveCheckpointExecutionID(ctx, exec)
+		}
+
+		committedBatches, committedRows, lastCursor, bErr := runner.ExecuteBatch(ctx, ref.DatabaseID, checkpointExecID, sqlUp, batchAttr, batchSize, startCursor, func(b, r int64, cursor string) {
 			if exec != nil {
 				exec.CommittedBatches = b
 				exec.CommittedRows = r
@@ -859,6 +1245,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			}
 		})
 
+		now = time.Now()
 		if exec != nil {
 			exec.CommittedBatches = committedBatches
 			exec.CommittedRows = committedRows
@@ -888,7 +1275,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			_ = s.Repository.UpdateExecution(ctx, exec)
 		}
 
-		_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, m.CreatedBy, now)
+		_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, actorID, now)
 		return contracts.ExecutionResult{
 			State:            contracts.ExecutionSucceeded,
 			RetryAdvice:      contracts.RetryStop,
@@ -898,6 +1285,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 	}
 
 	execErr := s.Runner.Execute(ctx, ref.DatabaseID, sqlUp)
+	now = time.Now()
 	if exec != nil {
 		exec.FinishedAt = &now
 	}
@@ -924,7 +1312,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 			exec.ErrorSummary = &errSummary
 			_ = s.Repository.UpdateExecution(ctx, exec)
 		}
-		_, _ = s.Repository.MarkFailed(ctx, ref.DatabaseID, m.ID, m.CreatedBy, execErr.Error(), now)
+		_, _ = s.Repository.MarkFailed(ctx, ref.DatabaseID, m.ID, actorID, execErr.Error(), now)
 		return contracts.ExecutionResult{
 			State:       contracts.ExecutionFailed,
 			RetryAdvice: contracts.RetryStop,
@@ -936,7 +1324,7 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 		exec.Status = "SUCCEEDED"
 		_ = s.Repository.UpdateExecution(ctx, exec)
 	}
-	_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, m.CreatedBy, now)
+	_, _ = s.Repository.MarkApplied(ctx, ref.DatabaseID, m.ID, actorID, now)
 
 	return contracts.ExecutionResult{
 		State:       contracts.ExecutionSucceeded,
@@ -946,7 +1334,8 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 
 // Inspect satisfies jobs.Executor.
 func (s *Service) Inspect(ctx context.Context, ref contracts.ExecutionRef) (contracts.ExecutionResult, error) {
-	if exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID); err == nil && exec != nil {
+	exec, execErr := s.Repository.GetExecution(ctx, ref.ExecutionID)
+	if execErr == nil && exec != nil {
 		switch exec.Status {
 		case "SUCCEEDED":
 			return contracts.ExecutionResult{
@@ -962,12 +1351,32 @@ func (s *Service) Inspect(ctx context.Context, ref contracts.ExecutionRef) (cont
 				CommittedBatches: exec.CommittedBatches,
 				CommittedRows:    exec.CommittedRows,
 			}, nil
+		case "PARTIALLY_REVERTED":
+			return contracts.ExecutionResult{
+				State:            contracts.ExecutionPartiallyReverted,
+				CommittedBatches: exec.CommittedBatches,
+				CommittedRows:    exec.CommittedRows,
+				RetryAdvice:      contracts.RetryResume,
+				BlocksDatabase:   true,
+			}, nil
+		case "PARTIAL":
+			return contracts.ExecutionResult{
+				State:            contracts.ExecutionPartial,
+				CommittedBatches: exec.CommittedBatches,
+				CommittedRows:    exec.CommittedRows,
+				RetryAdvice:      contracts.RetryResume,
+				BlocksDatabase:   true,
+			}, nil
 		}
 	}
 
+	checkpointExecID := ref.ExecutionID
+	if execErr == nil && exec != nil {
+		checkpointExecID = s.resolveCheckpointExecutionID(ctx, exec)
+	}
 	runner, ok := s.Runner.(*Runner)
 	if ok {
-		batches, rows, _, err := runner.InspectCheckpoints(ctx, ref.DatabaseID, ref.ExecutionID)
+		batches, rows, _, err := runner.InspectCheckpoints(ctx, ref.DatabaseID, checkpointExecID)
 		if err == nil && batches > 0 {
 			return contracts.ExecutionResult{
 				State:            contracts.ExecutionPartial,

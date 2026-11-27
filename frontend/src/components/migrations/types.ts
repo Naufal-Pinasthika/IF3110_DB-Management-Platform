@@ -36,7 +36,7 @@ export type Execution = {
   jobId?: string
   migration: string
   revision: string
-  action: 'UP' | 'ROLLBACK' | 'FORWARD'
+  action: 'UP' | 'ROLLBACK' | 'FORWARD' | 'RETRY' | 'REVERT_BATCH'
   actor: string
   status: ExecutionStatus
   startedAt: string

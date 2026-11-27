@@ -119,6 +119,36 @@ func (h *Handler) SubmitReview(w http.ResponseWriter, r *http.Request) {
 	api.WriteDataResponse(w, http.StatusOK, detail)
 }
 
+// SubmitRollbackReview handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/submit-rollback-review.
+func (h *Handler) SubmitRollbackReview(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	detail, err := h.Service.SubmitRollbackReview(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, detail)
+}
+
+// SubmitForwardReview handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/submit-forward-review.
+func (h *Handler) SubmitForwardReview(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	migrationID := r.PathValue("migrationId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	detail, err := h.Service.SubmitForwardReview(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, detail)
+}
+
 // Approve handles POST /api/v1/databases/{dbId}/migrations/{migrationId}/approve.
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	dbID := r.PathValue("dbId")
@@ -177,6 +207,36 @@ func (h *Handler) Forward(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.PrincipalFromContext(r.Context())
 
 	executed, err := h.Service.ForwardMigration(r.Context(), principal, dbID, migrationID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, executed)
+}
+
+// ResumeExecution handles POST /api/v1/databases/{dbId}/executions/{executionId}/resume.
+func (h *Handler) ResumeExecution(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	executionID := r.PathValue("executionId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	executed, err := h.Service.ResumeExecution(r.Context(), principal, dbID, executionID, time.Now())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	api.WriteDataResponse(w, http.StatusOK, executed)
+}
+
+// CancelBatch handles POST /api/v1/databases/{dbId}/executions/{executionId}/cancel-batch.
+func (h *Handler) CancelBatch(w http.ResponseWriter, r *http.Request) {
+	dbID := r.PathValue("dbId")
+	executionID := r.PathValue("executionId")
+	principal, _ := auth.PrincipalFromContext(r.Context())
+
+	executed, err := h.Service.CancelBatch(r.Context(), principal, dbID, executionID, time.Now())
 	if err != nil {
 		writeError(w, err)
 		return

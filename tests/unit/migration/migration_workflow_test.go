@@ -149,13 +149,36 @@ func (r *mockRepo) MarkFailed(ctx context.Context, databaseID, migrationID, exec
 
 func (r *mockRepo) MarkRolledBack(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error) {
 	m := r.migrations[migrationID]
-	m.Status = models.MigrationApproved
+	m.Status = models.MigrationRolledBack
 	m.Version = nil
 	r.migrations[migrationID] = m
 	return m, nil
 }
 
+func (r *mockRepo) RestoreApplied(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error) {
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationApplied
+	r.migrations[migrationID] = m
+	return m, nil
+}
+
 func (r *mockRepo) SubmitForReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationPendingReview
+	r.migrations[migrationID] = m
+	r.approvals[migrationID] = approvals
+	return nil
+}
+
+func (r *mockRepo) SubmitRollbackReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationPendingReview
+	r.migrations[migrationID] = m
+	r.approvals[migrationID] = approvals
+	return nil
+}
+
+func (r *mockRepo) SubmitForwardReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
 	m := r.migrations[migrationID]
 	m.Status = models.MigrationPendingReview
 	r.migrations[migrationID] = m
@@ -200,9 +223,35 @@ func (r *mockRepo) CheckAndSetApproved(ctx context.Context, databaseID, migratio
 	return true, nil
 }
 
+func (r *mockRepo) CheckAndSetRollbackApproved(ctx context.Context, databaseID, migrationID string) (bool, error) {
+	for _, a := range r.approvals[migrationID] {
+		if a.Status != models.ApprovalApproved {
+			return false, nil
+		}
+	}
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationRollbackApproved
+	r.migrations[migrationID] = m
+	return true, nil
+}
+
 func (r *mockRepo) RejectMigration(ctx context.Context, databaseID, migrationID string) error {
 	m := r.migrations[migrationID]
 	m.Status = models.MigrationRejected
+	r.migrations[migrationID] = m
+	return nil
+}
+
+func (r *mockRepo) RejectRollbackReview(ctx context.Context, databaseID, migrationID string) error {
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationApplied
+	r.migrations[migrationID] = m
+	return nil
+}
+
+func (r *mockRepo) RejectForwardReview(ctx context.Context, databaseID, migrationID string) error {
+	m := r.migrations[migrationID]
+	m.Status = models.MigrationRolledBack
 	r.migrations[migrationID] = m
 	return nil
 }
@@ -484,6 +533,13 @@ func TestRollbackAndHideRollback(t *testing.T) {
 	}
 
 	dbID := "db-1"
+	leader1 := "leader-1"
+	leader2 := "leader-2"
+	repo.groups = []models.Group{
+		{ID: "g-1", Name: "Engineering", LeaderID: &leader1},
+		{ID: "g-2", Name: "Data", LeaderID: &leader2},
+	}
+
 	downSQL := "DROP TABLE t1;"
 	ver := int64(1)
 	m := models.Migration{
@@ -505,20 +561,70 @@ func TestRollbackAndHideRollback(t *testing.T) {
 		repo.migrations[m.ID] = m
 		repo.lastApplied = &m
 
-		_, err := svc.RollbackMigration(ctx, makePrincipal("user-1"), dbID, m.ID, time.Now())
-		if err == nil {
+		if _, err := svc.SubmitRollbackReview(ctx, makePrincipal(leader1), dbID, m.ID, time.Now()); err == nil {
+			t.Fatal("expected rollback review to be rejected for irreversible migration")
+		}
+		if _, err := svc.RollbackMigration(ctx, makePrincipal(leader1), dbID, m.ID, time.Now()); err == nil {
 			t.Fatal("expected rollback to be rejected for irreversible migration")
 		}
 		m.IsIrreversible = false
+		m.IrreversibleReason = nil
 		repo.migrations[m.ID] = m
 		repo.lastApplied = &m
 	})
 
-	t.Run("Rollback creates execution referencing cancelled forward", func(t *testing.T) {
+	t.Run("Direct rollback without leader approval is rejected", func(t *testing.T) {
+		_, err := svc.RollbackMigration(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
+		if !errors.Is(err, apperror.ErrConflict) {
+			t.Fatalf("expected ErrConflict when rollback is not approved, got %v", err)
+		}
+	})
+
+	t.Run("Rollback review rejection restores APPLIED status", func(t *testing.T) {
+		detail, err := svc.SubmitRollbackReview(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
+		if err != nil {
+			t.Fatalf("submit rollback review failed: %v", err)
+		}
+		if detail.Status != models.MigrationPendingReview {
+			t.Fatalf("expected PENDING_REVIEW, got %s", detail.Status)
+		}
+		repo.approvals[m.ID][0].ID = "rb-app-1"
+		repo.approvals[m.ID][1].ID = "rb-app-2"
+
+		comment := "Not safe during peak hours"
+		rejected, err := svc.RejectMigration(ctx, makePrincipal(leader2), dbID, m.ID, api.DecideApprovalRequest{Comment: &comment}, time.Now())
+		if err != nil {
+			t.Fatalf("reject rollback failed: %v", err)
+		}
+		if rejected.Status != models.MigrationApplied {
+			t.Fatalf("expected APPLIED after rollback rejection, got %s", rejected.Status)
+		}
+	})
+
+	t.Run("Rollback requires all leader approvals then creates execution referencing cancelled forward", func(t *testing.T) {
 		repo.executions = []models.MigrationExecution{
 			{ID: "E1", MigrationID: m.ID, DatabaseID: dbID, ActionType: "FORWARD", Status: "SUCCEEDED"},
 		}
-		res, err := svc.RollbackMigration(ctx, makePrincipal("user-1"), dbID, m.ID, time.Now())
+		_, err := svc.SubmitRollbackReview(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
+		if err != nil {
+			t.Fatalf("submit rollback review failed: %v", err)
+		}
+		repo.approvals[m.ID][0].ID = "rb-app-3"
+		repo.approvals[m.ID][1].ID = "rb-app-4"
+
+		detail1, err := svc.ApproveMigration(ctx, makePrincipal(leader1), dbID, m.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil || detail1.Status != models.MigrationPendingReview {
+			t.Fatalf("expected PENDING_REVIEW after first approval, got %v (err: %v)", detail1.Status, err)
+		}
+		detail2, err := svc.ApproveMigration(ctx, makePrincipal(leader2), dbID, m.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil || detail2.Status != models.MigrationRollbackApproved {
+			t.Fatalf("expected ROLLBACK_APPROVED after all approvals, got %v (err: %v)", detail2.Status, err)
+		}
+		if !detail2.CanRollback {
+			t.Fatal("expected CanRollback to be true after ROLLBACK_APPROVED")
+		}
+
+		res, err := svc.RollbackMigration(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -532,6 +638,43 @@ func TestRollbackAndHideRollback(t *testing.T) {
 		}
 		if lastExec.RolledBackExecutionID == nil || *lastExec.RolledBackExecutionID != "E1" {
 			t.Fatalf("expected rolled back execution E1, got %v", lastExec.RolledBackExecutionID)
+		}
+	})
+
+	t.Run("Forward review on ROLLED_BACK requires leader approval", func(t *testing.T) {
+		_, _ = repo.MarkRolledBack(ctx, dbID, m.ID, time.Now())
+		cur := repo.migrations[m.ID]
+		repo.lastApplied = nil
+		repo.nextForward = &cur
+
+		if _, err := svc.ForwardMigration(ctx, makePrincipal(leader1), dbID, m.ID, time.Now()); !errors.Is(err, apperror.ErrConflict) {
+			t.Fatalf("expected ErrConflict forwarding unapproved ROLLED_BACK migration, got %v", err)
+		}
+
+		detail, err := svc.SubmitForwardReview(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
+		if err != nil || detail.Status != models.MigrationPendingReview {
+			t.Fatalf("expected PENDING_REVIEW for forward, got %v (err: %v)", detail.Status, err)
+		}
+		repo.approvals[m.ID][0].ID = "fw-app-1"
+		repo.approvals[m.ID][1].ID = "fw-app-2"
+
+		_, err = svc.ApproveMigration(ctx, makePrincipal(leader1), dbID, m.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil {
+			t.Fatalf("leader1 forward approve failed: %v", err)
+		}
+		approvedDetail, err := svc.ApproveMigration(ctx, makePrincipal(leader2), dbID, m.ID, api.DecideApprovalRequest{}, time.Now())
+		if err != nil || approvedDetail.Status != models.MigrationApproved {
+			t.Fatalf("expected APPROVED after forward approvals, got %v (err: %v)", approvedDetail.Status, err)
+		}
+		cur = repo.migrations[m.ID]
+		repo.nextForward = &cur
+
+		fwdRes, err := svc.ForwardMigration(ctx, makePrincipal(leader1), dbID, m.ID, time.Now())
+		if err != nil {
+			t.Fatalf("forward after approval failed: %v", err)
+		}
+		if fwdRes.JobID == "" {
+			t.Fatal("expected job ID on forward execution")
 		}
 	})
 
@@ -581,6 +724,135 @@ func TestRollbackAndHideRollback(t *testing.T) {
 		}
 	})
 }
+
+func TestBatchResumeAndCancel(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepo()
+	dispatcher := &mockDispatcher{}
+	svc := &migration.Service{
+		Repository: repo,
+		Access:     &mockAccess{},
+		Dispatcher: dispatcher,
+	}
+
+	dbID := "db-1"
+	leader1 := "leader-1"
+	repo.groups = []models.Group{
+		{ID: "g-1", Name: "Engineering", LeaderID: &leader1},
+	}
+
+	downSQL := "UPDATE users SET flag = 0 WHERE id <= {{CURSOR}} LIMIT {{BATCH_SIZE}};"
+	batchAttr := "id"
+	batchSize := 500
+	mb := models.Migration{
+		ID:             "mig-batch-1",
+		DatabaseID:     dbID,
+		Name:           "batch_backfill",
+		SQLText:        "UPDATE users SET flag = 1 WHERE id > {{CURSOR}} LIMIT {{BATCH_SIZE}};",
+		SQLDown:        &downSQL,
+		MigrationType:  "BATCH",
+		BatchAttribute: &batchAttr,
+		BatchSize:      &batchSize,
+		Status:         models.MigrationRunning,
+		CreatedBy:      leader1,
+	}
+	repo.migrations[mb.ID] = mb
+	repo.approvals[mb.ID] = []models.MigrationApproval{
+		{ID: "app-b1", MigrationID: mb.ID, GroupID: "g-1", LeaderID: leader1, Status: models.ApprovalApproved, Action: "MIGRATE"},
+	}
+
+	cursor := "1500"
+	repo.executions = []models.MigrationExecution{
+		{
+			ID:               "exec-partial-1",
+			MigrationID:      mb.ID,
+			DatabaseID:       dbID,
+			ActionType:       "FORWARD",
+			Status:           "PARTIAL",
+			ExecutedSQL:      mb.SQLText,
+			ExecutedBy:       leader1,
+			CommittedBatches: 3,
+			CommittedRows:    1500,
+			LastCursorValue:  &cursor,
+		},
+	}
+
+	t.Run("ResumeExecution queues RETRY from checkpoint", func(t *testing.T) {
+		res, err := svc.ResumeExecution(ctx, makePrincipal(leader1), dbID, "exec-partial-1", time.Now())
+		if err != nil {
+			t.Fatalf("resume execution failed: %v", err)
+		}
+		if res.JobID == "" {
+			t.Fatal("expected job ID")
+		}
+		latest := repo.executions[len(repo.executions)-1]
+		if latest.ActionType != "RETRY" {
+			t.Fatalf("expected RETRY action, got %s", latest.ActionType)
+		}
+		if latest.RolledBackExecutionID == nil || *latest.RolledBackExecutionID != "exec-partial-1" {
+			t.Fatalf("expected parent exec-partial-1, got %v", latest.RolledBackExecutionID)
+		}
+		if latest.LastCursorValue == nil || *latest.LastCursorValue != "1500" {
+			t.Fatalf("expected cursor 1500 preserved, got %v", latest.LastCursorValue)
+		}
+	})
+
+	t.Run("CancelBatch queues REVERT_BATCH compensation", func(t *testing.T) {
+		res, err := svc.CancelBatch(ctx, makePrincipal(leader1), dbID, "exec-partial-1", time.Now())
+		if err != nil {
+			t.Fatalf("cancel batch failed: %v", err)
+		}
+		if res.JobID == "" {
+			t.Fatal("expected job ID")
+		}
+		latest := repo.executions[len(repo.executions)-1]
+		if latest.ActionType != "REVERT_BATCH" {
+			t.Fatalf("expected REVERT_BATCH action, got %s", latest.ActionType)
+		}
+		if latest.ExecutedSQL != downSQL {
+			t.Fatalf("expected SQLDown on compensation execution, got %s", latest.ExecutedSQL)
+		}
+	})
+
+	t.Run("CancelBatch rejects irreversible batch migration", func(t *testing.T) {
+		mCopy := repo.migrations[mb.ID]
+		mCopy.IsIrreversible = true
+		repo.migrations[mb.ID] = mCopy
+		defer func() {
+			mCopy.IsIrreversible = false
+			repo.migrations[mb.ID] = mCopy
+		}()
+
+		if _, err := svc.CancelBatch(ctx, makePrincipal(leader1), dbID, "exec-partial-1", time.Now()); !errors.Is(err, apperror.ErrConflict) {
+			t.Fatalf("expected ErrConflict for irreversible cancel-batch, got %v", err)
+		}
+	})
+
+	t.Run("ResumeExecution on PARTIALLY_REVERTED continues REVERT_BATCH", func(t *testing.T) {
+		repo.executions = append(repo.executions, models.MigrationExecution{
+			ID:                    "exec-part-rev-1",
+			MigrationID:           mb.ID,
+			DatabaseID:            dbID,
+			ActionType:            "REVERT_BATCH",
+			RolledBackExecutionID: strPtr("exec-partial-1"),
+			Status:                "PARTIALLY_REVERTED",
+			ExecutedSQL:           downSQL,
+			ExecutedBy:            leader1,
+			CommittedBatches:      1,
+			CommittedRows:         500,
+		})
+		_, err := svc.ResumeExecution(ctx, makePrincipal(leader1), dbID, "exec-part-rev-1", time.Now())
+		if err != nil {
+			t.Fatalf("resume partially reverted failed: %v", err)
+		}
+		latest := repo.executions[len(repo.executions)-1]
+		if latest.ActionType != "REVERT_BATCH" {
+			t.Fatalf("expected REVERT_BATCH action on resume, got %s", latest.ActionType)
+		}
+	})
+}
+
+func strPtr(s string) *string { return &s }
 
 func TestProgressAndRegistry(t *testing.T) {
 	ctx := context.Background()

@@ -88,6 +88,7 @@ func Database(t *testing.T) *gorm.DB {
 		"000006_add_group_leader.sql",
 		"000007_add_migration_jobs.sql",
 		"000008_migration_workflow_and_batches.sql",
+		"000009_rollback_approval.sql",
 	} {
 		migration, err := os.ReadFile(filepath.Join(Root(), "db/platform", name))
 		if err != nil {

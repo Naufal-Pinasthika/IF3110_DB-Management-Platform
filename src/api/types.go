@@ -31,14 +31,16 @@ const (
 type MigrationStatus = models.MigrationStatus
 
 const (
-	MigrationDraft         = models.MigrationDraft
-	MigrationPendingReview = models.MigrationPendingReview
-	MigrationApproved      = models.MigrationApproved
-	MigrationQueued        = models.MigrationQueued
-	MigrationRunning       = models.MigrationRunning
-	MigrationApplied       = models.MigrationApplied
-	MigrationFailed        = models.MigrationFailed
-	MigrationRejected      = models.MigrationRejected
+	MigrationDraft            = models.MigrationDraft
+	MigrationPendingReview    = models.MigrationPendingReview
+	MigrationApproved         = models.MigrationApproved
+	MigrationRollbackApproved = models.MigrationRollbackApproved
+	MigrationRolledBack       = models.MigrationRolledBack
+	MigrationQueued           = models.MigrationQueued
+	MigrationRunning          = models.MigrationRunning
+	MigrationApplied          = models.MigrationApplied
+	MigrationFailed           = models.MigrationFailed
+	MigrationRejected         = models.MigrationRejected
 )
 
 // ------------------------------------------------------------
@@ -439,6 +441,7 @@ type MigrationApprovalItem struct {
 	LeaderID       string     `json:"leader_id"`
 	LeaderUsername string     `json:"leader_username"`
 	Status         string     `json:"status"`
+	Action         string     `json:"action"` // "MIGRATE", "ROLLBACK", or "FORWARD"
 	Comment        *string    `json:"comment,omitempty"`
 	DecidedAt      *time.Time `json:"decided_at,omitempty"`
 }
@@ -485,8 +488,11 @@ type MigrationDetail struct {
 	ExecutedAt         *time.Time              `json:"executed_at"`
 	ErrorSummary       *string                 `json:"error_summary"`
 	Approvals          []MigrationApprovalItem `json:"approvals,omitempty"`
-	CanRollback        bool                    `json:"can_rollback"`
-	CanForward         bool                    `json:"can_forward"`
+	// Forward/rollback eligibility flags
+	CanRollback        bool `json:"can_rollback"`         // ROLLBACK_APPROVED + last applied — ready to execute rollback
+	CanForward         bool `json:"can_forward"`          // APPROVED + next forward candidate — ready to execute forward
+	CanRequestRollback bool `json:"can_request_rollback"` // APPLIED + has sql_down — can submit rollback for review
+	CanRequestForward  bool `json:"can_request_forward"`  // ROLLED_BACK + next forward candidate — can submit forward for review
 }
 
 type MigrationExecutionSummary struct {
@@ -506,6 +512,7 @@ type MigrationExecutionSummary struct {
 	ErrorSummary          *string    `json:"error_summary,omitempty"`
 	CommittedBatches      int64      `json:"committed_batches"`
 	CommittedRows         int64      `json:"committed_rows"`
+	LastCursorValue       *string    `json:"last_cursor_value,omitempty"`
 }
 
 // AccessSnapshot contains only membership identifiers and group grants, never credentials.

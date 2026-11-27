@@ -138,6 +138,7 @@ export interface MigrationApprovalItem {
   leader_id: string
   leader_username: string
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  action?: 'MIGRATE' | 'ROLLBACK' | 'FORWARD'
   comment?: string | null
   decided_at?: string | null
 }
@@ -170,6 +171,8 @@ export interface Migration extends MigrationSummary {
   approvals?: MigrationApprovalItem[]
   can_rollback: boolean
   can_forward: boolean
+  can_request_rollback: boolean
+  can_request_forward: boolean
 }
 
 // Execution records returned while a migration runs
@@ -190,6 +193,7 @@ export interface MigrationExecutionSummary {
   error_summary?: string | null
   committed_batches: number
   committed_rows: number
+  last_cursor_value?: string | null
 }
 
 // Queue jobs used to show running and blocked migration work

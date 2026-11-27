@@ -482,8 +482,15 @@ func (r *Runner) ExecuteBatch(
 func (r *Runner) RevertBatch(
 	ctx context.Context,
 	databaseID, execID, sqlDownTemplate, attr string,
+	batchSize int,
 	onProgress func(batches, rows int64, cursor string),
 ) (int64, int64, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	if attr == "" {
+		attr = "id"
+	}
 	db, err := r.Targets.Migrator(ctx, databaseID)
 	if err != nil {
 		return 0, 0, err
@@ -534,8 +541,9 @@ func (r *Runner) RevertBatch(
 		}
 
 		downSQL := sqlDownTemplate
-		if strings.Contains(downSQL, "{{CURSOR}}") {
+		if strings.Contains(downSQL, "{{CURSOR}}") || strings.Contains(downSQL, "{{BATCH_SIZE}}") {
 			downSQL = strings.ReplaceAll(downSQL, "{{CURSOR}}", b.cursor)
+			downSQL = strings.ReplaceAll(downSQL, "{{BATCH_SIZE}}", fmt.Sprintf("%d", batchSize))
 			downSQL = strings.ReplaceAll(downSQL, "{{ATTRIBUTE}}", attr)
 		}
 

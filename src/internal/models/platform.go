@@ -16,14 +16,16 @@ const (
 type MigrationStatus string
 
 const (
-	MigrationDraft         MigrationStatus = "DRAFT"
-	MigrationPendingReview MigrationStatus = "PENDING_REVIEW"
-	MigrationApproved      MigrationStatus = "APPROVED"
-	MigrationQueued        MigrationStatus = "QUEUED"
-	MigrationRunning       MigrationStatus = "RUNNING"
-	MigrationApplied       MigrationStatus = "APPLIED"
-	MigrationFailed        MigrationStatus = "FAILED"
-	MigrationRejected      MigrationStatus = "REJECTED"
+	MigrationDraft            MigrationStatus = "DRAFT"
+	MigrationPendingReview    MigrationStatus = "PENDING_REVIEW"
+	MigrationApproved         MigrationStatus = "APPROVED"
+	MigrationRollbackApproved MigrationStatus = "ROLLBACK_APPROVED"
+	MigrationRolledBack       MigrationStatus = "ROLLED_BACK"
+	MigrationQueued           MigrationStatus = "QUEUED"
+	MigrationRunning          MigrationStatus = "RUNNING"
+	MigrationApplied          MigrationStatus = "APPLIED"
+	MigrationFailed           MigrationStatus = "FAILED"
+	MigrationRejected         MigrationStatus = "REJECTED"
 )
 
 // User stores a platform account rather than an API response.
@@ -160,9 +162,11 @@ type MigrationApproval struct {
 	GroupID     string         `gorm:"type:uuid;not null"`
 	LeaderID    string         `gorm:"type:uuid;not null;index:migration_approvals_leader_idx"`
 	Status      ApprovalStatus `gorm:"type:varchar(20);not null;default:'PENDING'"`
-	Comment     *string        `gorm:"type:text"`
-	DecidedAt   *time.Time     `gorm:"type:timestamptz"`
-	CreatedAt   time.Time      `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
+	// Action distinguishes approval rounds: "MIGRATE", "ROLLBACK", or "FORWARD"
+	Action    string     `gorm:"type:varchar(20);not null;default:'MIGRATE'"`
+	Comment   *string    `gorm:"type:text"`
+	DecidedAt *time.Time `gorm:"type:timestamptz"`
+	CreatedAt time.Time  `gorm:"type:timestamptz;not null;default:CURRENT_TIMESTAMP"`
 
 	Migration Migration `gorm:"foreignKey:MigrationID;references:ID;constraint:migration_approvals_migration_id_fkey,OnDelete:CASCADE" json:"-"`
 	Group     Group     `gorm:"foreignKey:GroupID;references:ID;constraint:migration_approvals_group_id_fkey,OnDelete:CASCADE" json:"-"`

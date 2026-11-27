@@ -25,11 +25,17 @@ type Repository interface {
 	MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error)
 	MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error)
 	MarkRolledBack(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error)
+	RestoreApplied(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error)
 	SubmitForReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error
+	SubmitRollbackReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error
+	SubmitForwardReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error
 	GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error)
 	UpdateApprovalStatus(ctx context.Context, approvalID string, status models.ApprovalStatus, comment *string, decidedAt time.Time) error
 	CheckAndSetApproved(ctx context.Context, databaseID, migrationID string) (bool, error)
+	CheckAndSetRollbackApproved(ctx context.Context, databaseID, migrationID string) (bool, error)
 	RejectMigration(ctx context.Context, databaseID, migrationID string) error
+	RejectRollbackReview(ctx context.Context, databaseID, migrationID string) error
+	RejectForwardReview(ctx context.Context, databaseID, migrationID string) error
 	GetDatabaseGroupsWithLeaders(ctx context.Context, databaseID string) ([]models.Group, error)
 	GetLastAppliedMigration(ctx context.Context, databaseID string) (*models.Migration, error)
 	GetNextForwardCandidate(ctx context.Context, databaseID string) (*models.Migration, error)
@@ -163,7 +169,7 @@ func (r *PostgresRepository) LockDatabase(ctx context.Context, databaseID string
 // MarkRunning claims the exact draft SQL that will be executed.
 func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
-		Where("database_id = ? AND id = ? AND status IN (?, ?, ?)", databaseID, migrationID, models.MigrationDraft, models.MigrationApproved, models.MigrationQueued).
+		Where("database_id = ? AND id = ? AND status IN (?, ?, ?, ?)", databaseID, migrationID, models.MigrationDraft, models.MigrationApproved, models.MigrationRollbackApproved, models.MigrationQueued).
 		Updates(map[string]interface{}{
 			"status":      models.MigrationRunning,
 			"executed_by": executorID,
@@ -184,7 +190,7 @@ func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrat
 func (r *PostgresRepository) MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
 	var maxVersion sql.NullInt64
 	r.DB.WithContext(ctx).Model(&models.Migration{}).
-		Where("database_id = ? AND status = ?", databaseID, models.MigrationApplied).
+		Where("database_id = ? AND version IS NOT NULL", databaseID).
 		Select("MAX(version)").Scan(&maxVersion)
 
 	nextVersion := int64(1)
@@ -234,12 +240,12 @@ func (r *PostgresRepository) MarkFailed(ctx context.Context, databaseID, migrati
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-// MarkRolledBack updates migration state after a successful rollback.
+// MarkRolledBack updates migration state after a successful rollback or batch compensation.
 func (r *PostgresRepository) MarkRolledBack(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
 		Where("database_id = ? AND id = ?", databaseID, migrationID).
 		Updates(map[string]interface{}{
-			"status":     models.MigrationApproved,
+			"status":     models.MigrationRolledBack,
 			"version":    nil,
 			"updated_at": now,
 		})
@@ -254,10 +260,29 @@ func (r *PostgresRepository) MarkRolledBack(ctx context.Context, databaseID, mig
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+// RestoreApplied restores migration status back to APPLIED when a rollback attempt fails cleanly.
+func (r *PostgresRepository) RestoreApplied(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error) {
+	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ?", databaseID, migrationID).
+		Updates(map[string]interface{}{
+			"status":     models.MigrationApplied,
+			"updated_at": now,
+		})
+
+	if result.Error != nil {
+		return models.Migration{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return models.Migration{}, apperror.ErrConflict
+	}
+
+	return r.GetMigration(ctx, databaseID, migrationID)
+}
+
+func (r *PostgresRepository) submitReviewFromStatuses(ctx context.Context, databaseID, migrationID string, allowedStatuses []models.MigrationStatus, approvals []models.MigrationApproval) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&models.Migration{}).
-			Where("database_id = ? AND id = ? AND status IN (?, ?)", databaseID, migrationID, models.MigrationDraft, models.MigrationRejected).
+			Where("database_id = ? AND id = ? AND status IN ?", databaseID, migrationID, allowedStatuses).
 			Update("status", models.MigrationPendingReview)
 		if res.Error != nil {
 			return res.Error
@@ -266,7 +291,9 @@ func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, mi
 			return apperror.ErrConflict
 		}
 
-		_ = tx.Where("migration_id = ?", migrationID).Delete(&models.MigrationApproval{}).Error
+		if err := tx.Where("migration_id = ?", migrationID).Delete(&models.MigrationApproval{}).Error; err != nil {
+			return err
+		}
 		if len(approvals) > 0 {
 			if err := tx.Create(&approvals).Error; err != nil {
 				return err
@@ -274,6 +301,18 @@ func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, mi
 		}
 		return nil
 	})
+}
+
+func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+	return r.submitReviewFromStatuses(ctx, databaseID, migrationID, []models.MigrationStatus{models.MigrationDraft, models.MigrationRejected}, approvals)
+}
+
+func (r *PostgresRepository) SubmitRollbackReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+	return r.submitReviewFromStatuses(ctx, databaseID, migrationID, []models.MigrationStatus{models.MigrationApplied}, approvals)
+}
+
+func (r *PostgresRepository) SubmitForwardReview(ctx context.Context, databaseID, migrationID string, approvals []models.MigrationApproval) error {
+	return r.submitReviewFromStatuses(ctx, databaseID, migrationID, []models.MigrationStatus{models.MigrationRolledBack}, approvals)
 }
 
 func (r *PostgresRepository) GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error) {
@@ -307,7 +346,7 @@ func (r *PostgresRepository) UpdateApprovalStatus(ctx context.Context, approvalI
 		Updates(updates).Error
 }
 
-func (r *PostgresRepository) CheckAndSetApproved(ctx context.Context, databaseID, migrationID string) (bool, error) {
+func (r *PostgresRepository) checkAndSetReviewStatus(ctx context.Context, databaseID, migrationID string, targetStatus models.MigrationStatus) (bool, error) {
 	var totalCount int64
 	if err := r.DB.WithContext(ctx).Model(&models.MigrationApproval{}).
 		Where("migration_id = ?", migrationID).
@@ -328,16 +367,36 @@ func (r *PostgresRepository) CheckAndSetApproved(ctx context.Context, databaseID
 	if pendingCount == 0 {
 		err := r.DB.WithContext(ctx).Model(&models.Migration{}).
 			Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationPendingReview).
-			Update("status", models.MigrationApproved).Error
+			Update("status", targetStatus).Error
 		return true, err
 	}
 	return false, nil
+}
+
+func (r *PostgresRepository) CheckAndSetApproved(ctx context.Context, databaseID, migrationID string) (bool, error) {
+	return r.checkAndSetReviewStatus(ctx, databaseID, migrationID, models.MigrationApproved)
+}
+
+func (r *PostgresRepository) CheckAndSetRollbackApproved(ctx context.Context, databaseID, migrationID string) (bool, error) {
+	return r.checkAndSetReviewStatus(ctx, databaseID, migrationID, models.MigrationRollbackApproved)
 }
 
 func (r *PostgresRepository) RejectMigration(ctx context.Context, databaseID, migrationID string) error {
 	return r.DB.WithContext(ctx).Model(&models.Migration{}).
 		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationPendingReview).
 		Update("status", models.MigrationRejected).Error
+}
+
+func (r *PostgresRepository) RejectRollbackReview(ctx context.Context, databaseID, migrationID string) error {
+	return r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationPendingReview).
+		Update("status", models.MigrationApplied).Error
+}
+
+func (r *PostgresRepository) RejectForwardReview(ctx context.Context, databaseID, migrationID string) error {
+	return r.DB.WithContext(ctx).Model(&models.Migration{}).
+		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationPendingReview).
+		Update("status", models.MigrationRolledBack).Error
 }
 
 func (r *PostgresRepository) GetDatabaseGroupsWithLeaders(ctx context.Context, databaseID string) ([]models.Group, error) {
@@ -357,7 +416,7 @@ func (r *PostgresRepository) GetDatabaseGroupsWithLeaders(ctx context.Context, d
 func (r *PostgresRepository) GetLastAppliedMigration(ctx context.Context, databaseID string) (*models.Migration, error) {
 	var m models.Migration
 	err := r.DB.WithContext(ctx).
-		Where("database_id = ? AND status = ?", databaseID, models.MigrationApplied).
+		Where("database_id = ? AND version IS NOT NULL", databaseID).
 		Order("version DESC").
 		First(&m).Error
 	if err != nil {
@@ -372,7 +431,7 @@ func (r *PostgresRepository) GetLastAppliedMigration(ctx context.Context, databa
 func (r *PostgresRepository) GetNextForwardCandidate(ctx context.Context, databaseID string) (*models.Migration, error) {
 	var m models.Migration
 	err := r.DB.WithContext(ctx).
-		Where("database_id = ? AND status = ?", databaseID, models.MigrationApproved).
+		Where("database_id = ? AND version IS NULL AND status IN (?, ?, ?)", databaseID, models.MigrationApproved, models.MigrationRolledBack, models.MigrationPendingReview).
 		Order("created_at ASC").
 		First(&m).Error
 	if err != nil {

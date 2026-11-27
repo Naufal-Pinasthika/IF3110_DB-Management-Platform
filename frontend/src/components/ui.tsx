@@ -51,12 +51,19 @@ export function Badge({ value }: { value: string }) {
     ENABLED: 'Enabled',
     PENDING_REVIEW: 'Pending review',
     APPROVED: 'Approved',
+    ROLLBACK_APPROVED: 'Rollback approved',
+    ROLLED_BACK: 'Rolled back',
     REJECTED: 'Changes requested',
     PENDING: 'Queued',
     SUCCEEDED: 'Success',
     PARTIAL: 'Partial',
     PARTIALLY_REVERTED: 'Partially reverted',
     UNKNOWN: 'Needs inspection',
+    MIGRATE: 'Initial migration',
+    FORWARD: 'Forward',
+    ROLLBACK: 'Rollback',
+    RETRY: 'Retry',
+    REVERT_BATCH: 'Batch compensation',
   }
   const colors: Record<string, string> = {
     APPLIED: 'green',
@@ -69,14 +76,20 @@ export function Badge({ value }: { value: string }) {
     VIEW_ONLY: 'purple',
     PENDING_REVIEW: 'amber',
     APPROVED: 'green',
+    ROLLBACK_APPROVED: 'amber',
+    ROLLED_BACK: 'purple',
     REJECTED: 'red',
     PENDING: 'blue',
     SUCCEEDED: 'green',
     PARTIAL: 'amber',
     PARTIALLY_REVERTED: 'amber',
     UNKNOWN: 'red',
+    MIGRATE: 'blue',
+    FORWARD: 'blue',
+    ROLLBACK: 'purple',
+    RETRY: 'amber',
+    REVERT_BATCH: 'red',
   }
-
   return <span className={`badge ${colors[value] || ''}`}>{labels[value] || value}</span>
 }
 

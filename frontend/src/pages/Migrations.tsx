@@ -8,6 +8,7 @@ import { useDatabase } from '../database-hooks'
 import { ActionButton, Badge, EmptyRow, ErrorState, Loading, Modal, PageHeading } from '../components/ui'
 import { useFormAction, useUnsavedChanges } from '../form-hooks'
 import { useSession } from '../session'
+import { ExecutionProgress } from '../components/migrations/MigrationExecutions'
 import Plans from '../components/Plans'
 
 // List migration definitions and execution records for the selected database
@@ -16,6 +17,10 @@ export function Migrations() {
   const [search, setSearch] = useSearchParams()
   const filter = search.get('status') || ''
   const [hideRollback, setHideRollback] = useState(false)
+  const [selectedExecId, setSelectedExecId] = useState<string | null>(null)
+  const recoveryAction = useFormAction()
+  const { confirm, notify } = useUI()
+  const canEdit = database.effective_access === 'VIEW_EDIT'
 
   // Refresh definition status only while queued work is active
   const migrationsQuery = useQuery({
@@ -51,9 +56,52 @@ export function Migrations() {
     void historyQuery.refetch()
   }
 
+  const handleResumeExecution = (executionId: string) => {
+    void recoveryAction.run(async () => {
+      if (!await confirm({
+        title: 'Resume batch execution?',
+        description: 'Continue processing remaining uncommitted batches from the last saved checkpoint?',
+        label: 'Resume from checkpoint',
+      })) return
+      await api(`${databaseAPI(database.id)}/executions/${encode(executionId)}/resume`, { method: 'POST' })
+      notify('Resume job queued from checkpoint.')
+      refreshAll()
+    })
+  }
+
+  const handleCancelBatch = (executionId: string) => {
+    void recoveryAction.run(async () => {
+      if (!await confirm({
+        title: 'Cancel batch and compensate?',
+        description: 'Run approved SQL down batch-by-batch in reverse order to compensate committed batches?',
+        label: 'Request batch compensation',
+      })) return
+      await api(`${databaseAPI(database.id)}/executions/${encode(executionId)}/cancel-batch`, { method: 'POST' })
+      notify('Batch compensation job queued.')
+      refreshAll()
+    })
+  }
+
+  const selectedExecSummary = (historyQuery.data || []).find(item => item.id === selectedExecId)
+  const selectedExecutionProp = selectedExecSummary ? {
+    id: selectedExecSummary.id,
+    migration: selectedExecSummary.migration_name || selectedExecSummary.migration_id.slice(0, 8),
+    revision: selectedExecSummary.version ? `v${selectedExecSummary.version}` : '--',
+    action: selectedExecSummary.action_type,
+    actor: selectedExecSummary.executed_by_username || selectedExecSummary.executed_by,
+    status: selectedExecSummary.status as 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'PARTIAL' | 'PARTIALLY_REVERTED' | 'UNKNOWN',
+    startedAt: selectedExecSummary.started_at,
+    sql: selectedExecSummary.executed_sql,
+    rolledBackExecutionId: selectedExecSummary.rolled_back_execution_id || undefined,
+    committedBatches: selectedExecSummary.committed_batches,
+    committedRows: selectedExecSummary.committed_rows,
+    cursor: selectedExecSummary.last_cursor_value || undefined,
+    attempt: 1,
+  } : undefined
+
   return <>
     <PageHeading title="Migrations">
-      {database.effective_access === 'VIEW_EDIT' && (
+      {canEdit && (
         <Link className="button primary" to={`${databaseURL(database.id)}/migrations/new`}>
           New migration
         </Link>
@@ -61,7 +109,7 @@ export function Migrations() {
       <ActionButton onAction={refreshAll}>Refresh</ActionButton>
     </PageHeading>
 
-    <ErrorState error={migrationsQuery.error || historyQuery.error} retry={refreshAll} />
+    <ErrorState error={migrationsQuery.error || historyQuery.error || recoveryAction.error} retry={refreshAll} />
 
     <section className="panel">
       <div className="panel-toolbar">
@@ -81,6 +129,8 @@ export function Migrations() {
             <option value="DRAFT">Draft</option>
             <option value="PENDING_REVIEW">Pending review</option>
             <option value="APPROVED">Approved</option>
+            <option value="ROLLBACK_APPROVED">Rollback approved</option>
+            <option value="ROLLED_BACK">Rolled back</option>
             <option value="QUEUED">Queued</option>
             <option value="RUNNING">Running</option>
             <option value="APPLIED">Applied</option>
@@ -130,6 +180,7 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Execution history</h2>
+          <p>Immutable audit trail of all execution attempts (forward, rollback, retry, compensation, and failures).</p>
         </div>
         <div
           className="toolbar-actions"
@@ -163,32 +214,70 @@ export function Migrations() {
               <th>Action</th>
               <th>Status</th>
               <th>Batches / Rows</th>
+              <th>Cursor</th>
               <th>Executed by</th>
               <th>Started at</th>
+              <th>Recovery</th>
             </tr>
           </thead>
           <tbody>
-            {(historyQuery.data || []).map(exec => (
-              <tr key={exec.id}>
-                <td><code>{exec.id.slice(0, 8)}</code></td>
-                <td>
-                  <Link to={`${databaseURL(database.id)}/migrations/${encode(exec.migration_id)}`}>
-                    {exec.migration_name || exec.migration_id.slice(0, 8)}
-                  </Link>
-                </td>
-                <td><Badge value={exec.action_type} /></td>
-                <td><Badge value={exec.status} /></td>
-                <td>
-                  {exec.committed_batches > 0 || exec.committed_rows > 0
-                    ? `${exec.committed_batches} batches (${exec.committed_rows} rows)`
-                    : '--'}
-                </td>
-                <td>{exec.executed_by_username || exec.executed_by}</td>
-                <td>{formatDate(exec.started_at)}</td>
-              </tr>
-            ))}
+            {(historyQuery.data || []).map(exec => {
+              const canResumeRow = canEdit && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
+              const canCancelRow = canEdit && exec.status === 'PARTIAL' && (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY')
+              return (
+                <tr key={exec.id}>
+                  <td><code>{exec.id.slice(0, 8)}</code></td>
+                  <td>
+                    <Link to={`${databaseURL(database.id)}/migrations/${encode(exec.migration_id)}`}>
+                      {exec.migration_name || exec.migration_id.slice(0, 8)}
+                    </Link>
+                  </td>
+                  <td><Badge value={exec.action_type} /></td>
+                  <td><Badge value={exec.status} /></td>
+                  <td>
+                    {exec.committed_batches > 0 || exec.committed_rows > 0
+                      ? `${exec.committed_batches} batches (${exec.committed_rows} rows)`
+                      : '--'}
+                  </td>
+                  <td><code>{exec.last_cursor_value || '--'}</code></td>
+                  <td>{exec.executed_by_username || exec.executed_by}</td>
+                  <td>{formatDate(exec.started_at)}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => setSelectedExecId(selectedExecId === exec.id ? null : exec.id)}
+                      >
+                        {selectedExecId === exec.id ? 'Hide' : 'Details'}
+                      </button>
+                      {canResumeRow && (
+                        <button
+                          type="button"
+                          className="button small primary"
+                          disabled={recoveryAction.busy}
+                          onClick={() => handleResumeExecution(exec.id)}
+                        >
+                          Resume
+                        </button>
+                      )}
+                      {canCancelRow && (
+                        <button
+                          type="button"
+                          className="button small danger"
+                          disabled={recoveryAction.busy}
+                          onClick={() => handleCancelBatch(exec.id)}
+                        >
+                          Compensate
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
             {!historyQuery.data?.length && (
-              <EmptyRow columns={7}>
+              <EmptyRow columns={9}>
                 {historyQuery.isPending
                   ? 'Loading execution records…'
                   : 'No execution history recorded.'}
@@ -198,6 +287,16 @@ export function Migrations() {
         </table>
       </div>
     </section>
+
+    {selectedExecutionProp && (
+      <ExecutionProgress
+        execution={selectedExecutionProp}
+        canEdit={canEdit}
+        busy={recoveryAction.busy}
+        onResume={handleResumeExecution}
+        onCancelBatch={handleCancelBatch}
+      />
+    )}
   </>
 }
 
@@ -280,8 +379,23 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
     app => app.leader_id === currentUser?.id && app.status === 'PENDING',
   )
   const canDecide = Boolean(pendingApproval)
+  const reviewAction = migration?.approvals?.[0]?.action || 'MIGRATE'
+  const reviewLabel =
+    reviewAction === 'ROLLBACK' ? 'rollback' : reviewAction === 'FORWARD' ? 'forward migration' : 'migration'
   const [decisionDialog, setDecisionDialog] = useState<'approve' | 'reject' | null>(null)
   const [reviewComment, setReviewComment] = useState('')
+
+  const migrationHistoryQuery = useQuery({
+    queryKey: ['migration-history', database.id, 'detail', migration?.id],
+    queryFn: ({ signal }) => api<MigrationExecutionSummary[]>(`${databaseAPI(database.id)}/migration-history`, { signal }),
+    enabled: Boolean(migration?.id),
+    refetchInterval: query =>
+      query.state.data?.some(item => item.migration_id === migration?.id && item.status === 'RUNNING') ? 3000 : false,
+  })
+  const migrationExecutions = (migrationHistoryQuery.data || []).filter(item => item.migration_id === migration?.id)
+  const partialExecutions = migrationExecutions.filter(
+    item => item.status === 'PARTIAL' || item.status === 'PARTIALLY_REVERTED'
+  )
 
   const canEdit = database.effective_access === 'VIEW_EDIT'
   const draft = creating || migration.status === 'DRAFT' || migration.status === 'REJECTED'
@@ -357,8 +471,8 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
 
       {migration?.status === 'PENDING_REVIEW' && canDecide && (
         <div className="notice" role="status" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <strong>Action Required: Review Pending</strong>
-          <p>Your approval is required as group leader before this migration can execute.</p>
+          <strong>Action Required: {reviewAction === 'ROLLBACK' ? 'Rollback Review Pending' : reviewAction === 'FORWARD' ? 'Forward Review Pending' : 'Review Pending'}</strong>
+          <p>Your approval is required as group leader before this {reviewLabel} can execute.</p>
         </div>
       )}
 
@@ -366,6 +480,20 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         <div className="notice" role="status" style={{ borderLeft: '4px solid #10b981' }}>
           <strong>Approved & Ready for Execution</strong>
           <p>All required group leaders have approved this migration. It can now be enqueued for worker execution.</p>
+        </div>
+      )}
+
+      {migration?.status === 'ROLLBACK_APPROVED' && (
+        <div className="notice" role="status" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <strong>Rollback Approved & Ready for Execution</strong>
+          <p>All required group leaders have approved rolling back this migration. You can now enqueue the rollback job.</p>
+        </div>
+      )}
+
+      {migration?.status === 'ROLLED_BACK' && (
+        <div className="notice" role="status" style={{ borderLeft: '4px solid #6366f1' }}>
+          <strong>Migration Rolled Back</strong>
+          <p>This migration has been rolled back. Re-applying it forward requires submitting a forward review for group leader approval.</p>
         </div>
       )}
 
@@ -790,6 +918,26 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               </button>
             )}
 
+            {migration && migration.can_request_rollback && canEdit && (
+              <button
+                className="button secondary"
+                type="button"
+                disabled={action.busy}
+                onClick={() => run('submit-rollback-review', async () => {
+                  if (!await confirm({
+                    title: 'Request rollback review?',
+                    description: `Submit rollback of ${migration.name} for group leader approval? All required leaders must approve before rollback executes.`,
+                    label: 'Request rollback review',
+                  })) return
+                  await api(`${endpoint}/submit-rollback-review`, { method: 'POST' })
+                  notify('Rollback review submitted. Awaiting group leader approvals.')
+                  await changed()
+                })}
+              >
+                {operation === 'submit-rollback-review' ? 'Submitting…' : 'Request rollback review'}
+              </button>
+            )}
+
             {migration && migration.can_rollback && canEdit && (
               <button
                 className="button danger"
@@ -799,9 +947,9 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   run('rollback', async () => {
                     // Roll back only after confirming the approved down SQL
                     if (!(await confirm({
-                      title: 'Rollback migration?',
-                      description: `Roll back ${migration.name} using its approved SQL down?`,
-                      label: 'Rollback',
+                      title: 'Execute approved rollback?',
+                      description: `Roll back ${migration.name} using its approved SQL down? Execution is asynchronous.`,
+                      label: 'Execute rollback',
                     }))) {
                       return
                     }
@@ -811,7 +959,27 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                   })
                 }
               >
-                {operation === 'rollback' ? 'Rolling back…' : 'Rollback migration'}
+                {operation === 'rollback' ? 'Rolling back…' : 'Execute rollback'}
+              </button>
+            )}
+
+            {migration && migration.can_request_forward && canEdit && (
+              <button
+                className="button secondary"
+                type="button"
+                disabled={action.busy}
+                onClick={() => run('submit-forward-review', async () => {
+                  if (!await confirm({
+                    title: 'Request forward review?',
+                    description: `Submit ${migration.name} for group leader approval before re-applying forward?`,
+                    label: 'Request forward review',
+                  })) return
+                  await api(`${endpoint}/submit-forward-review`, { method: 'POST' })
+                  notify('Forward review submitted. Awaiting group leader approvals.')
+                  await changed()
+                })}
+              >
+                {operation === 'submit-forward-review' ? 'Submitting…' : 'Request forward review'}
               </button>
             )}
 
@@ -844,6 +1012,99 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         <ErrorState error={action.error} />
       </form>
 
+      {migration && partialExecutions.length > 0 && (
+        <section className="panel" style={{ marginTop: '1.5rem' }}>
+          <div className="panel-toolbar">
+            <div>
+              <h2>Batch Checkpoint Recovery</h2>
+              <p>Resume from the last committed checkpoint or run reverse batch compensation.</p>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Execution</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>Committed Batches / Rows</th>
+                  <th>Last Cursor</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partialExecutions.map(exec => {
+                  const canResumeExec = canEdit && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
+                  const canCancelExec =
+                    canEdit &&
+                    exec.status === 'PARTIAL' &&
+                    (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY') &&
+                    !migration.is_irreversible &&
+                    Boolean(migration.sql_down)
+                  return (
+                    <tr key={exec.id}>
+                      <td><code>{exec.id.slice(0, 8)}</code></td>
+                      <td><Badge value={exec.action_type} /></td>
+                      <td><Badge value={exec.status} /></td>
+                      <td>{exec.committed_batches} batches ({exec.committed_rows} rows)</td>
+                      <td><code>{exec.last_cursor_value || '--'}</code></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          {canResumeExec && (
+                            <button
+                              type="button"
+                              className="button small primary"
+                              disabled={action.busy}
+                              onClick={() => run('resume', async () => {
+                                if (!await confirm({
+                                  title: 'Resume batch execution?',
+                                  description: 'Continue processing remaining batches from the last committed checkpoint?',
+                                  label: 'Resume from checkpoint',
+                                })) return
+                                await api(`${databaseAPI(database.id)}/executions/${encode(exec.id)}/resume`, { method: 'POST' })
+                                notify('Resume job queued from checkpoint.')
+                                await changed()
+                              })}
+                            >
+                              {operation === 'resume' ? 'Resuming…' : 'Resume from checkpoint'}
+                            </button>
+                          )}
+                          {canCancelExec && (
+                            <button
+                              type="button"
+                              className="button small danger"
+                              disabled={action.busy}
+                              onClick={() => run('cancel-batch', async () => {
+                                if (!await confirm({
+                                  title: 'Cancel batch and compensate?',
+                                  description: 'Execute approved SQL down batch-by-batch in reverse order to compensate committed rows?',
+                                  label: 'Request batch compensation',
+                                })) return
+                                await api(`${databaseAPI(database.id)}/executions/${encode(exec.id)}/cancel-batch`, { method: 'POST' })
+                                notify('Batch compensation job queued.')
+                                await changed()
+                              })}
+                            >
+                              {operation === 'cancel-batch' ? 'Cancelling…' : 'Cancel batch (compensate)'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {partialExecutions.some(e => e.error_summary) && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <strong>Last checkpoint error</strong>
+              <pre className="migration-error-code"><code>{partialExecutions.find(e => e.error_summary)?.error_summary}</code></pre>
+            </div>
+          )}
+        </section>
+      )}
+
       {migration?.approvals && migration.approvals.length > 0 && (
         <section className="panel" style={{ marginTop: '1.5rem' }}>
           <div className="panel-toolbar">
@@ -855,6 +1116,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
             <table>
               <thead>
                 <tr>
+                  <th>Action</th>
                   <th>Group</th>
                   <th>Assigned Leader</th>
                   <th>Status</th>
@@ -865,6 +1127,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               <tbody>
                 {migration.approvals.map(app => (
                   <tr key={app.id}>
+                    <td><Badge value={app.action || 'MIGRATE'} /></td>
                     <td><strong>{app.group_name}</strong></td>
                     <td>{app.leader_username}</td>
                     <td><Badge value={app.status} /></td>
@@ -890,7 +1153,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
 
       {decisionDialog && (
         <Modal
-          title={decisionDialog === 'approve' ? 'Approve migration' : 'Reject migration'}
+          title={decisionDialog === 'approve' ? `Approve ${reviewLabel}` : `Reject ${reviewLabel}`}
           onClose={() => setDecisionDialog(null)}
           busy={action.busy}
         >
@@ -910,7 +1173,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                     method: 'POST',
                     data: payload,
                   })
-                  notify(decisionDialog === 'approve' ? 'Approval recorded.' : 'Migration rejected.')
+                  notify(decisionDialog === 'approve' ? 'Approval recorded.' : 'Review rejected.')
                   setDecisionDialog(null)
                   await changed()
                 })
@@ -919,7 +1182,11 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               <fieldset className="form-fields" disabled={action.busy}>
                 <p className="muted">
                   {decisionDialog === 'approve'
-                    ? `Confirm that your group approves "${migration?.name}" for execution.`
+                    ? `Confirm that your group approves this ${reviewLabel} for "${migration?.name}".`
+                    : reviewAction === 'ROLLBACK'
+                    ? `Reject rollback for "${migration?.name}". The migration will remain applied.`
+                    : reviewAction === 'FORWARD'
+                    ? `Reject forward re-execution for "${migration?.name}". It will remain rolled back.`
                     : `Reject "${migration?.name}". It will be returned to draft state for revisions.`}
                 </p>
                 <label htmlFor="review-comment">
@@ -953,8 +1220,8 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
                       ? 'Approving…'
                       : 'Rejecting…'
                     : decisionDialog === 'approve'
-                    ? 'Approve migration'
-                    : 'Reject migration'}
+                    ? `Approve ${reviewLabel}`
+                    : `Reject ${reviewLabel}`}
                 </button>
               </div>
             </form>

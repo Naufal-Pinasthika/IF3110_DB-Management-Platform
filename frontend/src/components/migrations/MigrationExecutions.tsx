@@ -4,7 +4,33 @@ import { Badge, EmptyRow, Modal } from '../ui'
 import type { Execution } from './types'
 
 // Show one selected job with its last committed checkpoint
-export function ExecutionProgress({ execution }: { execution?: Execution }) {
+export function ExecutionProgress({
+  execution,
+  canEdit = false,
+  busy = false,
+  onResume,
+  onCancelBatch,
+}: {
+  execution?: Execution
+  canEdit?: boolean
+  busy?: boolean
+  onResume?: (executionId: string) => unknown
+  onCancelBatch?: (executionId: string) => unknown
+}) {
+  const canResume = Boolean(
+    canEdit &&
+    onResume &&
+    execution &&
+    (execution.status === 'PARTIAL' || execution.status === 'PARTIALLY_REVERTED')
+  )
+  const canCancel = Boolean(
+    canEdit &&
+    onCancelBatch &&
+    execution &&
+    execution.status === 'PARTIAL' &&
+    (execution.action === 'UP' || execution.action === 'FORWARD' || execution.action === 'RETRY')
+  )
+
   return (
     <section className="panel section-gap">
       <div className="panel-toolbar">
@@ -68,12 +94,26 @@ export function ExecutionProgress({ execution }: { execution?: Execution }) {
         <p className="notice">Compensation is incomplete. Continue from the last reverted batch.</p>
       )}
       <div className="toolbar-actions">
-        <button className="button" type="button" disabled>Request resume</button>
-        <button className="button danger" type="button" disabled>
-          Request batch compensation
+        <button
+          className="button"
+          type="button"
+          disabled={!canResume || busy}
+          onClick={() => execution && onResume?.(execution.id)}
+        >
+          {busy ? 'Working…' : 'Request resume'}
+        </button>
+        <button
+          className="button danger"
+          type="button"
+          disabled={!canCancel || busy}
+          onClick={() => execution && onCancelBatch?.(execution.id)}
+        >
+          {busy ? 'Working…' : 'Request batch compensation'}
         </button>
       </div>
-      <p className="helper-text">Recovery actions become available for eligible jobs after review.</p>
+      {!onResume && !onCancelBatch && (
+        <p className="helper-text">Recovery actions become available for eligible jobs after review.</p>
+      )}
     </section>
   )
 }
