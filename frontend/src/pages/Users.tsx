@@ -25,7 +25,6 @@ export default function Users() {
       <section className="panel">
         <div className="panel-toolbar">
           <h2>Platform accounts</h2>
-          <span className="muted">Database access is assigned through groups.</span>
           <ActionButton onAction={() => users.refetch()}>Refresh</ActionButton>
         </div>
         <div className="table-scroll">

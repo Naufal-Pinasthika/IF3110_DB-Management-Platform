@@ -117,11 +117,9 @@ function ConnectionForm({
     ...(connection ? { is_enabled: values.is_enabled } : {}),
   })
 
-  const descriptions: Record<string, string> = {
-    disable: 'Traffic is not encrypted. Use only on a trusted local network, such as an internal Docker network.',
+  const descriptions: Partial<Record<string, string>> = {
     require: "Traffic is encrypted; the server's identity is not verified.",
     'verify-ca': 'Traffic is encrypted and the server certificate authority is verified.',
-    'verify-full': 'Traffic is encrypted; the certificate authority and server hostname are verified. The server must trust the database certificate.',
   }
 
   // Show one password field with its own visibility and save state
@@ -359,10 +357,6 @@ function ConnectionForm({
             </section>
             <section className="connection-section">
               <h3>Credentials</h3>
-              <p className="helper-text">
-                Platform permissions control allowed actions. Database privileges control what those
-                credentials can do; use an account with only the permissions it needs.
-              </p>
               <h4>Reader</h4>
               <div className="form-columns">
                 <div>
@@ -416,16 +410,20 @@ function ConnectionForm({
                 id="connection-ssl"
                 value={values.ssl_mode}
                 onChange={event => update('ssl_mode', event.target.value)}
-                aria-describedby="ssl-description"
+                aria-describedby={
+                  descriptions[values.ssl_mode] ? 'ssl-description' : undefined
+                }
               >
                 <option value="verify-full">Verify full</option>
                 {values.engine !== 'mysql' && <option value="verify-ca">Verify CA</option>}
                 <option value="require">Require</option>
-                <option value="disable">Disable — trusted local networks only</option>
+                <option value="disable">Disable</option>
               </select>
-              <p id="ssl-description" className="helper-text">
-                {descriptions[values.ssl_mode]}
-              </p>
+              {descriptions[values.ssl_mode] && (
+                <p id="ssl-description" className="helper-text">
+                  {descriptions[values.ssl_mode]}
+                </p>
+              )}
               {connection && (
                 <>
                   <label className="checkbox-label">

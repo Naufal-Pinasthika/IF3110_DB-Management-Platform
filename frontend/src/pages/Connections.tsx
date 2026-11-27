@@ -67,7 +67,6 @@ export default function Connections() {
         <div className="panel-toolbar">
           <div>
             <h2>Registered connections</h2>
-            <p className="muted">Reader and migrator credentials are stored separately.</p>
           </div>
           <ActionButton onAction={() => connections.refetch()}>Refresh</ActionButton>
         </div>

@@ -28,7 +28,7 @@ function QueryPage() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [plan, setPlan] = useState<ExplainResult | null>(null)
   const [planError, setPlanError] = useState('')
-  const [summary, setSummary] = useState('No query run')
+  const [summary, setSummary] = useState('')
   const action = useFormAction()
   const controller = useRef<AbortController | null>(null)
   const results = useRef<HTMLDivElement>(null)
@@ -98,7 +98,6 @@ function QueryPage() {
       >
         <div className="section-toolbar">
           <h2>Query</h2>
-          <span className="muted">SELECT only</span>
         </div>
         <label className="sr-only" htmlFor="sql">SQL query</label>
         <textarea
@@ -149,13 +148,11 @@ function QueryPage() {
       <section className="query-results-surface" aria-label="Execution plan">
         <div className="section-toolbar">
           <h2>Execution plan</h2>
-          <span className="muted" role="status">
-            {plan
-              ? 'EXPLAIN ANALYZE - rolled back - actual timings and rows'
-              : action.busy
-                ? 'Analyzing…'
-                : 'Plan appears after a query runs.'}
-          </span>
+          {(plan || action.busy) && (
+            <span className="muted" role="status">
+              {plan ? 'EXPLAIN ANALYZE - rolled back - actual timings and rows' : 'Analyzing…'}
+            </span>
+          )}
         </div>
         {plan && <Plans result={plan} />}
         {planError && <p className="inline-state">{planError}</p>}

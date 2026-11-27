@@ -67,7 +67,6 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Migration definitions</h2>
-          <p>Drafts, approved migrations, and active target schema changes.</p>
         </div>
         <label className="toolbar-actions" htmlFor="migration-filter">
           Status
@@ -119,7 +118,7 @@ export function Migrations() {
               <EmptyRow columns={6}>
                 {migrationsQuery.isPending
                   ? 'Loading migration history…'
-                  : 'No migrations found. Users with edit access can create a draft.'}
+                  : 'No migrations found'}
               </EmptyRow>
             )}
           </tbody>
@@ -131,9 +130,6 @@ export function Migrations() {
       <div className="panel-toolbar">
         <div>
           <h2>Execution history</h2>
-          <p>
-            Immutable audit trail of all execution attempts (forward, rollback, and failures).
-          </p>
         </div>
         <div
           className="toolbar-actions"
@@ -294,7 +290,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
   const policy =
     database.engine === 'mysql'
       ? 'MySQL: one schema statement per migration (DDL auto-commits), or transactional INSERT/UPDATE/DELETE on InnoDB tables.'
-      : 'All statements execute together in a transaction, or step-by-step for batch migrations.'
+      : ''
 
   // Track the active action and always clear its label after it settles
   const run = (kind: string, work: () => Promise<unknown>) => {
@@ -517,7 +513,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
         <div className="panel-toolbar">
           <div>
             <h2>{creating ? 'Migration definition' : 'SQL changes'}</h2>
-            <p>{draft ? 'Configure migration parameters and statements.' : 'Executed migrations are immutable.'}</p>
+            {draft && <p>Configure migration parameters and statements.</p>}
           </div>
           <div className="toolbar-actions">
             {migration && canEdit && !draft && (
@@ -563,7 +559,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           }}
         >
           <div>
-            <label htmlFor="migration-type">Mode Eksekusi</label>
+            <label htmlFor="migration-type">Execution mode</label>
             <select
               id="migration-type"
               disabled={!editable || action.busy}
@@ -678,9 +674,11 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
 
         <div className="editor-footer">
           <span className="execution-target">Target: <code>{database.database_name}</code></span>
-          <span className="muted" role="status">
-            {operation === 'execute' ? `Queuing execution…` : note || policy}
-          </span>
+          {(operation === 'execute' || note || policy) && (
+            <span className="muted" role="status">
+              {operation === 'execute' ? 'Queuing execution…' : note || policy}
+            </span>
+          )}
           <div className="toolbar-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             {editable && (
               <button className="button primary" type="submit" disabled={action.busy}>
@@ -851,7 +849,6 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
           <div className="panel-toolbar">
             <div>
               <h2>Group Approvals</h2>
-              <p>Each team with access to this database must have its leader approve before execution.</p>
             </div>
           </div>
           <div className="table-scroll">
