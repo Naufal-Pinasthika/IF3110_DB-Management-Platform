@@ -113,8 +113,8 @@ function submit(id, work) {
 }
 
 function badge(value) {
-  const labels = { VIEW_ONLY: "Read only", VIEW_EDIT: "Read + migrations", DRAFT: "Draft", RUNNING: "Running", APPLIED: "Applied", FAILED: "Failed", ACTIVE: "Active", DISABLED: "Disabled" };
-  const colors = { APPLIED: "green", ACTIVE: "green", FAILED: "red", DISABLED: "red", RUNNING: "amber", VIEW_EDIT: "blue", VIEW_ONLY: "purple" };
+  const labels = { VIEW_ONLY: "Read only", VIEW_EDIT: "Read + migrations", DRAFT: "Draft", RUNNING: "Running", APPLIED: "Applied", SUCCEEDED: "Succeeded", FAILED: "Failed", PARTIAL: "Partial", PARTIALLY_REVERTED: "Partially reverted", UNKNOWN: "Unknown", ACTIVE: "Active", DISABLED: "Disabled" };
+  const colors = { APPLIED: "green", SUCCEEDED: "green", ACTIVE: "green", FAILED: "red", PARTIAL: "amber", PARTIALLY_REVERTED: "amber", UNKNOWN: "amber", DISABLED: "red", RUNNING: "amber", VIEW_EDIT: "blue", VIEW_ONLY: "purple" };
   return node("span", labels[value] || value, "badge " + (colors[value] || ""));
 }
 
@@ -655,12 +655,30 @@ function renderPlans(targetId, result) {
 
 async function migrationsPage() {
   const filter = $("migration-filter").value;
-  const migrations = await api(databaseAPI + "/migrations" + (filter ? "?status=" + encode(filter) : ""));
+  const [migrations, executions] = await Promise.all([
+    api(databaseAPI + "/migrations" + (filter ? "?status=" + encode(filter) : "")),
+    api(databaseAPI + "/migration-history"),
+  ]);
   rows("migration-list", migrations, migration => [
     link(migration.name, databasePath + "/migrations/" + encode(migration.id)),
     migration.version === null ? "--" : migration.version, badge(migration.status),
     migration.executed_by || "--", date(migration.executed_at),
   ], 5, "No migrations found. Users with edit access can create a draft.");
+  rows("migration-execution-list", executions, execution => {
+    const details = node("div", undefined, "execution-history-details");
+    if (execution.error_summary) details.append(node("p", execution.error_summary, "migration-history-error"));
+    const sqlDetails = node("details");
+    sqlDetails.append(node("summary", "SQL"));
+    const sql = node("pre", undefined, "migration-error-code");
+    sql.textContent = execution.executed_sql || "No SQL recorded.";
+    sqlDetails.append(sql);
+    details.append(sqlDetails);
+    return [
+      link(execution.migration_name || "Migration", databasePath + "/migrations/" + encode(execution.migration_id)),
+      execution.action_type, badge(execution.status), execution.executed_by_username || execution.executed_by,
+      date(execution.started_at), date(execution.finished_at), details,
+    ];
+  }, 7, "No migration executions recorded yet.");
 }
 
 function migrationPolicy() {

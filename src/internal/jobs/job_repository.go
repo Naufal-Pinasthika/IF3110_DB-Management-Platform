@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/apperror"
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/contracts"
@@ -14,6 +15,25 @@ import (
 )
 
 type PostgresRepository struct{ DB *gorm.DB }
+
+// FailOrphanedExecutions repairs the narrow crash window between persisting an
+// execution row and creating its queue job. The age threshold avoids racing a
+// request that is still in the process of enqueueing.
+func (r *PostgresRepository) FailOrphanedExecutions(ctx context.Context, minAge time.Duration) (int64, error) {
+	if minAge <= 0 {
+		minAge = time.Minute
+	}
+	result := r.run(ctx, "job.reconcile_orphan_executions", func(db *gorm.DB) *gorm.DB {
+		return db.Exec(`UPDATE migration_executions AS e
+			SET status = 'FAILED',
+				finished_at = COALESCE(e.finished_at, clock_timestamp()),
+				error_summary = COALESCE(e.error_summary, 'Execution was not accepted by the migration queue')
+			WHERE e.status = 'RUNNING'
+			  AND e.started_at < clock_timestamp() - ?::bigint * interval '1 millisecond'
+			  AND NOT EXISTS (SELECT 1 FROM migration_jobs AS j WHERE j.execution_id = e.id)`, minAge.Milliseconds())
+	})
+	return result.RowsAffected, result.Error
+}
 
 func fresh(db *gorm.DB) *gorm.DB {
 	return db.Session(&gorm.Session{NewDB: true})

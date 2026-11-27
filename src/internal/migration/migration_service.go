@@ -42,6 +42,32 @@ type Service struct {
 	Dispatcher Dispatcher
 }
 
+// finishUnqueuedExecution closes the history entry when a request cannot be
+// handed to the worker. UNKNOWN is used for enqueue errors because the queue
+// transaction may have committed even when its acknowledgement was lost.
+func (s *Service) finishUnqueuedExecution(ctx context.Context, execution *models.MigrationExecution, status, message string) error {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if finisher, ok := s.Repository.(interface {
+		FinishExecutionIfRunning(context.Context, string, string, string, time.Time) (bool, error)
+	}); ok {
+		_, err := finisher.FinishExecutionIfRunning(writeCtx, execution.ID, status, message, time.Now())
+		return err
+	}
+	current, err := s.Repository.GetExecution(writeCtx, execution.ID)
+	if err != nil {
+		return err
+	}
+	if current.Status != "RUNNING" {
+		return nil
+	}
+	now := time.Now()
+	current.Status = status
+	current.FinishedAt = &now
+	current.ErrorSummary = &message
+	return s.Repository.UpdateExecution(writeCtx, current)
+}
+
 func (s *Service) requirePostgresTarget(ctx context.Context, actor auth.Principal, databaseID string) error {
 	provider, ok := s.Access.(interface {
 		GetDatabase(context.Context, auth.Principal, string) (api.UserDatabase, error)
@@ -618,6 +644,7 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}
 
 	if s.Dispatcher == nil {
+		_ = s.finishUnqueuedExecution(ctx, &exec, "FAILED", "queue dispatcher not configured")
 		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
 	}
 
@@ -626,6 +653,7 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
+		_ = s.finishUnqueuedExecution(ctx, &exec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
 		return api.MigrationExecuted{}, err
 	}
 
@@ -713,6 +741,7 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 	}
 
 	if s.Dispatcher == nil {
+		_ = s.finishUnqueuedExecution(ctx, &exec, "FAILED", "queue dispatcher not configured")
 		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
 	}
 
@@ -721,6 +750,7 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
+		_ = s.finishUnqueuedExecution(ctx, &exec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
 		return api.MigrationExecuted{}, err
 	}
 
@@ -822,6 +852,7 @@ func (s *Service) ResumeExecution(ctx context.Context, actor auth.Principal, dat
 	}
 
 	if s.Dispatcher == nil {
+		_ = s.finishUnqueuedExecution(ctx, &newExec, "FAILED", "queue dispatcher not configured")
 		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
 	}
 
@@ -830,6 +861,7 @@ func (s *Service) ResumeExecution(ctx context.Context, actor auth.Principal, dat
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
+		_ = s.finishUnqueuedExecution(ctx, &newExec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
 		return api.MigrationExecuted{}, err
 	}
 
@@ -904,6 +936,7 @@ func (s *Service) CancelBatch(ctx context.Context, actor auth.Principal, databas
 	}
 
 	if s.Dispatcher == nil {
+		_ = s.finishUnqueuedExecution(ctx, &newExec, "FAILED", "queue dispatcher not configured")
 		return api.MigrationExecuted{}, fmt.Errorf("%w: queue dispatcher not configured", apperror.ErrInternal)
 	}
 
@@ -912,6 +945,7 @@ func (s *Service) CancelBatch(ctx context.Context, actor auth.Principal, databas
 		DatabaseID:  databaseID,
 	})
 	if err != nil {
+		_ = s.finishUnqueuedExecution(ctx, &newExec, "UNKNOWN", "queue acceptance could not be confirmed: "+err.Error())
 		return api.MigrationExecuted{}, err
 	}
 

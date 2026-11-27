@@ -31,6 +31,20 @@
 </tbody>
 </table>
 </div>
+</section>
+<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2>Execution attempts</h2>
+<p>Each forward run, retry, resume, and rollback is listed with its final outcome.</p>
+</div>
+</div>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Migration</th><th>Action</th><th>Outcome</th><th>Executed by</th><th>Started</th><th>Finished</th><th>Details</th></tr></thead>
+<tbody id="migration-execution-list"><tr><td colspan="7" class="empty-cell">Loading execution attempts…</td></tr></tbody>
+</table>
+</div>
 </section>{{end}}
 
 {{define "migration"}}<div id="migration-metadata" class="metadata-strip" {{if eq .Kind "migration-new"}}hidden{{end}}>

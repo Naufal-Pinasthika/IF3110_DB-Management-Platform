@@ -37,7 +37,7 @@ func NewWorker(repository *PostgresRepository, executor Executor, options Option
 	if repository == nil || repository.DB == nil || executor == nil {
 		return nil, ErrUnavailable
 	}
-	
+
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
@@ -95,6 +95,21 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	telemetry.Log(ctx, slog.LevelInfo, "worker.started", "worker_id", w.id, "concurrency", w.Options.Concurrency)
 	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		w.reconcileOrphans(ctx)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				w.reconcileOrphans(ctx)
+			}
+		}
+	}()
 
 	for range w.Options.Concurrency {
 		workers.Add(1)
@@ -117,6 +132,23 @@ func (w *Worker) Run(ctx context.Context) error {
 	workers.Wait()
 	telemetry.Log(context.Background(), slog.LevelInfo, "worker.stopped", "worker_id", w.id)
 	return nil
+}
+
+func (w *Worker) reconcileOrphans(ctx context.Context) {
+	minAge := 2 * w.Options.LeaseDuration
+	if minAge < time.Minute {
+		minAge = time.Minute
+	}
+	sweepCtx, cancel := context.WithTimeout(ctx, w.Options.HeartbeatInterval)
+	defer cancel()
+	count, err := w.Repository.FailOrphanedExecutions(sweepCtx, minAge)
+	if err != nil {
+		telemetry.Log(ctx, slog.LevelWarn, "worker.orphan_reconciliation_failed", "worker_id", w.id, "error_code", "RECONCILIATION_UNAVAILABLE")
+		return
+	}
+	if count > 0 {
+		telemetry.Log(ctx, slog.LevelWarn, "worker.orphan_executions_failed", "worker_id", w.id, "count", count)
+	}
 }
 
 func wait(ctx context.Context, delay time.Duration) bool {
@@ -146,7 +178,7 @@ func (w *Worker) take(ctx context.Context) (bool, error) {
 		if err := json.Unmarshal(candidate.TraceJSON, &carrier); err != nil {
 			carrier = nil
 		}
-		
+
 		jobCtx := telemetry.Extract(ctx, carrier)
 		jobCtx = telemetry.Correlate(jobCtx, candidate.ActorID, candidate.DatabaseID, candidate.ID, candidate.ExecutionID)
 		jobCtx, span := otel.Tracer("platform/jobs").Start(jobCtx, "queue.process", trace.WithSpanKind(trace.SpanKindConsumer),

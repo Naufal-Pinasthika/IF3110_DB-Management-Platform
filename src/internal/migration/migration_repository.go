@@ -452,6 +452,19 @@ func (r *PostgresRepository) UpdateExecution(ctx context.Context, exec *models.M
 	return r.DB.WithContext(ctx).Save(exec).Error
 }
 
+// FinishExecutionIfRunning closes an execution only if it is still awaiting
+// queue acceptance. This avoids a late enqueue error overwriting a worker's
+// already recorded result.
+func (r *PostgresRepository) FinishExecutionIfRunning(ctx context.Context, executionID, status, message string, finishedAt time.Time) (bool, error) {
+	result := r.DB.WithContext(ctx).Model(&models.MigrationExecution{}).
+		Where("id = ? AND status = ?", executionID, "RUNNING").
+		Updates(map[string]any{"status": status, "error_summary": message, "finished_at": finishedAt})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 func (r *PostgresRepository) ListExecutions(ctx context.Context, databaseID string, hideRollback bool) ([]models.MigrationExecution, error) {
 	query := r.DB.WithContext(ctx).
 		Preload("Migration").

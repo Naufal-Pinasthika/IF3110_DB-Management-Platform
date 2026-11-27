@@ -60,6 +60,26 @@ func (r *PostgresRepository) Finish(ctx context.Context, job Job, done completio
 		if err := affectedOne(result); err != nil {
 			return err
 		}
+		// The execution row is the user-facing history record. Finalize it in
+		// the same transaction as the job so a completed job can never leave its
+		// execution showing RUNNING just because the executor's best-effort write
+		// failed.
+		if done.Status != contracts.JobRetryWait {
+			executionStatus := string(done.Result.State)
+			if executionStatus == "" {
+				executionStatus = string(contracts.ExecutionUnknown)
+			}
+			result = tx.run(ctx, "job.finish_execution", func(db *gorm.DB) *gorm.DB {
+				return db.Table("migration_executions").Where("id = ?", job.ExecutionID).Updates(map[string]any{
+					"status":        executionStatus,
+					"finished_at":   gorm.Expr("COALESCE(finished_at, clock_timestamp())"),
+					"error_summary": gorm.Expr("COALESCE(error_summary, NULLIF(?, ''))", done.Result.ErrorCode),
+				})
+			})
+			if err := affectedOne(result); err != nil {
+				return err
+			}
+		}
 		var blockedJob any
 		if done.Result.BlocksDatabase {
 			blockedJob = job.ID
