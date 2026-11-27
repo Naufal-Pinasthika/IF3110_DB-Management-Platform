@@ -18,16 +18,29 @@ type Handler struct {
 // cookies function thats bascially wrapper from http function 
 // https://medium.com/@adrilukman73/the-simple-guide-to-cookies-in-golang-create-read-and-delete-a5397732b04b
 
-// will set-cookies to client browser via http response header 
-func (h * Handler) setCookie(w http.ResponseWriter, name string, value string, httpOnly bool, expires time.Time) {
+// setSessionCookie issues the session cookie with HttpOnly always enforced.
+func (h *Handler) setSessionCookie(w http.ResponseWriter, value string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name: name,
-		Value: value,
-		Path: "/", // valid for any place in this web
-		Expires: expires,
-		HttpOnly: httpOnly, // flag security for js
-		Secure: h.Service.Policy.CookieSecure, // https
-		SameSite: http.SameSiteLaxMode, // prevent csrf
+		Name:     h.Service.Policy.CookieName,
+		Value:    value,
+		Path:     "/",
+		Expires:  expires,
+		HttpOnly: true,
+		Secure:   h.Service.Policy.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+// setCSRFCookie issues the double-submit CSRF cookie readable by the SPA.
+func (h *Handler) setCSRFCookie(w http.ResponseWriter, value string, expires time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "csrf_token",
+		Value:    value,
+		Path:     "/",
+		Expires:  expires,
+		HttpOnly: false,
+		Secure:   h.Service.Policy.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 
@@ -86,9 +99,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 
 
-	// Set  HttpOnly and SameSite (csrf) cookie with Secure on production (HTTPS)
-	h.setCookie(w, h.Service.Policy.CookieName, result.SessionToken, true, result.Session.AbsoluteExpiresAt)
-	h.setCookie(w, "csrf_token", result.CSRFToken, false, result.Session.AbsoluteExpiresAt)
+	// Set HttpOnly session cookie and readable double-submit CSRF cookie.
+	h.setSessionCookie(w, result.SessionToken, result.Session.AbsoluteExpiresAt)
+	h.setCSRFCookie(w, result.CSRFToken, result.Session.AbsoluteExpiresAt)
 
 	// DataResponse uses Generic Wrapper [T any] {Data T}, where T is LoginResponse
 	// since LoginResponse.User exist, we pass ONLY the User field into schema (LoginResponse.User = Data)

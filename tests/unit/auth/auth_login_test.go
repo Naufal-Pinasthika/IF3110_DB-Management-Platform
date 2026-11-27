@@ -3,6 +3,8 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +117,45 @@ func TestValidateCSRF(t *testing.T) {
 		if input != token && !errors.Is(err, auth.ErrCSRF) {
 			t.Fatalf("invalid CSRF %q accepted", input)
 		}
+	}
+}
+
+func TestLoginHandlerCookieFlags(t *testing.T) {
+	hash, err := auth.HashPassword("test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &loginRepository{user: models.User{ID: "user", Username: "tester", PasswordHash: hash, IsActive: true}}
+	cfg := testutil.AuthConfig()
+	svc, err := auth.NewService(repo, cfg.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &auth.Handler{Service: svc, PublicOrigin: cfg.PublicOrigin}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"tester","password":"test-password"}`))
+	rr := httptest.NewRecorder()
+	handler.Login(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	cookies := map[string]*http.Cookie{}
+	for _, c := range rr.Result().Cookies() {
+		cookies[c.Name] = c
+	}
+	sid, ok := cookies[cfg.Session.CookieName]
+	if !ok {
+		t.Fatalf("missing session cookie %q", cfg.Session.CookieName)
+	}
+	if !sid.HttpOnly || sid.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("session cookie flags = HttpOnly:%v SameSite:%v, want HttpOnly:true SameSite:Lax", sid.HttpOnly, sid.SameSite)
+	}
+	csrf, ok := cookies["csrf_token"]
+	if !ok {
+		t.Fatal("missing csrf_token cookie")
+	}
+	if csrf.HttpOnly || csrf.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("csrf cookie flags = HttpOnly:%v SameSite:%v, want HttpOnly:false SameSite:Lax", csrf.HttpOnly, csrf.SameSite)
 	}
 }
