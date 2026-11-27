@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { api, databaseAPI, databaseURL, encode, formatDate } from '../api'
 import { useUI } from '../ui-context'
-import type { ExplainResult, Migration, MigrationExecutionSummary, MigrationSummary, SchemaDiff } from '../types'
+import type { ExplainResult, JobPage, Migration, MigrationExecutionSummary, MigrationSummary, SchemaDiff } from '../types'
 import { useDatabase } from '../database-hooks'
 import { ActionButton, Badge, EmptyRow, ErrorState, Loading, Modal, PageHeading } from '../components/ui'
 import { useFormAction, useUnsavedChanges } from '../form-hooks'
@@ -38,6 +38,19 @@ export function Migrations() {
         : false,
   })
 
+  // Show authoritative queue state, attempts, and worker lease information.
+  const jobsQuery = useQuery({
+    queryKey: ['jobs', database.id],
+    queryFn: ({ signal }) =>
+      api<JobPage>(`${databaseAPI(database.id)}/jobs?limit=50`, { signal }),
+    refetchInterval: query =>
+      query.state.data?.jobs.some(job =>
+        ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(job.status),
+      )
+        ? 2000
+        : false,
+  })
+
   // Refresh history while an execution is still running
   const historyQuery = useQuery({
     queryKey: ['migration-history', database.id, hideRollback],
@@ -47,13 +60,19 @@ export function Migrations() {
         { signal },
       ),
     refetchInterval: query =>
-      query.state.data?.some(item => item.status === 'RUNNING') ? 3000 : false,
+      query.state.data?.some(item =>
+        item.status === 'RUNNING' ||
+        (item.status === 'UNKNOWN' && ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(item.job_status || '')),
+      )
+        ? 3000
+        : false,
   })
 
   // Refresh both lists after a user requests a manual update
   const refreshAll = () => {
     void migrationsQuery.refetch()
     void historyQuery.refetch()
+    void jobsQuery.refetch()
   }
 
   const handleResumeExecution = (executionId: string) => {
@@ -78,6 +97,25 @@ export function Migrations() {
       })) return
       await api(`${databaseAPI(database.id)}/executions/${encode(executionId)}/cancel-batch`, { method: 'POST' })
       notify('Batch compensation job queued.')
+      refreshAll()
+    })
+  }
+
+  const handleReconcileExecution = (executionId: string, outcome: 'APPLIED' | 'NOT_APPLIED') => {
+    void recoveryAction.run(async () => {
+      const applied = outcome === 'APPLIED'
+      if (!await confirm({
+        title: applied ? 'Confirm execution applied?' : 'Confirm execution not applied?',
+        description: applied
+          ? 'Only choose this after inspecting the target and confirming all intended changes are present. Do not use this for a partial result.'
+          : 'Only choose this after inspecting the target and confirming none of this execution’s changes took effect. Do not use this for a partial result.',
+        label: applied ? 'Confirm applied' : 'Confirm not applied',
+      })) return
+      await api(`${databaseAPI(database.id)}/executions/${encode(executionId)}/reconcile`, {
+        method: 'POST',
+        data: { outcome },
+      })
+      notify(applied ? 'Execution reconciled as applied.' : 'Execution reconciled as not applied.')
       refreshAll()
     })
   }
@@ -109,7 +147,7 @@ export function Migrations() {
       <ActionButton onAction={refreshAll}>Refresh</ActionButton>
     </PageHeading>
 
-    <ErrorState error={migrationsQuery.error || historyQuery.error || recoveryAction.error} retry={refreshAll} />
+    <ErrorState error={migrationsQuery.error || historyQuery.error || jobsQuery.error || recoveryAction.error} retry={refreshAll} />
 
     <section className="panel">
       <div className="panel-toolbar">
@@ -224,6 +262,7 @@ export function Migrations() {
             {(historyQuery.data || []).map(exec => {
               const canResumeRow = canEdit && (exec.status === 'PARTIAL' || exec.status === 'PARTIALLY_REVERTED')
               const canCancelRow = canEdit && exec.status === 'PARTIAL' && (exec.action_type === 'FORWARD' || exec.action_type === 'RETRY')
+              const canReconcileRow = canEdit && exec.status === 'UNKNOWN' && exec.job_status === 'BLOCKED'
               return (
                 <tr key={exec.id}>
                   <td><code>{exec.id.slice(0, 8)}</code></td>
@@ -233,7 +272,10 @@ export function Migrations() {
                     </Link>
                   </td>
                   <td><Badge value={exec.action_type} /></td>
-                  <td><Badge value={exec.status} /></td>
+                  <td>
+                    <Badge value={exec.status} />
+                    {exec.job_status && <span className="cell-subtitle">Job: {exec.job_status.toLowerCase().replaceAll('_', ' ')}</span>}
+                  </td>
                   <td>
                     {exec.committed_batches > 0 || exec.committed_rows > 0
                       ? `${exec.committed_batches} batches (${exec.committed_rows} rows)`
@@ -271,6 +313,26 @@ export function Migrations() {
                           Compensate
                         </button>
                       )}
+                      {canReconcileRow && (
+                        <>
+                          <button
+                            type="button"
+                            className="button small primary"
+                            disabled={recoveryAction.busy}
+                            onClick={() => handleReconcileExecution(exec.id, 'APPLIED')}
+                          >
+                            Confirm applied
+                          </button>
+                          <button
+                            type="button"
+                            className="button small danger"
+                            disabled={recoveryAction.busy}
+                            onClick={() => handleReconcileExecution(exec.id, 'NOT_APPLIED')}
+                          >
+                            Confirm not applied
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -286,6 +348,60 @@ export function Migrations() {
           </tbody>
         </table>
       </div>
+    </section>
+
+    <section className="panel" style={{ marginTop: '1.5rem' }}>
+      <div className="panel-toolbar">
+        <div>
+          <h2>Worker queue</h2>
+          <p>Queue status, attempts, committed progress, and lease expiry for recent jobs.</p>
+        </div>
+        <ActionButton onAction={() => jobsQuery.refetch()} disabled={jobsQuery.isFetching}>
+          Refresh queue
+        </ActionButton>
+      </div>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Status</th>
+              <th>Attempt</th>
+              <th>Progress</th>
+              <th>Lease expires</th>
+              <th>Next attempt</th>
+              <th>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(jobsQuery.data?.jobs || []).map(job => (
+              <tr key={job.id}>
+                <td><code>{job.id.slice(0, 8)}</code></td>
+                <td>
+                  <Badge value={job.status} />
+                  {job.database_blocked && <span className="cell-subtitle">Database blocked</span>}
+                </td>
+                <td>{job.attempt_count} / {job.max_attempts}</td>
+                <td>{job.committed_batches} batches · {job.committed_rows.toLocaleString()} rows</td>
+                <td>{formatDate(job.lease_expires_at)}</td>
+                <td>{formatDate(job.next_attempt_at)}</td>
+                <td>
+                  {job.result?.state ? <Badge value={job.result.state} /> : job.error_code || '--'}
+                  {job.needs_inspection && <span className="cell-subtitle">Inspection required</span>}
+                </td>
+              </tr>
+            ))}
+            {!jobsQuery.data?.jobs.length && (
+              <EmptyRow columns={7}>
+                {jobsQuery.isPending ? 'Loading worker queue…' : 'No worker jobs recorded for this database.'}
+              </EmptyRow>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {jobsQuery.data?.next_before && (
+        <p className="helper-text">Showing the 50 most recent jobs. Older job state remains available in execution history.</p>
+      )}
     </section>
 
     {selectedExecutionProp && (
@@ -390,11 +506,20 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
     queryFn: ({ signal }) => api<MigrationExecutionSummary[]>(`${databaseAPI(database.id)}/migration-history`, { signal }),
     enabled: Boolean(migration?.id),
     refetchInterval: query =>
-      query.state.data?.some(item => item.migration_id === migration?.id && item.status === 'RUNNING') ? 3000 : false,
+      query.state.data?.some(item =>
+        item.migration_id === migration?.id &&
+        (item.status === 'RUNNING' ||
+          (item.status === 'UNKNOWN' && ['PENDING', 'RUNNING', 'RETRY_WAIT'].includes(item.job_status || ''))),
+      )
+        ? 3000
+        : false,
   })
   const migrationExecutions = (migrationHistoryQuery.data || []).filter(item => item.migration_id === migration?.id)
   const partialExecutions = migrationExecutions.filter(
     item => item.status === 'PARTIAL' || item.status === 'PARTIALLY_REVERTED'
+  )
+  const unknownExecutions = migrationExecutions.filter(
+    item => item.status === 'UNKNOWN' && item.job_status === 'BLOCKED',
   )
 
   const canEdit = database.effective_access === 'VIEW_EDIT'
@@ -429,6 +554,25 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
       client.invalidateQueries({ queryKey: ['table', database.id] }),
       client.invalidateQueries({ queryKey: ['rows', database.id] }),
     ])
+  }
+
+  const reconcileExecution = (executionId: string, outcome: 'APPLIED' | 'NOT_APPLIED') => {
+    run(`reconcile-${outcome}`, async () => {
+      const applied = outcome === 'APPLIED'
+      if (!await confirm({
+        title: applied ? 'Confirm execution applied?' : 'Confirm execution not applied?',
+        description: applied
+          ? 'Inspect the target and confirm all intended changes are present. Do not use this for a partial result.'
+          : 'Inspect the target and confirm none of this execution’s changes took effect. Do not use this for a partial result.',
+        label: applied ? 'Confirm applied' : 'Confirm not applied',
+      })) return
+      await api(`${databaseAPI(database.id)}/executions/${encode(executionId)}/reconcile`, {
+        method: 'POST',
+        data: { outcome },
+      })
+      notify(applied ? 'Execution reconciled as applied.' : 'Execution reconciled as not applied.')
+      await changed()
+    })
   }
 
   // Render state notices first then the editor and allowed actions
@@ -814,7 +958,7 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               </button>
             )}
 
-            {migration && editable && database.engine !== 'mysql' && (
+            {migration && editable && migration.status === 'DRAFT' && database.engine !== 'mysql' && (
               <button
                 className="button small"
                 type="button"
@@ -1102,6 +1246,62 @@ function MigrationEditor({ migration }: { migration?: Migration }) {
               <pre className="migration-error-code"><code>{partialExecutions.find(e => e.error_summary)?.error_summary}</code></pre>
             </div>
           )}
+        </section>
+      )}
+
+      {migration && unknownExecutions.length > 0 && (
+        <section className="panel" style={{ marginTop: '1.5rem' }}>
+          <div className="panel-toolbar">
+            <div>
+              <h2>Execution outcome requires inspection</h2>
+              <p>Inspect the target before confirming whether an unknown execution applied.</p>
+            </div>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Execution</th>
+                  <th>Action</th>
+                  <th>Worker job</th>
+                  <th>Error</th>
+                  <th>Reconcile</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unknownExecutions.map(exec => (
+                  <tr key={exec.id}>
+                    <td><code>{exec.id}</code></td>
+                    <td><Badge value={exec.action_type} /></td>
+                    <td><Badge value={exec.job_status || 'UNKNOWN'} /></td>
+                    <td>{exec.error_summary || 'Outcome not confirmed'}</td>
+                    <td>
+                      {canEdit ? (
+                        <div className="toolbar-actions">
+                          <button
+                            type="button"
+                            className="button small primary"
+                            disabled={action.busy}
+                            onClick={() => reconcileExecution(exec.id, 'APPLIED')}
+                          >
+                            Confirm applied
+                          </button>
+                          <button
+                            type="button"
+                            className="button small danger"
+                            disabled={action.busy}
+                            onClick={() => reconcileExecution(exec.id, 'NOT_APPLIED')}
+                          >
+                            Confirm not applied
+                          </button>
+                        </div>
+                      ) : 'Requires migration access'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 

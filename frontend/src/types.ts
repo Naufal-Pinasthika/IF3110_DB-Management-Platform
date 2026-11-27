@@ -184,6 +184,7 @@ export interface MigrationExecutionSummary {
   action_type: 'FORWARD' | 'ROLLBACK' | 'REVERT_BATCH' | 'RETRY'
   rolled_back_execution_id?: string | null
   status: string
+  job_status?: string
   executed_sql: string
   executed_by: string
   executed_by_username?: string
@@ -206,6 +207,9 @@ export interface Job {
   attempt_count: number
   max_attempts: number
   needs_inspection: boolean
+  lease_expires_at?: string | null
+  heartbeat_at?: string | null
+  next_attempt_at: string
   committed_batches: number
   committed_rows: number
   error_code?: string
@@ -213,6 +217,17 @@ export interface Job {
   started_at?: string | null
   finished_at?: string | null
   database_blocked: boolean
+  result?: {
+    state: string
+    retry_advice?: string
+    blocks_database?: boolean
+    error_code?: string
+  }
+}
+
+export interface JobPage {
+  jobs: Job[]
+  next_before?: number
 }
 
 // Comparison results and connection checks shown in admin flows
