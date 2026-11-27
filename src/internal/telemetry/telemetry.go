@@ -39,7 +39,6 @@ var (
 	kvSecretPattern    = regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|csrf_token|session_id|session_token|cookie|api_key)\s*([=:])\s*([^\s;,&'"]+)`)
 )
 
-// RedactKey reports whether a log attribute key may carry credentials or session identifiers.
 func RedactKey(key string) bool {
 	lower := strings.ToLower(strings.TrimSpace(key))
 	for _, needle := range []string{
@@ -55,15 +54,12 @@ func RedactKey(key string) bool {
 	return false
 }
 
-// stripLogNewlines removes CR/LF control characters to prevent log injection.
 func stripLogNewlines(v string) string {
 	v = strings.ReplaceAll(v, "\r", "")
 	v = strings.ReplaceAll(v, "\n", " ")
 	return v
 }
 
-// SanitizeValue masks credentials, DSN passwords, bearer tokens, secret key-value pairs,
-// and newline control characters.
 func SanitizeValue(v string) string {
 	if v == "" {
 		return v
@@ -75,7 +71,6 @@ func SanitizeValue(v string) string {
 	return v
 }
 
-// RedactParams returns redacted placeholders matching the supplied parameter count.
 func RedactParams(params ...any) []string {
 	if len(params) == 0 {
 		return []string{}
@@ -87,7 +82,6 @@ func RedactParams(params ...any) []string {
 	return out
 }
 
-// SQLState extracts a PostgreSQL SQLSTATE or MySQL error code from an error chain.
 func SQLState(err error) string {
 	if err == nil {
 		return ""
@@ -107,7 +101,6 @@ func SQLState(err error) string {
 	return ""
 }
 
-// NewJSONHandler builds a JSON slog.Handler with "event" as message key and automatic redaction.
 func NewJSONHandler(w io.Writer) slog.Handler {
 	return slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -127,9 +120,6 @@ func NewJSONHandler(w io.Writer) slog.Handler {
 	})
 }
 
-// Init configures structured JSON logging to stdout and OpenTelemetry tracing.
-// When OTEL_EXPORTER_OTLP_ENDPOINT is set, logs and traces are also exported via OTLP/HTTP
-// to an OpenTelemetry Collector; otherwise traces fall back to console JSON output.
 func Init(service string) func(context.Context) error {
 	res := resource.NewSchemaless(attribute.String("service.name", service))
 	stdoutHandler := NewJSONHandler(os.Stdout)
@@ -144,7 +134,6 @@ func Init(service string) func(context.Context) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		// Rely on OTel's native OTEL_EXPORTER_OTLP_ENDPOINT handling so /v1/traces and /v1/logs are preserved.
 		if exp, err := otlptracehttp.New(ctx); err == nil {
 			traceExporter = exp
 		} else {
@@ -187,14 +176,14 @@ func Init(service string) func(context.Context) error {
 	}
 }
 
-// Carrier serializes only W3C TraceContext (no baggage, cookies, credentials, or sessions).
+// serializes W3C trace context
 func Carrier(ctx context.Context) map[string]string {
 	carrier := mapCarrier{}
 	propagationTraceContext{}.Inject(ctx, carrier)
 	return carrier
 }
 
-// Extract restores W3C TraceContext from a serialized map carrier.
+// restores W3C trace context
 func Extract(ctx context.Context, carrier map[string]string) context.Context {
 	return propagationTraceContext{}.Extract(ctx, mapCarrier(carrier))
 }
@@ -225,7 +214,7 @@ func currentCorrelation(ctx context.Context) correlation {
 	return correlation{}
 }
 
-// Correlate attaches non-secret identifiers to context while preserving previously set fields.
+// attaches non-secret IDs to context
 func Correlate(ctx context.Context, actor, databaseID, jobID, executionID string) context.Context {
 	fields := currentCorrelation(ctx)
 	if actor != "" {
@@ -332,7 +321,6 @@ func sanitizeLogArg(v any) any {
 	}
 }
 
-// Log emits a structured JSON log event enriched with context correlation IDs and OTel trace/span IDs.
 func Log(ctx context.Context, level slog.Level, event string, attrs ...any) {
 	cleanEvent := stripLogNewlines(event)
 	cleanAttrs := make([]any, 0, len(attrs)+16)
@@ -403,8 +391,7 @@ func newRequestID(headerVal string) string {
 	return hex.EncodeToString(b[:])
 }
 
-// HTTP starts a server trace span, attaches a correlation request_id, and logs request completion
-// without recording URL query parameters, cookies, credentials, or request bodies.
+// traces and logs HTTP requests
 func HTTP(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := propagationTraceContext{}.Extract(r.Context(), headerCarrier(r.Header))
@@ -441,7 +428,6 @@ func HTTP(next http.Handler) http.Handler {
 			level = slog.LevelWarn
 		}
 
-		// Skip noisy scrape/probe endpoints unless they fail.
 		if (r.URL.Path == "/health" || r.URL.Path == "/metrics") && rec.status < 400 {
 			return
 		}

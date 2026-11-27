@@ -21,7 +21,7 @@ type databaseLock struct {
 	pid  int
 }
 
-// Share the legacy session lock across batches until release or worker connection failure
+// acquires session-level advisory lock
 func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*databaseLock, error) {
 	started := time.Now()
 	ctx, span := otel.Tracer("platform/jobs").Start(ctx, "database.lock")
@@ -40,7 +40,6 @@ func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*dat
 	var acquired bool
 
 	if err := conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1::bigint), pg_backend_pid()`, lock.key).Scan(&acquired, &lock.pid); err != nil {
-		// Discard the connection when lock ownership cannot be confirmed
 		lock.discard()
 		span.SetStatus(codes.Error, "database lock unavailable")
 		telemetry.ObserveLockWait(time.Since(started), "error")
@@ -58,6 +57,7 @@ func tryDatabaseLock(ctx context.Context, pool *sql.DB, databaseID string) (*dat
 	return lock, nil
 }
 
+// checks advisory lock session ownership
 func (l *databaseLock) alive(ctx context.Context) error {
 	var pid int
 
@@ -72,6 +72,7 @@ func (l *databaseLock) alive(ctx context.Context) error {
 	return nil
 }
 
+// taints and closes lock connection
 func (l *databaseLock) discard() {
 	_ = l.conn.Raw(func(any) error { return driver.ErrBadConn })
 	_ = l.conn.Close()

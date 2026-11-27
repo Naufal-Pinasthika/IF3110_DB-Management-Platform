@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// Build queue eligibility from subqueries while preserving database ordering
+// queries eligible jobs in queue order
 func readyJobs(db *gorm.DB) *gorm.DB {
 	running := fresh(db).Model(&Job{}).Table("migration_jobs AS running").Select("1").
 		Where("running.database_id = j.database_id").Where("running.id <> j.id").
@@ -60,7 +60,6 @@ func (r *PostgresRepository) Candidates(ctx context.Context, limit int) ([]Job, 
 	return jobs, result.Error
 }
 
-// Claim a ready job while the caller holds the database advisory lock
 func (r *PostgresRepository) Claim(ctx context.Context, jobID, workerID string, lease time.Duration) (Job, error) {
 	var job Job
 	err := r.transaction(ctx, func(tx *PostgresRepository) error {
@@ -106,7 +105,7 @@ func (r *PostgresRepository) Heartbeat(ctx context.Context, job Job, lease time.
 	}))
 }
 
-// Persist uncertainty and a database block before invoking the executor
+// marks execution uncertain before running
 func (r *PostgresRepository) BeginExecution(ctx context.Context, job *Job) error {
 	var updated Job
 	err := r.transaction(ctx, func(tx *PostgresRepository) error {

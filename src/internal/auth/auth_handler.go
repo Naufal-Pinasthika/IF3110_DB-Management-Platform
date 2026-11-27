@@ -14,11 +14,6 @@ type Handler struct {
 	PublicOrigin string
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// cookies function thats bascially wrapper from http function 
-// https://medium.com/@adrilukman73/the-simple-guide-to-cookies-in-golang-create-read-and-delete-a5397732b04b
-
-// setSessionCookie issues the session cookie with HttpOnly always enforced.
 func (h *Handler) setSessionCookie(w http.ResponseWriter, value string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.Service.Policy.CookieName,
@@ -31,7 +26,6 @@ func (h *Handler) setSessionCookie(w http.ResponseWriter, value string, expires 
 	})
 }
 
-// setCSRFCookie issues the double-submit CSRF cookie readable by the SPA.
 func (h *Handler) setCSRFCookie(w http.ResponseWriter, value string, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "csrf_token",
@@ -44,37 +38,28 @@ func (h *Handler) setCSRFCookie(w http.ResponseWriter, value string, expires tim
 	})
 }
 
-// revoke cookies thats available (in this case h.Service.Policy.CookieName and csrf_token)
-// we use MaxAge: -1 to instruct the browser to delete the cookies immediately, and set value to ""
 func (h * Handler) clearCookie(w http.ResponseWriter) {
-	// uses for loop range, range returns idx, value
-	// since we dont need any idx, use blank identifier (_)
 	for _, name := range []string{h.Service.Policy.CookieName, "csrf_token"} {
 		http.SetCookie(w, &http.Cookie{
 			Name: name,
 			Value: "",
-			Path: "/", // valid for any place in this web
+			Path: "/",
 			MaxAge: -1,
-			Expires: time.Unix(0,0), // since we also enforce expiration, we set this to 00:00:00 UTC 1 Jan 1970 https://en.wikipedia.org/wiki/Unix_time
+			Expires: time.Unix(0,0),
 			HttpOnly: name == h.Service.Policy.CookieName, 
-			Secure: h.Service.Policy.CookieSecure, // https
-			SameSite: http.SameSiteLaxMode, // prevent csrf			
+			Secure: h.Service.Policy.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
 		})
 	}
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// /api/v1/auth/login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	// no-store since this is auth handling
 	w.Header().Set("Cache-Control", "no-store")
 
-	// limit request body only 8kb
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	
-	// decode api.LoginRequest with a body size limit and call Service.Login
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields() // add strict rule when unmarshling json to struct to prevent malicious additional input fields (ex: adding is_admin)
+	decoder.DisallowUnknownFields()
 
 	var input api.LoginRequest
 	errDecode := decoder.Decode(&input)
@@ -83,36 +68,25 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// make sure json request body is properly validated untill eof
 	errDecode = decoder.Decode(&struct{}{})
 	if errDecode!= io.EOF {
 		api.WriteAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Expected one JSON object")
 		return
 	}
 
-	// pass the credentials into service
 	result, err := h.Service.Login(r.Context(), input, time.Now().UTC())
 	if err != nil {
 		WriteAuthError(w, err)
 		return
 	}
 
-
-
-	// Set HttpOnly session cookie and readable double-submit CSRF cookie.
 	h.setSessionCookie(w, result.SessionToken, result.Session.AbsoluteExpiresAt)
 	h.setCSRFCookie(w, result.CSRFToken, result.Session.AbsoluteExpiresAt)
 
-	// DataResponse uses Generic Wrapper [T any] {Data T}, where T is LoginResponse
-	// since LoginResponse.User exist, we pass ONLY the User field into schema (LoginResponse.User = Data)
-	// this is because Login() only need to rply with User response pattern
-	// expect alot of this pattern will exist accross auth handler
 	WriteJSON(w, api.DataResponse[api.LoginResponse]{Data: result.User})
 }
 
-// /api/v1/auth/me
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	// read the validated principal from context and call Service.Me
 	principal, ok := PrincipalFromContext(r.Context())
 	if !ok {
 		WriteAuthError(w, ErrUnauthenticated)
@@ -128,9 +102,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, api.DataResponse[api.LoginResponse]{Data: user})
 }
 
-// POST /api/v1/auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	// validate session and CSRF guard then call Service.Logout
 	principal, ok := PrincipalFromContext(r.Context())
 	if !ok {
 		WriteAuthError(w, ErrUnauthenticated)
@@ -143,7 +115,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// clear cookies 
 	h.clearCookie(w)
 	
 	WriteJSON(w, api.DataResponse[api.LogoutResult]{

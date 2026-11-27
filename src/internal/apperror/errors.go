@@ -33,13 +33,10 @@ var ErrInternal = errors.New("internal server error")
 // returned when ciphertext is malformed or authentication fails.
 var ErrInvalidCiphertext = errors.New("invalid ciphertext")
 
-
-// New creates a new error with the given message.
 func New(message string) error {
 	return errors.New(message)
 }
 
-// Wrap wraps an error with additional context.
 func Wrap(err error, message string) error {
 	if err == nil {
 		return nil

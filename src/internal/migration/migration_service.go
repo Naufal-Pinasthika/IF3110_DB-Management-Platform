@@ -59,7 +59,6 @@ func (s *Service) requirePostgresTarget(ctx context.Context, actor auth.Principa
 	return nil
 }
 
-// CompareSchema checks a complete desired DDL description against the target.
 func (s *Service) CompareSchema(ctx context.Context, actor auth.Principal, databaseID string, input api.SchemaDiffRequest) (api.SchemaDiffResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.SchemaDiffResult{}, err
@@ -73,7 +72,6 @@ func (s *Service) CompareSchema(ctx context.Context, actor auth.Principal, datab
 	return s.SchemaDiff.Compare(ctx, databaseID, input.DesiredDDL)
 }
 
-// ExplainMigration previews a draft without committing any statement effects.
 func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, analyze bool) (api.ExplainResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.ExplainResult{}, err
@@ -94,7 +92,6 @@ func (s *Service) ExplainMigration(ctx context.Context, actor auth.Principal, da
 	return s.Explainer.ExplainSQL(ctx, databaseID, m.SQLText, analyze)
 }
 
-// ListMigrations returns linear history and draft summaries.
 func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, databaseID string, status api.MigrationStatus) ([]api.MigrationSummary, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return nil, err
@@ -123,7 +120,6 @@ func (s *Service) ListMigrations(ctx context.Context, actor auth.Principal, data
 	return summaries, nil
 }
 
-// GetMigration returns SQL, approvals, and execution eligibility for a visible migration.
 func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.MigrationDetail{}, err
@@ -182,7 +178,6 @@ func (s *Service) GetMigration(ctx context.Context, actor auth.Principal, databa
 	}, nil
 }
 
-// CreateMigration creates a SQL draft.
 func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, databaseID string, input api.CreateMigrationRequest, now time.Time) (api.MigrationCreated, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationCreated{}, err
@@ -243,7 +238,6 @@ func (s *Service) CreateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
-// UpdateMigration changes SQL and parameters before review.
 func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.UpdateMigrationRequest, now time.Time) (api.MigrationUpdated, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationUpdated{}, err
@@ -284,7 +278,6 @@ func (s *Service) UpdateMigration(ctx context.Context, actor auth.Principal, dat
 	}, nil
 }
 
-// SubmitReview requests approval from all group leaders with database access.
 func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationDetail{}, err
@@ -335,7 +328,6 @@ func (s *Service) SubmitReview(ctx context.Context, actor auth.Principal, databa
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
 
-// ApproveMigration allows a group leader to approve a pending review.
 func (s *Service) ApproveMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.DecideApprovalRequest, now time.Time) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.MigrationDetail{}, err
@@ -377,7 +369,6 @@ func (s *Service) ApproveMigration(ctx context.Context, actor auth.Principal, da
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
 
-// RejectMigration allows a group leader to reject a pending review.
 func (s *Service) RejectMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, input api.DecideApprovalRequest, now time.Time) (api.MigrationDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.MigrationDetail{}, err
@@ -417,7 +408,6 @@ func (s *Service) RejectMigration(ctx context.Context, actor auth.Principal, dat
 	return s.GetMigration(ctx, actor, databaseID, migrationID)
 }
 
-// ExecuteMigration publishes the forward execution job asynchronously.
 func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationExecuted{}, err
@@ -431,7 +421,6 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 		return api.MigrationExecuted{}, fmt.Errorf("%w: migration must be APPROVED before execution", apperror.ErrConflict)
 	}
 
-	// Revalidate that every group currently granted access to this database has a leader and approved this migration.
 	groups, err := s.Repository.GetDatabaseGroupsWithLeaders(ctx, databaseID)
 	if err != nil {
 		return api.MigrationExecuted{}, err
@@ -500,7 +489,6 @@ func (s *Service) ExecuteMigration(ctx context.Context, actor auth.Principal, da
 	}, nil
 }
 
-// RollbackMigration triggers an asynchronous rollback of the latest active migration.
 func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationExecuted{}, err
@@ -581,7 +569,6 @@ func (s *Service) RollbackMigration(ctx context.Context, actor auth.Principal, d
 	}, nil
 }
 
-// ForwardMigration triggers forward execution of an approved migration in linear sequence.
 func (s *Service) ForwardMigration(ctx context.Context, actor auth.Principal, databaseID, migrationID string, now time.Time) (api.MigrationExecuted, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewEdit); err != nil {
 		return api.MigrationExecuted{}, err
@@ -598,7 +585,6 @@ func (s *Service) ForwardMigration(ctx context.Context, actor auth.Principal, da
 	return s.ExecuteMigration(ctx, actor, databaseID, migrationID, now)
 }
 
-// ListMigrationHistory returns all execution attempts, optionally hiding rolled back pairs.
 func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal, databaseID string, hideRollback bool) ([]api.MigrationExecutionSummary, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return nil, err
@@ -633,7 +619,6 @@ func (s *Service) ListMigrationHistory(ctx context.Context, actor auth.Principal
 	return result, nil
 }
 
-// ValidateExecution satisfies jobs.ExecutionRegistry.
 func (s *Service) ValidateExecution(ctx context.Context, ref contracts.ExecutionRef) (jobs.ExecutionMetadata, error) {
 	exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID)
 	if err == nil {
@@ -650,7 +635,6 @@ func (s *Service) ValidateExecution(ctx context.Context, ref contracts.Execution
 	return jobs.ExecutionMetadata{ActorID: m.CreatedBy}, nil
 }
 
-// ReadProgress satisfies jobs.ProgressReader for real-time batch progress monitoring.
 func (s *Service) ReadProgress(ctx context.Context, ref contracts.ExecutionRef) (jobs.Progress, error) {
 	if runner, ok := s.Runner.(*Runner); ok {
 		batches, rows, _, err := runner.InspectCheckpoints(ctx, ref.DatabaseID, ref.ExecutionID)
@@ -665,7 +649,6 @@ func (s *Service) ReadProgress(ctx context.Context, ref contracts.ExecutionRef) 
 	return jobs.Progress{}, err
 }
 
-// Execute satisfies jobs.Executor.
 func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res contracts.ExecutionResult, retErr error) {
 	started := time.Now()
 	exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID)
@@ -833,7 +816,6 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 		return contracts.ExecutionResult{State: contracts.ExecutionSucceeded, RetryAdvice: contracts.RetryStop}, nil
 	}
 
-	// FORWARD execution
 	sqlUp := m.SQLText
 	if exec != nil && exec.ExecutedSQL != "" {
 		sqlUp = exec.ExecutedSQL
@@ -944,7 +926,6 @@ func (s *Service) Execute(ctx context.Context, ref contracts.ExecutionRef) (res 
 	}, nil
 }
 
-// Inspect satisfies jobs.Executor.
 func (s *Service) Inspect(ctx context.Context, ref contracts.ExecutionRef) (contracts.ExecutionResult, error) {
 	if exec, err := s.Repository.GetExecution(ctx, ref.ExecutionID); err == nil && exec != nil {
 		switch exec.Status {

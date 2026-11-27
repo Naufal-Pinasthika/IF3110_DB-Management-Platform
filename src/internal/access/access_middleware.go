@@ -9,7 +9,6 @@ import (
 	"github.com/Naufal-Pinasthika/IF3110_DB-Management-Platform/src/internal/telemetry"
 )
 
-// checks platform management permission after session validation.
 func (s *Service) PlatformAdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := auth.PrincipalFromContext(r.Context())
@@ -29,7 +28,6 @@ func (s *Service) PlatformAdminMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// creates the guard expected by RouteMiddleware.DatabaseAccess.
 func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +38,6 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 				return
 			}
 
-			// Extract dbId
 			dbID := extractDBIDFromPath(r.URL.Path)
 			if dbID == "" {
 				api.WriteAPIError(w, http.StatusBadRequest, "BAD_REQUEST", "Missing database ID")
@@ -59,7 +56,6 @@ func (s *Service) DatabaseAccessMiddleware(required api.AccessLevel) api.Middlew
 	}
 }
 
-// extracts the database ID from a path like /api/v1/databases/{dbId}/...
 func extractDBIDFromPath(path string) string {
 	prefix := "/api/v1/databases/"
 	idx := findSubstring(path, prefix)
@@ -70,7 +66,6 @@ func extractDBIDFromPath(path string) string {
 	if start >= len(path) {
 		return ""
 	}
-	// Find next slash
 	end := start
 	for end < len(path) && path[end] != '/' {
 		end++

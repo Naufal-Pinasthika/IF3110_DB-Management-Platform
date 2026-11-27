@@ -24,7 +24,6 @@ type QueryExplainer interface {
 	ExplainQuery(ctx context.Context, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error)
 }
 
-// ExplainQuery returns a plan for one read-only query.
 func (s *Service) ExplainQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.ExplainQueryRequest) (api.ExplainResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.ExplainResult{}, err
@@ -61,17 +60,14 @@ type Service struct {
 	QueryMaxRows int
 }
 
-// ListDatabases lists databases visible through group grants.
 func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]api.UserDatabase, error) {
 	return s.Access.ListDatabases(ctx, actor)
 }
 
-// GetDatabase returns a visible database summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
 	return s.Access.GetDatabase(ctx, actor, databaseID)
 }
 
-// ListSchemas lists schemas after checking target access.
 func (s *Service) ListSchemas(ctx context.Context, actor auth.Principal, databaseID string) ([]api.SchemaSummary, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return nil, err
@@ -79,7 +75,6 @@ func (s *Service) ListSchemas(ctx context.Context, actor auth.Principal, databas
 	return s.Repository.ListSchemas(ctx, databaseID)
 }
 
-// ListTables lists tables within a visible schema.
 func (s *Service) ListTables(ctx context.Context, actor auth.Principal, databaseID, schema string) ([]api.TableSummary, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return nil, err
@@ -90,7 +85,6 @@ func (s *Service) ListTables(ctx context.Context, actor auth.Principal, database
 	return s.Repository.ListTables(ctx, databaseID, schema)
 }
 
-// GetTableDetail returns live table structure.
 func (s *Service) GetTableDetail(ctx context.Context, actor auth.Principal, databaseID, schema, table string) (api.TableDetail, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.TableDetail{}, err
@@ -101,7 +95,6 @@ func (s *Service) GetTableDetail(ctx context.Context, actor auth.Principal, data
 	return s.Repository.GetTableDetail(ctx, databaseID, schema, table)
 }
 
-// GetTableRows returns a bounded page of visible data.
 func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databaseID, schema, table string, limit, offset int) (api.TableRows, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.TableRows{}, err
@@ -114,7 +107,7 @@ func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databa
 		limit = 50
 	}
 	if limit > 100 {
-		limit = 100 // Hard cap on rows to prevent memory exhaustion
+		limit = 100
 	}
 	if offset < 0 {
 		return api.TableRows{}, fmt.Errorf("%w: offset cannot be negative", apperror.ErrInvalidInput)
@@ -123,7 +116,6 @@ func (s *Service) GetTableRows(ctx context.Context, actor auth.Principal, databa
 	return s.Repository.GetTableRows(ctx, databaseID, schema, table, limit, offset)
 }
 
-// RunQuery runs a supported read only query.
 func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID string, input api.RunQueryRequest) (api.QueryResult, error) {
 	if err := s.Access.RequireDatabase(ctx, actor, databaseID, api.AccessViewOnly); err != nil {
 		return api.QueryResult{}, err
@@ -132,14 +124,12 @@ func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID
 		return api.QueryResult{}, fmt.Errorf("%w: sql text cannot be empty", apperror.ErrInvalidInput)
 	}
 
-	// Determine MaxRows based on client request and platform constraints
 	if input.MaxRows <= 0 {
 		input.MaxRows = s.QueryMaxRows
 	} else if input.MaxRows > s.QueryMaxRows {
 		input.MaxRows = s.QueryMaxRows
 	}
 
-	// 1. Static validation against AST rules
 	database, err := s.Access.GetDatabase(ctx, actor, databaseID)
 	if err != nil {
 		return api.QueryResult{}, err
@@ -153,6 +143,5 @@ func (s *Service) RunQuery(ctx context.Context, actor auth.Principal, databaseID
 		return api.QueryResult{}, err
 	}
 
-	// 2. Execution wrapped in ReadOnly Tx
 	return s.Repository.RunQuery(ctx, databaseID, input)
 }

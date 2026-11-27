@@ -18,7 +18,6 @@ type MySQLMigration struct {
 func invalid(message string) error { return fmt.Errorf("%w: %s", apperror.ErrInvalidInput, message) }
 
 func mysqlStatements(sql string) ([]string, error) {
-	// Executable comments must not change the SQL that was validated.
 	if strings.Contains(sql, "/*!") || strings.Contains(strings.ToUpper(sql), "/*M!") {
 		return nil, invalid("executable SQL comments are not supported")
 	}
@@ -38,7 +37,7 @@ func mysqlStatements(sql string) ([]string, error) {
 	return statements, nil
 }
 
-// mysqlTokens skips comments and retains decoded identifiers/strings for DDL checks.
+// tokenizes SQL skipping comments
 func mysqlTokens(sql string) []string {
 	tokenizer := sqlparser.NewStringTokenizer(sql)
 	var tokens []string
@@ -102,8 +101,6 @@ func ValidateMySQLQuery(sql, database string) error {
 	return err
 }
 
-// ParseMySQLMigration rejects mixed DDL/DML before any target changes occur.
-// MySQL DDL is intentionally limited to one table/index statement per migration.
 func ParseMySQLMigration(sql, database string) (MySQLMigration, error) {
 	plan := MySQLMigration{}
 	statements, err := mysqlStatements(sql)

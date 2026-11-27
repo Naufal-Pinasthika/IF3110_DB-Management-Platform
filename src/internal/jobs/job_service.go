@@ -29,7 +29,7 @@ type Service struct {
 	Options    Options
 }
 
-// WithTransaction binds queue and registry to the caller transaction before HTTP acceptance
+// binds queue and registry to tx
 func (s *Service) WithTransaction(tx *gorm.DB, registry ExecutionRegistry) *Service {
 	copy := *s
 	copy.Repository = &PostgresRepository{DB: tx}
@@ -69,7 +69,6 @@ func (s *Service) Enqueue(ctx context.Context, ref contracts.ExecutionRef) (rece
 	}
 	ref = normalizeRef(ref)
 	span.SetAttributes(attribute.String("execution.id", ref.ExecutionID), attribute.String("database.id", ref.DatabaseID))
-	// Return the existing job when the same execution is submitted again
 	existing, lookupErr := s.Repository.GetByExecution(ctx, ref.ExecutionID)
 	if lookupErr == nil {
 		if existing.DatabaseID != ref.DatabaseID {
@@ -151,7 +150,7 @@ func (s *Service) List(ctx context.Context, actor auth.Principal, databaseID str
 	default:
 		return Page{}, apperror.ErrInvalidInput
 	}
-	options.Limit++ // Fetch one extra row to detect another page
+	options.Limit++
 	rows, err := s.Repository.List(ctx, databaseID, options)
 	if err != nil {
 		return Page{}, err

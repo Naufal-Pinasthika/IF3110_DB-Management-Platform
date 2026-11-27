@@ -46,7 +46,6 @@ type PostgresRepository struct {
 
 var _ Repository = (*PostgresRepository)(nil)
 
-// ListMigrations reads history scoped to a target.
 func (r *PostgresRepository) ListMigrations(ctx context.Context, databaseID string, status models.MigrationStatus) ([]models.Migration, error) {
 	var migrations []models.Migration
 	query := r.DB.WithContext(ctx).Where("database_id = ?", databaseID)
@@ -59,7 +58,6 @@ func (r *PostgresRepository) ListMigrations(ctx context.Context, databaseID stri
 	return migrations, err
 }
 
-// GetMigration loads a migration only within its target.
 func (r *PostgresRepository) GetMigration(ctx context.Context, databaseID, migrationID string) (models.Migration, error) {
 	var migration models.Migration
 	err := r.DB.WithContext(ctx).
@@ -78,7 +76,6 @@ func (r *PostgresRepository) GetMigrationWithApprovals(ctx context.Context, data
 		return m, nil, err
 	}
 
-	// Sync pending approvals if the group leader changed
 	_ = r.DB.WithContext(ctx).Exec(`
 		UPDATE migration_approvals ma
 		SET leader_id = g.leader_id
@@ -101,7 +98,6 @@ func (r *PostgresRepository) GetMigrationWithApprovals(ctx context.Context, data
 	return m, approvals, err
 }
 
-// CreateMigration persists an unversioned draft.
 func (r *PostgresRepository) CreateMigration(ctx context.Context, migration models.Migration) (models.Migration, error) {
 	migration.Status = models.MigrationDraft
 	migration.Version = nil
@@ -109,7 +105,6 @@ func (r *PostgresRepository) CreateMigration(ctx context.Context, migration mode
 	return migration, err
 }
 
-// UpdateMigration updates SQL only while the record is a draft.
 func (r *PostgresRepository) UpdateMigration(ctx context.Context, databaseID, migrationID string, sqlText string, now time.Time) (models.Migration, error) {
 	return r.UpdateMigrationFields(ctx, databaseID, migrationID, map[string]any{"sql_text": sqlText}, now)
 }
@@ -131,7 +126,6 @@ func (r *PostgresRepository) UpdateMigrationFields(ctx context.Context, database
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-// LockDatabase serializes execution and version allocation for a target.
 func (r *PostgresRepository) LockDatabase(ctx context.Context, databaseID string) (func() error, error) {
 	sqlDB, err := r.DB.DB()
 	if err != nil {
@@ -160,7 +154,6 @@ func (r *PostgresRepository) LockDatabase(ctx context.Context, databaseID string
 	return release, nil
 }
 
-// MarkRunning claims the exact draft SQL that will be executed.
 func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
 		Where("database_id = ? AND id = ? AND status IN (?, ?, ?)", databaseID, migrationID, models.MigrationDraft, models.MigrationApproved, models.MigrationQueued).
@@ -180,7 +173,6 @@ func (r *PostgresRepository) MarkRunning(ctx context.Context, databaseID, migrat
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-// MarkApplied records a confirmed target commit with the next version.
 func (r *PostgresRepository) MarkApplied(ctx context.Context, databaseID, migrationID, executorID string, now time.Time) (models.Migration, error) {
 	var maxVersion sql.NullInt64
 	r.DB.WithContext(ctx).Model(&models.Migration{}).
@@ -212,7 +204,6 @@ func (r *PostgresRepository) MarkApplied(ctx context.Context, databaseID, migrat
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-// MarkFailed records a failure only after rollback is confirmed.
 func (r *PostgresRepository) MarkFailed(ctx context.Context, databaseID, migrationID, executorID, errorSummary string, now time.Time) (models.Migration, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
 		Where("database_id = ? AND id = ? AND status = ?", databaseID, migrationID, models.MigrationRunning).
@@ -234,7 +225,6 @@ func (r *PostgresRepository) MarkFailed(ctx context.Context, databaseID, migrati
 	return r.GetMigration(ctx, databaseID, migrationID)
 }
 
-// MarkRolledBack updates migration state after a successful rollback.
 func (r *PostgresRepository) MarkRolledBack(ctx context.Context, databaseID, migrationID string, now time.Time) (models.Migration, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Migration{}).
 		Where("database_id = ? AND id = ?", databaseID, migrationID).
@@ -277,7 +267,6 @@ func (r *PostgresRepository) SubmitForReview(ctx context.Context, databaseID, mi
 }
 
 func (r *PostgresRepository) GetPendingApprovalForLeader(ctx context.Context, migrationID, leaderID string) ([]models.MigrationApproval, error) {
-	// Sync pending approvals if the group leader changed
 	_ = r.DB.WithContext(ctx).Exec(`
 		UPDATE migration_approvals ma
 		SET leader_id = g.leader_id
@@ -411,7 +400,6 @@ func (r *PostgresRepository) ListExecutions(ctx context.Context, databaseID stri
 		Where("database_id = ?", databaseID)
 
 	if hideRollback {
-		// Hide both the cancelled execution and the successful rollback that cancelled it
 		query = query.Where(`id NOT IN (
 			SELECT rolled_back_execution_id 
 			FROM migration_executions 

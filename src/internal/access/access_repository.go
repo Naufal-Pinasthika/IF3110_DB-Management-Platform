@@ -15,7 +15,6 @@ type PostgresRepository struct {
 
 var _ Repository = (*PostgresRepository)(nil)
 
-// loads grants across all current groups for a specific user and database.
 func (r *PostgresRepository) ListUserGrants(ctx context.Context, userID, databaseID string) ([]models.GroupAccess, error) {
 	var grants []models.GroupAccess
 
@@ -36,7 +35,6 @@ func (r *PostgresRepository) ListUserGrants(ctx context.Context, userID, databas
 	return grants, nil
 }
 
-// lists distinct enabled targets with at least one group grant for the user.
 func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID string) ([]models.ManagedDatabase, error) {
 	var databases []models.ManagedDatabase
 
@@ -57,7 +55,6 @@ func (r *PostgresRepository) ListGrantedDatabases(ctx context.Context, userID st
 	return databases, nil
 }
 
-// lists every enabled target for platform administrators.
 func (r *PostgresRepository) ListEnabledDatabases(ctx context.Context) ([]models.ManagedDatabase, error) {
 	var databases []models.ManagedDatabase
 	err := r.DB.WithContext(ctx).
@@ -69,7 +66,6 @@ func (r *PostgresRepository) ListEnabledDatabases(ctx context.Context) ([]models
 	return databases, err
 }
 
-// loads safe target metadata (public fields only).
 func (r *PostgresRepository) GetDatabaseSummary(ctx context.Context, databaseID string) (models.ManagedDatabase, error) {
 	var db models.ManagedDatabase
 

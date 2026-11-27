@@ -50,7 +50,6 @@ func (s *TargetStore) Configuration(ctx context.Context, databaseID string) (mod
 	return db, nil
 }
 
-// OpenPlatform opens the metadata database rather than a managed target.
 func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{
 		DisableAutomaticPing: true,
@@ -76,7 +75,6 @@ func OpenPlatform(ctx context.Context, databaseURL string) (*gorm.DB, error) {
 	return db, nil
 }
 
-// Reader opens a connection with only the reader credentials.
 func (s *TargetStore) Reader(ctx context.Context, databaseID string) (*sql.DB, error) {
 	db, err := s.Databases.GetDatabase(ctx, databaseID)
 	if err != nil {
@@ -85,7 +83,6 @@ func (s *TargetStore) Reader(ctx context.Context, databaseID string) (*sql.DB, e
 	return s.getOrOpenPool(ctx, db, "reader", db.ReaderUsername, db.ReaderPasswordEnc)
 }
 
-// Migrator opens a connection for authorized migration execution.
 func (s *TargetStore) Migrator(ctx context.Context, databaseID string) (*sql.DB, error) {
 	db, err := s.Databases.GetDatabase(ctx, databaseID)
 	if err != nil {
@@ -94,7 +91,6 @@ func (s *TargetStore) Migrator(ctx context.Context, databaseID string) (*sql.DB,
 	return s.getOrOpenPool(ctx, db, "migrator", db.MigratorUsername, db.MigratorPasswordEnc)
 }
 
-// TestConnection checks both configured roles without changing target data.
 func (s *TargetStore) TestConnection(ctx context.Context, databaseID string) error {
 	db, err := s.Databases.GetDatabase(ctx, databaseID)
 	if err != nil {
@@ -104,7 +100,7 @@ func (s *TargetStore) TestConnection(ctx context.Context, databaseID string) err
 	return s.TestConfiguration(ctx, db)
 }
 
-// TestConfiguration checks unsaved settings without persisting them or creating cached pools.
+// checks unsaved target settings
 func (s *TargetStore) TestConfiguration(ctx context.Context, db models.ManagedDatabase) error {
 
 	testRole := func(username, encryptedPass string) error {
@@ -142,8 +138,7 @@ func (s *TargetStore) TestConfiguration(ctx context.Context, db models.ManagedDa
 	return nil
 }
 
-// InvalidateTargetPools safely drops all cached connection pools for a given database target.
-// Call this whenever a database's configuration (host, port, credentials) is updated or disabled.
+// closes cached pools for target
 func (s *TargetStore) InvalidateTargetPools(databaseID string) {
 	roles := []string{"reader", "migrator"}
 	for _, role := range roles {
@@ -154,7 +149,6 @@ func (s *TargetStore) InvalidateTargetPools(databaseID string) {
 	}
 }
 
-// PoolStats aggregates active target pool stats into bounded role keys ("target_reader", "target_migrator").
 func (s *TargetStore) PoolStats() map[string]sql.DBStats {
 	stats := map[string]sql.DBStats{
 		"target_reader":   {},
@@ -184,7 +178,6 @@ func (s *TargetStore) PoolStats() map[string]sql.DBStats {
 	return stats
 }
 
-// getOrOpenPool manages the thread-safe connection cache and invalidates dead connections.
 func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDatabase, role, username, encryptedPass string) (*sql.DB, error) {
 	if !db.IsEnabled {
 		return nil, apperror.ErrForbidden
@@ -193,7 +186,6 @@ func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDataba
 	cacheKey := db.ID + "-" + role
 	if val, ok := s.pools.Load(cacheKey); ok {
 		pool := val.(*sql.DB)
-		// Quick check to see if the cached connection is still alive
 		if err := pool.PingContext(ctx); err == nil {
 			return pool, nil
 		}
@@ -230,7 +222,7 @@ func (s *TargetStore) getOrOpenPool(ctx context.Context, db models.ManagedDataba
 	return pool, nil
 }
 
-// MySQL's driver keeps multiStatements disabled; migration statements execute individually.
+// builds driver name and DSN
 func targetDSN(db models.ManagedDatabase, username, password string) (string, string, error) {
 	switch db.TargetEngine() {
 	case models.EnginePostgres:
