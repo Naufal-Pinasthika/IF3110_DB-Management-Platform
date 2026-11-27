@@ -362,3 +362,13 @@ Dapat dilihat dari stress test bahwa
 Dapat dilihat dari stress test bahwa 
 - p95 API agregat **15.93 ms**
 - error rate **0%**
+
+## Security: SAST dengan CodeQL
+
+Static Application Security Testing (SAST) diaktifkan menggunakan **GitHub CodeQL** (`security-extended`) melalui workflow [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) untuk cakupan bahasa **`go`**, **`javascript-typescript`**, dan **`actions`**.
+
+- **Hasil Baseline Scan** (`2c88b7b`): `go` = 4 temuan (`2× go/sql-injection`, `1× go/cookie-httponly-not-set`, `1× go/log-injection`); `javascript-typescript` = 0 temuan; `actions` = 0 temuan.
+- **Perbaikan**: `go/cookie-httponly-not-set` dan `go/log-injection` diperbaiki pada commit `06a0f7f` & `4ba2a06`, sedangkan `2× go/sql-injection` pada Database Explorer (`RunQuery` & `ExplainQuery`) didokumentasikan sebagai *risiko diterima / intentional by design* dengan mitigasi berlapis (RBAC + CSRF + AST SQL validator + role `reader` + transaksi `ReadOnly: true` yang selalu di-rollback).
+- **Hasil Re-scan Akhir** (`b04466c`): `go` = 2 temuan (*intentional by design*), `javascript-typescript` = 0 temuan, `actions` = 0 temuan.
+
+Lihat dokumentasi lengkap (tabel SARIF test awal, langkah/alasan tiap temuan, detail dampak & keputusan, hasil re-scan, serta catatan keterbatasan SAST) di [docs/sast.md](docs/sast.md).
