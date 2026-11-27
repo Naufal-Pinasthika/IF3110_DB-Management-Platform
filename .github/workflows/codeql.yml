@@ -2,12 +2,7 @@ name: CodeQL SAST
 
 on:
   push:
-    branches:
-      - main
-      - feat/sast
   pull_request:
-    branches:
-      - main
   schedule:
     - cron: '30 1 * * 1'
   workflow_dispatch:
