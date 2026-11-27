@@ -62,7 +62,6 @@ type Service struct {
 	HashPassword func(string) (string, error)
 }
 
-// ListUsers lists platform accounts.
 func (s *Service) ListUsers(ctx context.Context, actor auth.Principal) ([]api.AdminUser, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return nil, err
@@ -83,7 +82,6 @@ func (s *Service) ListUsers(ctx context.Context, actor auth.Principal) ([]api.Ad
 	return result, nil
 }
 
-// CreateUser creates an account with a password hash.
 func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input api.CreateUserRequest) (api.AdminUser, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.AdminUser{}, err
@@ -122,7 +120,6 @@ func (s *Service) CreateUser(ctx context.Context, actor auth.Principal, input ap
 	}, nil
 }
 
-// UpdateUser applies only supplied user fields.
 func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID string, input api.UpdateUserRequest, now time.Time) (api.AdminUser, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.AdminUser{}, err
@@ -182,7 +179,6 @@ func (s *Service) UpdateUser(ctx context.Context, actor auth.Principal, userID s
 	}, nil
 }
 
-// ListGroups lists platform groups.
 func (s *Service) ListGroups(ctx context.Context, actor auth.Principal) ([]api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return nil, err
@@ -198,7 +194,6 @@ func (s *Service) ListGroups(ctx context.Context, actor auth.Principal) ([]api.G
 	return result, nil
 }
 
-// CreateGroup creates a named group with an active leader.
 func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input api.CreateGroupRequest) (api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.Group{}, err
@@ -219,7 +214,6 @@ func (s *Service) CreateGroup(ctx context.Context, actor auth.Principal, input a
 	return res, nil
 }
 
-// UpdateGroup changes only the supplied group name or leader.
 func (s *Service) UpdateGroup(ctx context.Context, actor auth.Principal, groupID string, input api.UpdateGroupRequest) (api.Group, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.Group{}, err
@@ -265,7 +259,6 @@ func groupResponse(group models.Group) api.Group {
 	return result
 }
 
-// DeleteGroup removes a group with its memberships and grants.
 func (s *Service) DeleteGroup(ctx context.Context, actor auth.Principal, groupID string, now time.Time) error {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return err
@@ -280,7 +273,6 @@ func (s *Service) DeleteGroup(ctx context.Context, actor auth.Principal, groupID
 	return nil
 }
 
-// AddGroupMember adds a user while allowing multiple groups.
 func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, groupID, userID string, now time.Time) (api.GroupMember, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.GroupMember{}, err
@@ -296,7 +288,6 @@ func (s *Service) AddGroupMember(ctx context.Context, actor auth.Principal, grou
 	return api.GroupMember{GroupID: ug.GroupID, UserID: ug.UserID}, nil
 }
 
-// RemoveGroupMember removes only the specified group membership.
 func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, groupID, userID string, now time.Time) error {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return err
@@ -311,7 +302,6 @@ func (s *Service) RemoveGroupMember(ctx context.Context, actor auth.Principal, g
 	return nil
 }
 
-// ListManagedDatabases lists all registered targets for administration.
 func (s *Service) ListManagedDatabases(ctx context.Context, actor auth.Principal) ([]api.ManagedDatabaseSummary, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return nil, err
@@ -333,7 +323,6 @@ func (s *Service) ListManagedDatabases(ctx context.Context, actor auth.Principal
 	return result, nil
 }
 
-// CreateManagedDatabase registers a PostgreSQL target.
 func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principal, input api.CreateDatabaseRequest) (api.ManagedDatabaseSummary, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseSummary{}, err
@@ -349,7 +338,6 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 		return api.ManagedDatabaseSummary{}, err
 	}
 	input.Engine = engine
-	// Retain PostgreSQL defaults for existing clients.
 	if strings.TrimSpace(input.Host) == "" {
 		input.Host = "postgres"
 		if engine == models.EngineMySQL {
@@ -428,7 +416,6 @@ func (s *Service) CreateManagedDatabase(ctx context.Context, actor auth.Principa
 	}, nil
 }
 
-// GetManagedDatabase returns editable connection settings without passwords.
 func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.ManagedDatabaseDetail, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseDetail{}, err
@@ -454,7 +441,6 @@ func (s *Service) GetManagedDatabase(ctx context.Context, actor auth.Principal, 
 	}, nil
 }
 
-// UpdateManagedDatabase updates only supplied connection fields.
 func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string, input api.UpdateDatabaseRequest) (api.ManagedDatabaseSummary, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.ManagedDatabaseSummary{}, err
@@ -493,7 +479,6 @@ func (s *Service) UpdateManagedDatabase(ctx context.Context, actor auth.Principa
 	}, nil
 }
 
-// DisableManagedDatabase soft deletes a registration while keeping history.
 func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return err
@@ -511,7 +496,6 @@ func (s *Service) DisableManagedDatabase(ctx context.Context, actor auth.Princip
 	return nil
 }
 
-// DeleteManagedDatabase permanently removes a disabled connection registration.
 func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principal, databaseID string) error {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return err
@@ -533,7 +517,6 @@ func (s *Service) DeleteManagedDatabase(ctx context.Context, actor auth.Principa
 	return nil
 }
 
-// TestDatabaseConnection checks a registered target connection.
 func (s *Service) TestDatabaseConnection(ctx context.Context, actor auth.Principal, databaseID string) (api.TestConnectionResult, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.TestConnectionResult{}, err
@@ -548,7 +531,6 @@ func (s *Service) TestDatabaseConnection(ctx context.Context, actor auth.Princip
 	return api.TestConnectionResult{Connected: true, Message: "Reader and migrator connections succeeded."}, nil
 }
 
-// SetGroupDatabaseAccess sets a group permission for one database.
 func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Principal, groupID, databaseID string, input api.SetGroupAccessRequest, now time.Time) (api.GroupDatabaseAccess, error) {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return api.GroupDatabaseAccess{}, err
@@ -580,7 +562,6 @@ func (s *Service) SetGroupDatabaseAccess(ctx context.Context, actor auth.Princip
 	}, nil
 }
 
-// DeleteGroupDatabaseAccess removes a group permission for one database.
 func (s *Service) DeleteGroupDatabaseAccess(ctx context.Context, actor auth.Principal, groupID, databaseID string, now time.Time) error {
 	if err := s.Access.RequirePlatformAdmin(ctx, actor); err != nil {
 		return err

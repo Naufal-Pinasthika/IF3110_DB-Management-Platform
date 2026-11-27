@@ -77,7 +77,6 @@ func (r *TargetRepository) mysqlTableDetail(ctx context.Context, config models.M
 		return detail, apperror.ErrNotFound
 	}
 
-	// LEFT JOIN includes CHECK constraints, which have no key_column_usage row.
 	constraints, err := db.QueryContext(ctx, `SELECT tc.constraint_name, tc.constraint_type, kcu.column_name
 		FROM information_schema.table_constraints tc
 		LEFT JOIN information_schema.key_column_usage kcu ON tc.constraint_schema=kcu.constraint_schema AND tc.table_name=kcu.table_name AND tc.constraint_name=kcu.constraint_name

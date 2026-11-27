@@ -26,12 +26,10 @@ var (
 	ErrNotFound        = errors.New("not found")
 )
 
-// NewService creates a new access service.
 func NewService(repo Repository) *Service {
 	return &Service{Repository: repo}
 }
 
-// checks the current platform role. rejects missing identity
 func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal) error {
 	if actor.User.ID == "" {
 		return ErrUnauthenticated
@@ -42,7 +40,7 @@ func (s *Service) RequirePlatformAdmin(ctx context.Context, actor auth.Principal
 	return nil
 }
 
-// calculates the strongest grant for one target.
+// calculates strongest grant for target
 func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, databaseID string) (api.AccessLevel, error) {
 	if actor.User.ID == "" {
 		return "", ErrUnauthenticated
@@ -57,7 +55,6 @@ func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, dat
 		return "", ErrForbidden
 	}
 
-	// VIEW_EDIT is stronger than VIEW_ONLY
 	for _, grant := range grants {
 		if grant.AccessLevel == models.AccessViewEdit {
 			return api.AccessViewEdit, nil
@@ -67,13 +64,11 @@ func (s *Service) EffectiveAccess(ctx context.Context, actor auth.Principal, dat
 	return api.AccessViewOnly, nil
 }
 
-// enforces a minimum target permission.
 func (s *Service) RequireDatabase(ctx context.Context, actor auth.Principal, databaseID string, required api.AccessLevel) error {
 	if actor.User.ID == "" {
 		return ErrUnauthenticated
 	}
 
-	// Validate required level
 	if required != api.AccessViewOnly && required != api.AccessViewEdit {
 		return ErrForbidden
 	}
@@ -90,7 +85,6 @@ func (s *Service) RequireDatabase(ctx context.Context, actor auth.Principal, dat
 	return nil
 }
 
-// returns only targets visible to the authenticated user.
 func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]api.UserDatabase, error) {
 	if actor.User.ID == "" {
 		return nil, ErrUnauthenticated
@@ -123,7 +117,6 @@ func (s *Service) ListDatabases(ctx context.Context, actor auth.Principal) ([]ap
 	return result, nil
 }
 
-// returns a permitted target summary.
 func (s *Service) GetDatabase(ctx context.Context, actor auth.Principal, databaseID string) (api.UserDatabase, error) {
 	if actor.User.ID == "" {
 		return api.UserDatabase{}, ErrUnauthenticated

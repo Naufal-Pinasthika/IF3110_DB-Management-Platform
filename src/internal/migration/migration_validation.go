@@ -8,9 +8,6 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v5"
 )
 
-// validateDMLSQL uses PostgreSQL's parser and permits only row-query/DML
-// statements. In particular, schema-changing statements such as CREATE,
-// ALTER, and DROP are rejected regardless of case, comments, or formatting.
 func validateDMLSQL(sqlText string) error {
 	if strings.TrimSpace(sqlText) == "" {
 		return fmt.Errorf("%w: SQL text cannot be empty", apperror.ErrInvalidInput)

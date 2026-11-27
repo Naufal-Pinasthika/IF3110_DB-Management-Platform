@@ -47,7 +47,6 @@ func NewWorker(repository *PostgresRepository, executor Executor, options Option
 		return nil, err
 	}
 
-	// Reserve pool capacity for locks and metadata queries
 	if max := pool.Stats().MaxOpenConnections; max > 0 && max < options.Concurrency*2+2 {
 		return nil, fmt.Errorf("worker platform pool needs at least %d connections", options.Concurrency*2+2)
 	}
@@ -62,7 +61,6 @@ func NewWorker(repository *PostgresRepository, executor Executor, options Option
 		pool: pool, id: host + "-" + hex.EncodeToString(nonce[:])}, nil
 }
 
-// Start initiates background worker execution using a cancellable child of ctx.
 func (w *Worker) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	w.cancel = cancel
@@ -75,7 +73,6 @@ func (w *Worker) Start(ctx context.Context) {
 	}()
 }
 
-// Stop signals cancellation to the worker and waits for all running goroutines to exit.
 func (w *Worker) Stop(ctx context.Context) error {
 	if w.cancel != nil {
 		w.cancel()
@@ -91,7 +88,6 @@ func (w *Worker) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Run stops claims on cancellation and waits for executors before releasing locks
 func (w *Worker) Run(ctx context.Context) error {
 	if err := w.Repository.Ready(ctx); err != nil {
 		return fmt.Errorf("migration jobs schema is unavailable: %w", err)
@@ -134,6 +130,7 @@ func wait(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
+// claims and runs next ready job
 func (w *Worker) take(ctx context.Context) (bool, error) {
 	candidates, err := w.Repository.Candidates(ctx, 64)
 	if err != nil {
@@ -221,13 +218,12 @@ func (w *Worker) process(ctx context.Context, job Job, lock *databaseLock) {
 	}
 	span.End()
 	done := w.decide(job, result, callErr, inspect)
-	// Persist confirmed outcomes even after execution cancellation
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), w.Options.HeartbeatInterval)
 	defer finishCancel()
 	if err := w.Repository.Finish(finishCtx, job, done); err != nil {
 		telemetry.Log(ctx, slog.LevelError, "job.finish_unconfirmed", "job_id", job.ID, "execution_id", job.ExecutionID,
 			"database_id", job.DatabaseID, "error_code", "FINISH_UNCONFIRMED")
-		return // Preserve inspection state and the database block for recovery
+		return
 	}
 	if done.Status == contracts.JobRetryWait {
 		telemetry.IncJobRetry(string(done.Result.RetryAdvice))
@@ -289,7 +285,7 @@ func (w *Worker) monitor(ctx context.Context, cancel context.CancelFunc, stop <-
 	}
 }
 
-// Keep invalid execution results from clearing the database gate
+// resolves job state and retry policy
 func (w *Worker) decide(job Job, result contracts.ExecutionResult, err error, inspecting bool) completion {
 	valid := result.CommittedBatches >= 0 && result.CommittedRows >= 0
 	switch result.State {
@@ -318,7 +314,6 @@ func (w *Worker) decide(job Job, result contracts.ExecutionResult, err error, in
 	if result.RetryAdvice == contracts.RetryReconcile {
 		result.BlocksDatabase = true
 	}
-	// Store safe error codes instead of driver messages
 	if len(result.ErrorCode) > 80 || strings.IndexFunc(result.ErrorCode, func(ch rune) bool {
 		return !(ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_')
 	}) >= 0 {
@@ -336,7 +331,6 @@ func (w *Worker) decide(job Job, result contracts.ExecutionResult, err error, in
 	switch result.RetryAdvice {
 	case contracts.RetryReconcile:
 		done.Inspect = true
-		// Inspect the final execution attempt even when its retry budget is exhausted
 		if !inspecting || job.AttemptCount < job.MaxAttempts {
 			done.Status = contracts.JobRetryWait
 		}
@@ -352,6 +346,7 @@ func (w *Worker) decide(job Job, result contracts.ExecutionResult, err error, in
 	return done
 }
 
+// computes jittered exponential retry delay
 func (w *Worker) backoff(attempt int) time.Duration {
 	delay := w.Options.RetryBaseDelay
 	for i := 1; i < attempt && delay < w.Options.RetryMaxDelay; i++ {
@@ -364,6 +359,5 @@ func (w *Worker) backoff(attempt int) time.Duration {
 	if delay > w.Options.RetryMaxDelay {
 		delay = w.Options.RetryMaxDelay
 	}
-	// Add jitter to keep worker retries from synchronizing
 	return delay/2 + time.Duration(randv2.Int64N(int64(delay-delay/2)))
 }

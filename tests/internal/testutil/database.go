@@ -29,8 +29,7 @@ func Root() string {
 	return filepath.Join(filepath.Dir(file), "../../..")
 }
 
-// Database applies the production migration in a unique schema and cleans up
-// only that schema. The database itself must be dedicated to tests.
+// prepares isolated test schema
 func Database(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -80,8 +79,6 @@ func Database(t *testing.T) *gorm.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pool.Close() })
-	// Build the current platform schema without applying development seed or
-	// password-reset scripts. Keep this list aligned with schema migrations.
 	for _, name := range []string{
 		"000001_create_platform_schema.sql",
 		"000005_add_database_engine.sql",

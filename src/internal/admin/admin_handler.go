@@ -18,7 +18,6 @@ type Handler struct {
 	Service *Service
 }
 
-// ListUsers handles GET /api/v1/admin/users.
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -35,7 +34,6 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[[]api.AdminUser]{Data: users})
 }
 
-// CreateUser handles POST /api/v1/admin/users.
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -67,7 +65,6 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.AdminUser]{Data: user})
 }
 
-// UpdateUser handles PATCH /api/v1/admin/users/{userId}.
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -104,7 +101,6 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.AdminUser]{Data: user})
 }
 
-// ListGroups handles GET /api/v1/admin/groups.
 func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -121,7 +117,6 @@ func (h *Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[[]api.Group]{Data: groups})
 }
 
-// CreateGroup handles POST /api/v1/admin/groups.
 func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -153,7 +148,6 @@ func (h *Handler) CreateGroup(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.Group]{Data: group})
 }
 
-// UpdateGroup handles PATCH /api/v1/admin/groups/{groupId}.
 func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -190,7 +184,6 @@ func (h *Handler) UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.Group]{Data: group})
 }
 
-// DeleteGroup handles DELETE /api/v1/admin/groups/{groupId}.
 func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -213,7 +206,6 @@ func (h *Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// mapError maps service errors to API error responses.
 func (h *Handler) mapError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, auth.ErrUnauthenticated), errors.Is(err, access.ErrUnauthenticated):
@@ -236,7 +228,6 @@ func (h *Handler) mapError(w http.ResponseWriter, err error) {
 	}
 }
 
-// AddGroupMember handles PUT /api/v1/admin/groups/{groupId}/members/{userId}.
 func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -260,7 +251,6 @@ func (h *Handler) AddGroupMember(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.GroupMember]{Data: member})
 }
 
-// RemoveGroupMember handles DELETE /api/v1/admin/groups/{groupId}/members/{userId}.
 func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -284,7 +274,6 @@ func (h *Handler) RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ListManagedDatabases handles GET /api/v1/admin/databases.
 func (h *Handler) ListManagedDatabases(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -301,7 +290,6 @@ func (h *Handler) ListManagedDatabases(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[[]api.ManagedDatabaseSummary]{Data: dbs})
 }
 
-// CreateManagedDatabase handles POST /api/v1/admin/databases.
 func (h *Handler) CreateManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -333,7 +321,6 @@ func (h *Handler) CreateManagedDatabase(w http.ResponseWriter, r *http.Request) 
 	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
 }
 
-// GetManagedDatabase handles GET /api/v1/admin/databases/{dbId}.
 func (h *Handler) GetManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -356,7 +343,6 @@ func (h *Handler) GetManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseDetail]{Data: db})
 }
 
-// UpdateManagedDatabase handles PATCH /api/v1/admin/databases/{dbId}.
 func (h *Handler) UpdateManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -393,7 +379,6 @@ func (h *Handler) UpdateManagedDatabase(w http.ResponseWriter, r *http.Request) 
 	api.WriteJSON(w, api.DataResponse[api.ManagedDatabaseSummary]{Data: db})
 }
 
-// DisableManagedDatabase handles DELETE /api/v1/admin/databases/{dbId}.
 func (h *Handler) DisableManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -416,7 +401,6 @@ func (h *Handler) DisableManagedDatabase(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeleteManagedDatabase permanently removes a disabled connection.
 func (h *Handler) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -435,7 +419,6 @@ func (h *Handler) DeleteManagedDatabase(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// TestDatabaseConnection handles POST /api/v1/admin/databases/{dbId}/test-connection.
 func (h *Handler) TestDatabaseConnection(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -458,7 +441,6 @@ func (h *Handler) TestDatabaseConnection(w http.ResponseWriter, r *http.Request)
 	api.WriteJSON(w, api.DataResponse[api.TestConnectionResult]{Data: result})
 }
 
-// SetGroupDatabaseAccess handles PUT /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
 func (h *Handler) SetGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
@@ -496,7 +478,6 @@ func (h *Handler) SetGroupDatabaseAccess(w http.ResponseWriter, r *http.Request)
 	api.WriteJSON(w, api.DataResponse[api.GroupDatabaseAccess]{Data: access})
 }
 
-// DeleteGroupDatabaseAccess handles DELETE /api/v1/admin/groups/{groupId}/databases/{dbId}/access.
 func (h *Handler) DeleteGroupDatabaseAccess(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.PrincipalFromContext(r.Context())
 	if !ok {
