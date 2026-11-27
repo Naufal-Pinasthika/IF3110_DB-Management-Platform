@@ -213,13 +213,6 @@ h3 {
   padding: .85rem .2rem .1rem;
 }
 
-.admin-navigation > summary {
-  color: var(--muted);
-  cursor: pointer;
-  font-size: .9rem;
-  padding: .3rem .45rem;
-}
-
 .admin-navigation .main-nav {
   margin-top: .5rem;
 }
@@ -252,70 +245,58 @@ h3 {
   min-width: 0;
 }
 
-.switch-database {
-  color: var(--muted);
-  font-size: .86rem;
-  white-space: nowrap;
+.database-topbar {
+  min-height: 72px;
+  gap: 1.5rem;
 }
 
-.database-identity {
-  display: flex;
-  flex-direction: column;
+.database-navbar-info {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .8fr);
+  flex: 1;
+  min-width: 0;
+  max-width: 58rem;
+  gap: 1.25rem;
+  margin: 0;
+}
+
+.navbar-info-field {
   min-width: 0;
 }
 
-.database-identity strong {
-  color: var(--text);
-  font-weight: 600;
-  font-size: .94rem;
-}
-
-.database-label {
-  font-size: .8rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 22rem;
-}
-
-.connection-status {
-  font-size: .8rem;
-  color: var(--muted);
-  white-space: nowrap;
+.navbar-info-field + .navbar-info-field {
   border-left: 1px solid var(--line);
-  padding-left: .75rem;
+  padding-left: 1.25rem;
 }
 
-.access-details {
-  position: relative;
-  font-size: .85rem;
+.navbar-info-field dt {
+  margin-bottom: .2rem;
+  color: var(--muted);
+  font-size: .78rem;
 }
 
-.access-details summary {
-  cursor: pointer;
-  color: #36465b;
-  white-space: nowrap;
-  padding: .4rem .1rem;
+.navbar-info-field dd {
+  margin: 0;
+  font-size: .94rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.access-details > div {
-  position: absolute;
-  z-index: 6;
-  top: 100%;
-  left: 0;
-  width: 270px;
-  max-width: calc(100vw - 2rem);
-  padding: 1rem;
-  border: 1px solid #aeb8c5;
-  background: white;
-  border-radius: 4px;
-  box-shadow: 0 5px 16px #17202f12;
-  line-height: 1.6;
+.navbar-info-field dd a {
+  color: var(--text);
 }
 
-.access-details p + p {
-  margin-top: .6rem;
+.navbar-info-field dd a:hover {
+  color: var(--blue);
+}
+
+.navbar-access {
+  color: #435268;
+  font-size: .86rem;
+}
+
+.navbar-access.can-migrate {
+  color: var(--blue-dark);
 }
 
 .account {
@@ -1321,12 +1302,18 @@ fieldset .helper-text {
     padding: .5rem 1.4rem;
   }
 
-  .connection-status {
-    display: none;
+  .database-navbar-info {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem 1rem;
   }
 
-  .database-label {
-    max-width: 15rem;
+  .navbar-info-field + .navbar-info-field {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .database-topbar {
+    padding-block: .75rem;
   }
 }
 
@@ -1376,7 +1363,7 @@ fieldset .helper-text {
     margin-bottom: .8rem;
   }
 
-  .main-nav a, .object-tree a, .object-tree summary, .admin-navigation > summary {
+  .main-nav a, .object-tree a, .object-tree summary {
     min-height: 44px;
   }
 
@@ -1398,17 +1385,6 @@ fieldset .helper-text {
   .connection-context {
     gap: .4rem;
     flex: 1;
-  }
-
-  .switch-database, .database-label, .access-details {
-    display: none;
-  }
-
-  .database-identity strong {
-    font-size: .85rem;
-    max-width: 40vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .engine-label {
@@ -2228,9 +2204,6 @@ select[data-empty] {
     flex-wrap: wrap;
   }
 
-  .topbar .database-identity strong {
-    overflow-wrap: anywhere;
-  }
 }
 
 @media (max-width: 760px) {
@@ -2258,11 +2231,6 @@ select[data-empty] {
   .topbar .connection-context {
     flex: 1;
     flex-wrap: nowrap;
-  }
-
-  .topbar .database-identity strong {
-    max-width: 100%;
-    white-space: nowrap;
   }
 
   .account, #account-name {
@@ -2439,5 +2407,47 @@ select[data-empty] {
   .connection-dialog .host-port {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .database-shell {
+    --mobile-topbar-height: 164px;
+  }
+
+  .database-topbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: 44px minmax(0, 1fr);
+    gap: .5rem 1rem;
+    padding: .5rem 1rem;
+  }
+
+  .database-topbar .mobile-menu-button {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .database-topbar .account {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+
+  .database-navbar-info {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-content: center;
+    gap: .5rem 1rem;
+  }
+
+  .navbar-info-field dd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .database-shell .content {
+    min-height: calc(100dvh - var(--mobile-topbar-height));
   }
 }

@@ -171,7 +171,7 @@ function UserDialog({ user, onClose }: { user?: AdminUser; onClose: () => void }
               </label>
             )}
             <p className="helper-text">
-              Disabling an account or changing its password revokes its sessions.
+              Disabling an account or changing its password revokes its sessions
             </p>
           </fieldset>
           <ErrorState error={action.error} />

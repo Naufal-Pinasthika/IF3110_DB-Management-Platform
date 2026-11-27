@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, NavLink, Navigate, Outlet, useLocation, useMatch, useNavigate, useParams, useSearchParams } from 'react-router'
-import { accessDescription, accessLabel, api, databaseURL, encode } from '../api'
+import { accessLabel, api, databaseURL, encode } from '../api'
 import { resetSession, useSession } from '../session'
 import { useUI } from '../ui-context'
 import { useDatabaseQuery, useSchemas, useTables } from '../database-hooks'
@@ -224,7 +224,7 @@ export function Shell() {
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <div className="app-shell">
+      <div className={`app-shell${dbId ? ' database-shell' : ''}`}>
         <aside ref={sidebar} id="sidebar" className="sidebar" aria-label="Workspace navigation">
           <Link className="brand" to="/databases">
             <Icon name="database" />
@@ -261,8 +261,7 @@ export function Shell() {
           </nav>
           {dbId && database.data && <ObjectExplorer databaseId={dbId} key={dbId} />}
           {user?.is_platform_admin && (
-            <details className="admin-navigation" open>
-              <summary>Administration</summary>
+            <div className="admin-navigation">
               <nav className="main-nav" aria-label="Administration">
                 <NavLink to="/admin/users">
                   <Icon name="users" />
@@ -277,11 +276,11 @@ export function Shell() {
                   Connections
                 </NavLink>
               </nav>
-            </details>
+            </div>
           )}
         </aside>
         <div className="workspace">
-          <header className="topbar">
+          <header className={`topbar${dbId ? ' database-topbar' : ''}`}>
             <button
               ref={menuButton}
               type="button"
@@ -293,34 +292,43 @@ export function Shell() {
               {mobileOpen ? 'Close' : 'Menu'}
             </button>
             {dbId ? (
-              <div className="connection-context">
-                <Link to="/databases" className="switch-database">
-                  Databases /
-                </Link>
-                <div className="database-identity">
-                  <strong className="mono">{database.data?.database_name || 'Database'}</strong>
-                  <span className="database-label">{database.data?.label}</span>
+              <dl className="database-navbar-info" aria-label="Current database connection">
+                <div className="navbar-info-field">
+                  <dt>Connection</dt>
+                  <dd>
+                    <Link to="/databases" title={database.data?.label}>
+                      {database.data ? database.data.label || 'Unlabeled connection' : database.error ? 'Unavailable' : 'Loading…'}
+                    </Link>
+                  </dd>
                 </div>
-                <details className="access-details">
-                  <summary>
+                <div className="navbar-info-field">
+                  <dt>Database</dt>
+                  <dd className="mono" title={database.data?.database_name}>
+                    {database.data?.database_name || (database.error ? 'Unavailable' : 'Loading…')}
+                  </dd>
+                </div>
+                <div className="navbar-info-field">
+                  <dt>Access</dt>
+                  <dd>
+                    <span className={`navbar-access${database.data?.effective_access === 'VIEW_EDIT' ? ' can-migrate' : ''}`}>
+                      {database.data
+                        ? accessLabel(database.data.effective_access)
+                        : database.error
+                          ? 'Unavailable'
+                          : 'Checking…'}
+                    </span>
+                  </dd>
+                </div>
+                <div className="navbar-info-field">
+                  <dt>SQL provider</dt>
+                  <dd>
                     {database.data
-                      ? accessLabel(database.data.effective_access)
-                      : database.error
-                        ? 'Access unavailable'
-                        : 'Checking access…'}
-                  </summary>
-                  <div>
-                    <p>{accessDescription(database.data?.effective_access || '')}</p>
-                    <p className="muted">Connection has not been tested.</p>
-                  </div>
-                </details>
-                <span className="connection-status">
-                  {database.data?.engine === 'mysql' ? 'MySQL' : 'PostgreSQL'}
-                </span>
-              </div>
-            ) : (
-              <span className="engine-label">PostgreSQL</span>
-            )}
+                      ? database.data.engine === 'mysql' ? 'MySQL' : 'PostgreSQL'
+                      : database.error ? 'Unavailable' : 'Loading…'}
+                  </dd>
+                </div>
+              </dl>
+            ) : null}
             <div className="account" inert={mobileOpen}>
               <span className="avatar" aria-hidden="true">
                 {user?.username.slice(0, 1).toUpperCase()}
